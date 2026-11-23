@@ -142,7 +142,8 @@ jobs:
           npm install --silent playwright
           npx playwright install --with-deps chromium \
             > "$GITHUB_WORKSPACE/test-outputs/playwright-install.log" 2>&1
-          node "$GITHUB_WORKSPACE/tests/consumer/browser-run.mjs" /tmp/browser-consumer \
+          cp "$GITHUB_WORKSPACE/tests/consumer/browser-run.mjs" /tmp/pw/browser-run.mjs
+          node /tmp/pw/browser-run.mjs /tmp/browser-consumer \
             > "$GITHUB_WORKSPACE/test-outputs/browser-consumer.log" 2>&1
 
       - name: Android package - native libs, then the Gradle AAR

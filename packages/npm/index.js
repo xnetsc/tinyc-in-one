@@ -152,6 +152,22 @@ let _protos = null;
 function load() {
   if (_lib) return _fn;
   _lib = koffi.load(nativePath());
+  // On Windows the dual-form file is an EXE loaded as a library:
+  // the loader never runs its process entry, so the image's import
+  // table is bound by tinyc_init, which must run before any other
+  // symbol is bound or called. Other hosts' images are fully
+  // initialized by the loader and export no tinyc_init, so nothing
+  // changes there.
+  if (process.platform === 'win32') {
+    let tinycInit = null;
+    try { tinycInit = _lib.func('int tinyc_init()'); } catch { /* not exported */ }
+    if (tinycInit) {
+      const rc = tinycInit();
+      if (rc !== 0) {
+        throw new TinyCError(`tinyc: tinyc_init failed with code ${rc} in ${nativePath()}`);
+      }
+    }
+  }
   _protos = {
     errorFunc: koffi.proto('void TccErrorFunc(void *opaque, const char *msg)'),
     ioWrite: koffi.proto('int TccIoWrite(void *ctx, const uint8_t *buf, size_t len)'),

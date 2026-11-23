@@ -27,14 +27,22 @@
  * the module base) to the markers file, together with the address
  * it computes for tinyc_ping by walking the loaded image's export
  * directory itself, and the VirtualQuery state of the tinyc_ping
- * address. It then calls tinyc_noop - an exported function with an
- * empty body - and tinyc_ping, whose whole body is one Win32 file
- * append inside the loaded image. If the noop call dies, the fault
- * is in the transfer into the image; if the noop returns and the
- * ping dies, the transfer works and the fault is at the ping's
- * first call out of the image; if both return and tinyc_init dies,
- * the fault is inside tinyc_init. A vectored exception handler is
- * armed across the noop + ping + init window: on a fatal exception
+ * address.
+ *
+ * The calls then run in the host contract's order. First
+ * tinyc_noop - an exported function with an empty body: if that
+ * call dies, the fault is in the transfer into the image. Then the
+ * test reads the loaded image's IAT slot for CreateFileA (found by
+ * walking its import directory) into the markers file, calls
+ * tinyc_init - the first call a host is contracted to make, which
+ * binds the image's import table itself - and reads the slot
+ * again: before, it must hold the hint/name RVA the file shipped
+ * (this load form does not reliably backfill an EXE's IAT); after,
+ * it must hold the real CreateFileA address, checked against this
+ * process's own GetProcAddress result. Finally tinyc_ping, whose
+ * whole body is one file append inside the loaded image, proves
+ * the post-init path end to end. A vectored exception handler is
+ * armed across the noop + init + ping window: on a fatal exception
  * it appends the exception code, the fault address, its RVA
  * relative to the loaded module, and (for an access violation) the
  * access kind and data address to win_host_test.markers, then
@@ -176,6 +184,70 @@ static void *manual_export(HMODULE h, const char *name)
     return NULL;
 }
 
+/* Address of the IAT slot through which the loaded image calls
+ * dll_name!func_name, found by walking the image's import
+ * directory: the descriptor by DLL name, then the lookup-table
+ * entry whose import-by-name string matches; the slot is the
+ * parallel entry in the first-thunk table. NULL when not found. */
+static uintptr_t *find_iat_slot(HMODULE h, const char *dll_name,
+                                const char *func_name)
+{
+    const unsigned char *base = (const unsigned char *)h;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_IMPORT_DESCRIPTOR *desc;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return NULL;
+    nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return NULL;
+    if (!nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+            .VirtualAddress)
+        return NULL;
+    desc = (IMAGE_IMPORT_DESCRIPTOR *)(base + nt->OptionalHeader
+        .DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    for (; desc->Name; desc++) {
+        const char *name = (const char *)(base + desc->Name);
+        IMAGE_THUNK_DATA *ilt, *iat;
+        int i;
+        if (_stricmp(name, dll_name) != 0)
+            continue;
+        ilt = (IMAGE_THUNK_DATA *)(base + (desc->OriginalFirstThunk
+                                           ? desc->OriginalFirstThunk
+                                           : desc->FirstThunk));
+        iat = (IMAGE_THUNK_DATA *)(base + desc->FirstThunk);
+        for (i = 0; ilt[i].u1.AddressOfData; i++) {
+            const IMAGE_IMPORT_BY_NAME *by;
+            if (IMAGE_SNAP_BY_ORDINAL(ilt[i].u1.Ordinal))
+                continue;
+            by = (const IMAGE_IMPORT_BY_NAME *)(base
+                                                + ilt[i].u1.AddressOfData);
+            if (strcmp((const char *)by->Name, func_name) == 0)
+                return (uintptr_t *)&iat[i].u1.Function;
+        }
+        return NULL;
+    }
+    return NULL;
+}
+
+/* Append "iat:CreateFileA:<label>=<slot content>" to the markers
+ * file. Read before tinyc_init, the slot shows the unbound file
+ * value; read after, the address tinyc_init's self-binding pass
+ * wrote into it. */
+static void log_iat_slot(const char *label, const uintptr_t *slot)
+{
+    struct linebuf lb;
+    lb.len = 0; lb.buf[0] = 0;
+    lb_puts(&lb, "iat:CreateFileA:");
+    lb_puts(&lb, label);
+    lb_puts(&lb, "=");
+    if (slot)
+        lb_hex(&lb, (unsigned long long)*slot);
+    else
+        lb_puts(&lb, "not-found");
+    mark_line(lb.buf);
+}
+
 /* RVA of an address inside the loaded module, or 0 when outside it
  * (module size from its in-memory PE headers). */
 static unsigned long long module_rva(const void *addr)
@@ -313,22 +385,41 @@ int main(int argc, char **argv)
         mark_line(lb.buf);
     }
 
-    /* The exception handler is armed only across the noop + ping +
-     * init window: those calls are the ones under diagnosis, and
+    /* The exception handler is armed only across the noop + init +
+     * ping window: those calls are the ones under diagnosis, and
      * exceptions elsewhere keep their normal handling. */
     g_veh_armed = 1;
     mark("tinyc_noop:begin");
     check(p_noop() == 0, "tinyc_noop() returns 0");
     mark("tinyc_noop:done");
 
+    /* The image's CreateFileA IAT slot, read around tinyc_init:
+     * unbound file value before, the real address after - the
+     * direct evidence of the self-binding in the artifacts. */
+    {
+        uintptr_t *create_file_slot =
+            find_iat_slot(h, "kernel32.dll", "CreateFileA");
+        HMODULE k32;
+        FARPROC real_create_file = NULL;
+        log_iat_slot("before", create_file_slot);
+
+        mark("tinyc_init:begin");
+        check(p_init() == 0, "tinyc_init() returns 0");
+        mark("tinyc_init:done");
+
+        log_iat_slot("after", create_file_slot);
+        k32 = GetModuleHandleA("kernel32.dll");
+        if (k32)
+            real_create_file = GetProcAddress(k32, "CreateFileA");
+        check(create_file_slot && real_create_file
+              && *create_file_slot == (uintptr_t)real_create_file,
+              "CreateFileA IAT slot holds the real address after tinyc_init");
+    }
+
     mark("tinyc_ping:begin");
     check(p_ping() == 0, "tinyc_ping() returns 0");
     mark("tinyc_ping:done");
-
-    mark("tinyc_init:begin");
-    check(p_init() == 0, "tinyc_init() returns 0");
     g_veh_armed = 0;
-    mark("tinyc_init:done");
 
     {
         char a0[] = "tinyc", a1[] = "--version";

@@ -136,6 +136,28 @@ final class Native {
             SymbolLookup lookup = SymbolLookup.libraryLookup(file.toString(), Arena.global());
             Linker linker = Linker.nativeLinker();
 
+            // Windows 上双形态文件是被当作库加载的 EXE：加载器不跑它的
+            // 进程入口，映像导入表由 tinyc_init 在首次调用前自绑定，必须
+            // 赶在绑定其它句柄之前先调用一次。其余宿主的映像初始化由
+            // 加载器完成，也没有这个导出，跳过不改变行为。宿主判断读
+            // os.name 本身，不受 triple 覆盖（宿主模拟）影响。
+            if (System.getProperty("os.name", "").contains("Windows")) {
+                MemorySegment initSeg = lookup.find("tinyc_init").orElse(null);
+                if (initSeg != null) {
+                    int rc;
+                    try {
+                        rc = (int) linker
+                                .downcallHandle(initSeg, FunctionDescriptor.of(JAVA_INT))
+                                .invokeExact();
+                    } catch (Throwable t) {
+                        throw new TccException("failed to call tinyc_init in " + FILE, t);
+                    }
+                    if (rc != 0) {
+                        throw new TccException("tinyc_init failed with code " + rc + " in " + FILE);
+                    }
+                }
+            }
+
             FunctionDescriptor ptr = FunctionDescriptor.of(ADDRESS);
             FunctionDescriptor vA = FunctionDescriptor.ofVoid(ADDRESS);
             FunctionDescriptor vAA = FunctionDescriptor.ofVoid(ADDRESS, ADDRESS);

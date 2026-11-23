@@ -174,6 +174,19 @@ def _load():
     if _lib is not None:
         return _lib
     lib = ctypes.CDLL(native_path())
+    # On Windows the dual-form file is an EXE loaded as a library:
+    # the loader never runs its process entry, so the image's import
+    # table is bound by tinyc_init, which must run before any other
+    # symbol is prototyped or called. It is called bare on purpose:
+    # ctypes' defaults (int restype, no argtypes) already match its
+    # int () signature. Other hosts' images are fully initialized by
+    # the loader and export no tinyc_init, so nothing changes there.
+    if sys.platform == "win32" and hasattr(lib, "tinyc_init"):
+        rc = lib.tinyc_init()
+        if rc != 0:
+            raise TinyCError(
+                f"tinyc: tinyc_init failed with code {rc} in "
+                f"{native_path()}")
     lib.tcc_new.restype = ctypes.c_void_p
     lib.tcc_compile_string.restype = ctypes.c_int
     lib.tcc_compile_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
