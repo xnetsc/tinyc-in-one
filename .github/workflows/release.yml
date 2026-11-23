@@ -384,6 +384,7 @@ jobs:
           RC=0
           /tmp/win_host_test.exe "$EXE" > "$LOG" 2>&1 || RC=$?
           cp win_host_test.markers "$(dirname "$LOG")/" 2>/dev/null || true
+          cp tinyc_init.markers "$(dirname "$LOG")/" 2>/dev/null || true
           echo "win_host_test exit code: $RC" >> "$LOG"
           exit $RC
 

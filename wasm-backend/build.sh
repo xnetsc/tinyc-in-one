@@ -16,7 +16,7 @@ mkdir -p "$SRC"
     --exclude='c2str.exe' --exclude='config.h' --exclude='config.mak' . ) \
   | ( cd "$SRC" && tar xf - --no-same-owner )
 
-cp src/wasm-gen.c src/wasm-link.c "$SRC"/
+cp src/wasm-gen.c src/wasm-link.c src/wasm-int.h "$SRC"/
 python3 patches/apply-patches.py "$SRC" > "$LOG" 2>&1
 
 cd "$SRC"

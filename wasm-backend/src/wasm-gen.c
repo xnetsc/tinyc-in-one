@@ -57,6 +57,7 @@
 
 #define USING_GLOBALS
 #include "tcc.h"
+#include "wasm-int.h"
 #include <assert.h>
 
 ST_DATA const char * const target_machine_defs =
@@ -78,16 +79,13 @@ ST_DATA const int reg_classes[NB_REGS] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* shared module state (used by wasm-link.c, same translation unit)   */
+/* shared module state: types, registries and the wb_* buffer        */
+/* functions are declared in wasm-int.h (used by wasm-link.c too);   */
+/* the definitions live here.                                        */
 
-typedef struct WBuf {
-    unsigned char *data;
-    int len, cap;
-} WBuf;
-
-static void wb_init(WBuf *b) { b->data = NULL; b->len = b->cap = 0; }
-static void wb_free(WBuf *b) { tcc_free(b->data); wb_init(b); }
-static void wb_putc(WBuf *b, int c)
+void wb_init(WBuf *b) { b->data = NULL; b->len = b->cap = 0; }
+void wb_free(WBuf *b) { tcc_free(b->data); wb_init(b); }
+void wb_putc(WBuf *b, int c)
 {
     if (b->len >= b->cap) {
         b->cap = b->cap ? b->cap * 2 : 256;
@@ -95,12 +93,12 @@ static void wb_putc(WBuf *b, int c)
     }
     b->data[b->len++] = (unsigned char)c;
 }
-static void wb_write(WBuf *b, const void *p, int n)
+void wb_write(WBuf *b, const void *p, int n)
 {
     const unsigned char *s = p;
     while (n-- > 0) wb_putc(b, *s++);
 }
-static void wb_uleb(WBuf *b, uint32_t v)
+void wb_uleb(WBuf *b, uint32_t v)
 {
     do { int c = v & 0x7f; v >>= 7; if (v) c |= 0x80; wb_putc(b, c); } while (v);
 }
@@ -111,7 +109,7 @@ static void wb_uleb5(WBuf *b, uint32_t v)
     for (i = 0; i < 4; i++) { wb_putc(b, (v & 0x7f) | 0x80); v >>= 7; }
     wb_putc(b, v & 0x7f);
 }
-static void wb_sleb(WBuf *b, int64_t v)
+void wb_sleb(WBuf *b, int64_t v)
 {
     for (;;) {
         int c = v & 0x7f; v >>= 7;
@@ -126,72 +124,32 @@ static void wb_sleb5(WBuf *b, int32_t v)
     for (i = 0; i < 4; i++) { wb_putc(b, (x & 0x7f) | 0x80); x >>= 7; }
     wb_putc(b, x & 0x7f);
 }
-static void wb_patch_uleb5(WBuf *b, int pos, uint32_t v)
+void wb_patch_uleb5(WBuf *b, int pos, uint32_t v)
 {
     int i;
     for (i = 0; i < 4; i++) { b->data[pos + i] = (v & 0x7f) | 0x80; v >>= 7; }
     b->data[pos + 4] = v & 0x7f;
 }
-static void wb_patch_sleb5(WBuf *b, int pos, int32_t v)
+void wb_patch_sleb5(WBuf *b, int pos, int32_t v)
 {
     int i; int64_t x = v;
     for (i = 0; i < 4; i++) { b->data[pos + i] = (x & 0x7f) | 0x80; x >>= 7; }
     b->data[pos + 4] = x & 0x7f;
 }
 
-/* wasm value types */
-#define WT_I32 0x7f
-#define WT_V128 0x7b
-
 static int wasm_vec_bytes(CType *t); /* defined in the v128 section */
-#define WT_I64 0x7e
-#define WT_F32 0x7d
-#define WT_F64 0x7c
 
-typedef struct WSig {
-    int nparams;
-    int params[16];
-    int ret; /* WT_* or -1 for void */
-} WSig;
+/* tcc.h declares this ST_DATA and every backend's gen file defines
+ * it (x86_64-gen.c, arm64-gen.c, ...); tccgen.c sets and reads it on
+ * the bounds-check path.  In the unity build the tcc.h declaration
+ * itself was the definition (ST_DATA is static there); as a separate
+ * translation unit the backend must provide it. */
+ST_DATA int func_bound_add_epilog;
 
-#define WFIX_CALL 1 /* uleb5 at pos := final function index of sym */
-#define WFIX_ADDR 2 /* sleb5 at pos := linear-memory address of sym + addend */
-
-typedef struct WFix {
-    int pos;      /* offset in the function's final body */
-    char *name;   /* owned copy: Sym objects are freed by tccgen_finish
-                     before output runs, so nothing may keep Sym* */
-    int kind;
-    int addend;
-    int shndx;    /* >= 0: resolve the address as wsec_base[shndx] +
-                     value at output time, from the ELF section and
-                     offset captured when the fixup was created;
-                     -1 when the symbol is resolved by name */
-    addr_t value; /* st_value captured at fixup creation when shndx >= 0 */
-} WFix;
-
-typedef struct WFunc {
-    Sym *sym;         /* valid only while that TU is being generated */
-    char *name;       /* owned copy (see WFix note) */
-    int is_static;    /* captured at prolog from the function type */
-    int sig;          /* index into wsigs */
-    int sig_from_call; /* sig was synthesized from a call site's actual
-                          arguments (undeclared FUNC_OLD callee); a later
-                          prototype replaces it */
-    int is_import;
-    int defined;
-    int final_index;  /* assigned by wasm-link */
-    int nparams;
-    int rettype;      /* WT_* or -1 */
-    WBuf final_body;  /* assembled at gfunc_epilog */
-    WFix *fixs;
-    int nfixs, fixcap;
-} WFunc;
-
-static WSig wsigs[128];
-static int nb_wsigs;
-static WFunc wfuns[512];
-static int nb_wfuns;
+WSig wsigs[128];
+int nb_wsigs;
+WFunc wfuns[512];
+int nb_wfuns;
 
 static int wasm_type_of(CType *t)
 {

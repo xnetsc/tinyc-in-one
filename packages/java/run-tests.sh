@@ -2,8 +2,10 @@
 # 运行绑定层测试，三遍：
 #   A 开发模式：系统属性直接指定本地原生文件与运行时目录
 #   B 分发模式：无属性，从 Jar resources 按组合解压到 ~/.cache/tinyc-java/<version>/
-#   C 宿主模拟：TINYC_HOST_TRIPLE 覆盖探测——本机宿主正常解析并跑全套；
-#     包内不存在的组合与 32 位宿主分别断言指名错误
+#   C 宿主模拟：TINYC_HOST_TRIPLE 覆盖探测。期望由本包 manifest 驱动
+#     （与 Python 包的宿主模拟测试同一形态）：模拟的组合在本包内则
+#     解析并跑全套，不在则断言 missing-combination 错误指名该宿主
+#     并列出包内全部组合；32 位宿主单独断言拒绝。
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -52,21 +54,56 @@ $JAVA -Dtinyc.native.path="$PWD/build/test-runtime/$NAME" \
 echo "=== mode B: jar extraction (distribution) ==="
 $JAVA -cp "$CP" tinyc.TinyCTest
 
+# 本包 manifest 的组合清单，每行 "host target"（build.sh 的 staging
+# 产物，与 jar 内的 packaging-manifest.json 同一份）。
+manifest_combos() {
+  python3 - "$PWD/build/jarroot/packaging-manifest.json" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    mf = json.load(f)
+for c in mf["combinations"]:
+    print(c["host"], c["target"])
+PYEOF
+}
+
 echo "=== mode C: host simulation via TINYC_HOST_TRIPLE ==="
-echo "--- C1: x86_64-linux-gnu resolves and runs the full suite"
-TINYC_HOST_TRIPLE=x86_64-linux-gnu $JAVA -cp "$CP" tinyc.TinyCTest >/dev/null
+echo "--- C1: x86_64-linux-gnu host simulation"
+if manifest_combos | grep -qx "x86_64-linux-gnu x86_64-linux-gnu"; then
+  echo "    (combination present in this package: resolves and runs the full suite)"
+  TINYC_HOST_TRIPLE=x86_64-linux-gnu $JAVA -cp "$CP" tinyc.TinyCTest >/dev/null
+else
+  echo "    (combination absent from this package: the error must name it)"
+  set +e
+  OUT=$(TINYC_HOST_TRIPLE=x86_64-linux-gnu $JAVA -cp "$CP" tinyc.HostProbe 2>&1)
+  RC=$?
+  set -e
+  [ $RC -ne 0 ] || { echo "C1 FAILED: probe unexpectedly succeeded"; echo "$OUT"; exit 1; }
+  grep -q "no native build for host x86_64-linux-gnu" <<<"$OUT" \
+    || { echo "C1 FAILED: host not named"; echo "$OUT"; exit 1; }
+  grep -q "available combinations:" <<<"$OUT" \
+    || { echo "C1 FAILED: available combinations not listed"; echo "$OUT"; exit 1; }
+fi
 echo "C1 OK"
 
 echo "--- C2: combination absent from the package names host and available combinations"
+# 缺席宿主取包内不存在者：默认 x86_64-w64-mingw32；若本包宿主正是它
+# （Windows 上构建的 jar），改用 aarch64-linux-gnu。
+ABSENT_HOST=x86_64-w64-mingw32
+if manifest_combos | grep -q "^$ABSENT_HOST "; then
+  ABSENT_HOST=aarch64-linux-gnu
+fi
 set +e
-OUT=$(TINYC_HOST_TRIPLE=x86_64-w64-mingw32 $JAVA -cp "$CP" tinyc.HostProbe 2>&1)
+OUT=$(TINYC_HOST_TRIPLE=$ABSENT_HOST $JAVA -cp "$CP" tinyc.HostProbe 2>&1)
 RC=$?
 set -e
 [ $RC -ne 0 ] || { echo "C2 FAILED: probe unexpectedly succeeded"; echo "$OUT"; exit 1; }
-grep -q "no native build for host x86_64-w64-mingw32" <<<"$OUT" \
+grep -q "no native build for host $ABSENT_HOST" <<<"$OUT" \
   || { echo "C2 FAILED: host not named"; echo "$OUT"; exit 1; }
-grep -q "x86_64-linux-gnu x x86_64-linux-gnu" <<<"$OUT" \
-  || { echo "C2 FAILED: available combinations not listed"; echo "$OUT"; exit 1; }
+# 错误信息里的 available 列表必须逐个列出本包 manifest 的全部组合。
+while read -r combo_host combo_target; do
+  grep -q "$combo_host x $combo_target" <<<"$OUT" \
+    || { echo "C2 FAILED: available list missing $combo_host x $combo_target"; echo "$OUT"; exit 1; }
+done < <(manifest_combos)
 echo "C2 OK"
 
 echo "--- C3: 32-bit host is rejected"

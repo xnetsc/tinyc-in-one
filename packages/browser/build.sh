@@ -76,7 +76,7 @@ case "$TARGET" in
             --exclude='./c2str.exe' --exclude='./config.h' \
             --exclude='./config.mak' --exclude='./tccdefs_.h' \
             -C "$UPSTREAM" . | tar xf - --no-same-owner -C "$ASRC"
-        cp "$WB/src/wasm-gen.c" "$WB/src/wasm-link.c" "$ASRC/"
+        cp "$WB/src/wasm-gen.c" "$WB/src/wasm-link.c" "$WB/src/wasm-int.h" "$ASRC/"
         python3 "$WB/patches/apply-patches.py" "$ASRC" >/dev/null
         ABS_ASRC=$PWD/$ASRC
         (cd "$ASRC" && ./configure --prefix="$ABS_ASRC/install" >/dev/null)
@@ -99,7 +99,12 @@ esac
 
 # Core sources: upstream Makefile's CORE_FILES minus tcctools.c
 # (the standalone ar/ld tools are not part of the compiler module),
-# plus the target backend above.
+# plus the target backend above.  They are compiled as separate
+# translation units, which is upstream's ONE_SOURCE=no mode: tcc.c
+# and libtcc.c default ONE_SOURCE to 1 (each would textually include
+# every other file, duplicating every definition at link time), so
+# the emcc invocation below passes -DONE_SOURCE=0, the same define
+# the Makefile uses for its per-file objects.
 CORE_SRC="$UPSTREAM/tcc.c $UPSTREAM/libtcc.c $UPSTREAM/tccpp.c $UPSTREAM/tccgen.c \
 $UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TARGET_SRC"
 
@@ -141,6 +146,7 @@ EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","UTF8ToString","stringToUTF8","l
 emcc $CORE_SRC \
     -I"$UPSTREAM" \
     $TARGET_DEFS \
+    -DONE_SOURCE=0 \
     -DCONFIG_TCC_PREDEFS=1 \
     -O2 \
     -sMODULARIZE=1 \

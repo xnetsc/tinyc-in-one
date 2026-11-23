@@ -45,6 +45,7 @@
 
 #define USING_GLOBALS
 #include "tcc.h"
+#include "wasm-int.h"
 
 /* ---- ELF-facing stubs (tcc.h:1609-1628 interface) ------------------ */
 

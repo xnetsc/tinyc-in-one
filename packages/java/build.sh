@@ -76,13 +76,57 @@ STAGED_BIN="$JARROOT/natives/$HOST_TRIPLE/toolchain/$HOST_TRIPLE/$NATIVE_NAME"
 [ -f "$STAGED_BIN" ] || { echo "native (host == target) build not staged: $STAGED_BIN" >&2; exit 1; }
 echo "$NATIVE_NAME" > "$BUILD/native-name.txt"
 
-# 导出表核对：tcc_new 必须在；main/tinyc_main 缺失只警告（runCli 不可用）
-nm -D "$STAGED_BIN" | grep -q ' T tcc_new' \
-  || { echo "ERROR: tcc_new not exported by $STAGED_BIN" >&2; exit 1; }
-if nm -D "$STAGED_BIN" | grep -qE ' T (tinyc_main|main)$'; then
-  echo "native: main entry exported"
+# 导出表核对：tcc_new 必须在；main/tinyc_main 缺失只警告（runCli 不可用）。
+# ELF/PE 宿主上导出就在 staged 文件的动态符号表里。Darwin 的双形态
+# 文件是 Mach-O 可执行文件，没有动态符号表，导出在它内嵌的
+# __TINYC,__dylib 段（构建时以 -sectcreate 嵌入的那份 dylib）里：
+# 先把该段按其 Mach-O 段头解出，再对解出的 dylib 做同一条核对。
+if [ "$OS" = "Darwin" ]; then
+  CHECK_BIN="$BUILD/staged-libtinyc.dylib"
+  python3 - "$STAGED_BIN" "$CHECK_BIN" <<'PYEOF'
+import struct, sys
+src, dst = sys.argv[1], sys.argv[2]
+data = open(src, "rb").read()
+if data[:4] == b"\xcf\xfa\xed\xfe":    # MH_MAGIC_64, little-endian
+    fmt = "<"
+elif data[:4] == b"\xfe\xed\xfa\xcf":  # MH_CIGAM_64, big-endian
+    fmt = ">"
+else:
+    sys.exit(f"not a 64-bit Mach-O file: {src}")
+ncmds = struct.unpack_from(fmt + "I", data, 16)[0]
+off = 32  # sizeof(mach_header_64)
+for _ in range(ncmds):
+    cmd, cmdsize = struct.unpack_from(fmt + "II", data, off)
+    if cmd == 0x19:  # LC_SEGMENT_64
+        segname = data[off + 8:off + 24].split(b"\0")[0]
+        nsects = struct.unpack_from(fmt + "I", data, off + 64)[0]
+        soff = off + 72  # sizeof(segment_command_64)
+        for _ in range(nsects):
+            sectname = data[soff:soff + 16].split(b"\0")[0]
+            size = struct.unpack_from(fmt + "Q", data, soff + 40)[0]
+            offset = struct.unpack_from(fmt + "I", data, soff + 48)[0]
+            if segname == b"__TINYC" and sectname == b"__dylib":
+                open(dst, "wb").write(data[offset:offset + size])
+                sys.exit(0)
+            soff += 80  # sizeof(section_64)
+    off += cmdsize
+sys.exit(f"no __TINYC,__dylib section in {src}")
+PYEOF
+  nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?tcc_new$' \
+    || { echo "ERROR: tcc_new not exported by the dylib embedded in $STAGED_BIN" >&2; exit 1; }
+  if nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?(tinyc_main|main)$'; then
+    echo "native: main entry exported"
+  else
+    echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
+  fi
 else
-  echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
+  nm -D "$STAGED_BIN" | grep -q ' T tcc_new' \
+    || { echo "ERROR: tcc_new not exported by $STAGED_BIN" >&2; exit 1; }
+  if nm -D "$STAGED_BIN" | grep -qE ' T (tinyc_main|main)$'; then
+    echo "native: main entry exported"
+  else
+    echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
+  fi
 fi
 
 cat > "$JARROOT/tinyc-native.properties" <<EOF

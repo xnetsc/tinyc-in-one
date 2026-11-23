@@ -750,6 +750,36 @@ PATCHES = [
      "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_WASM32\n"
      "#define gen_cvt_ftoi1 gen_cvt_ftoi",
      1),
+    # 29. tcc.h/tccgen.c: publish the value-stack base the way vtop
+    #     is published - an ST_DATA declaration in tcc.h next to
+    #     vtop's, with the definition in tccgen.c.  Upstream keeps
+    #     vstack as a tccgen.c-local macro over a static array; that
+    #     is visible to a backend only while libtcc.c #includes
+    #     tccgen.c and the backend into one translation unit (the
+    #     Makefile build).  A build that compiles the backend as its
+    #     own translation unit (the browser package's emcc build)
+    #     cannot see it, and wasm-gen.c iterates the live stack from
+    #     its base (wasm_vec_alloc, gfunc_call).  In ONE_SOURCE mode
+    #     the header declaration is a tentative static declaration
+    #     completed by the tccgen.c definition, exactly as before;
+    #     in multi-TU mode it is the extern declaration and the
+    #     definition is tccgen.c's tentative one, the same arrangement
+    #     vtop uses.
+    ("tcc.h",
+     "ST_DATA SValue *vtop;\n"
+     "ST_DATA int rsym, anon_sym, ind, loc;",
+     "ST_DATA SValue *vtop;\n"
+     "ST_DATA SValue _vstack[];\n"
+     "#define vstack (_vstack + 1)\n"
+     "ST_DATA int rsym, anon_sym, ind, loc;",
+     1),
+    ("tccgen.c",
+     "ST_DATA SValue *vtop;\n"
+     "static SValue _vstack[1 + VSTACK_SIZE];\n"
+     "#define vstack (_vstack + 1)",
+     "ST_DATA SValue *vtop;\n"
+     "ST_DATA SValue _vstack[1 + VSTACK_SIZE];",
+     1),
 ]
 
 for fname, old, new, count in PATCHES:
