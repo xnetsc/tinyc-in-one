@@ -99,6 +99,8 @@ s.addFile("/home/user/mylib/libfoo.a");             // 单个库文件，不走 
 | `defineSymbol` / `undefineSymbol` | `tcc_define_symbol` / `tcc_undefine_symbol` |
 | `addSymbol` | `tcc_add_symbol` |
 | `setErrorHandler` / `setIO` | `tcc_set_error_func` |
+| `TinyC.runCli(io, ...)` | `tinyc_main_io`（io 经 `tcc_io_callback` 组成 TCCIO） |
+| `TinyC.runCli(...)` | `tinyc_main` |
 | `compileString` | `tcc_compile_string` |
 | `compileFile` | `tcc_add_file`（libtcc.h 没有 `tcc_compile_file`） |
 | `setOutputType` | `tcc_set_output_type`（常量 `TinyC.TCC_OUTPUT_*`） |
@@ -114,15 +116,19 @@ null 回落 System 流）、`TccIO.capturing()`（内存攒积，out/err 分开�
 
 当前接入状态：
 
-- 错误通道已接通：`TccSession.setIO(io)` 或 `setErrorHandler(handler)` 后，
+- 错误通道：`TccSession.setIO(io)` 或 `setErrorHandler(handler)` 后，
   libtcc 的错误文本经 Panama upcall 跳板以字节交给 `writeErr`。
-  跳板遵守四条规矩：异常不穿 C 边界（抓住存下、原生调用返回后以
+- 全部三通道：`TinyC.runCli(io, args...)` 把 `writeOut` / `writeErr` /
+  `readIn` 的跳板经内核 `tcc_io_callback` 组成回调型 TCCIO，传给
+  `tinyc_main_io`，在该次调用期间作为编译器的当前 IO：编译器自身的
+  输出（版本、预处理结果等）走 `writeOut`、诊断走 `writeErr`、
+  `readIn` 随 TCCIO 一并传给内核。不带 io 的 `runCli(args...)` 走
+  `tinyc_main`，输出走进程真实 stdio，与命令行一致。
+- 跳板遵守四条规矩：异常不穿 C 边界（抓住存下、原生调用返回后以
   `TccException` 重抛）；字节传递不假设 `\0` 结尾；stub 所在 Arena
-  由会话钉住到 `close()`；回调在调用线程同步执行。
+  钉到调用结束（会话错误回调钉到 `close()`）；回调在调用线程同步执行。
 - 默认不设任何回调：libtcc 的报错走进程真实 stderr，与命令行一致。
-- `writeOut` / `readIn` 的 upcall 跳板已由 `TccIoUpcalls` 提供
-  （`writeStub` / `readStub`），但当前 libtcc 没有 `tcc_set_io` 符号，
-  尚未接入内核；在此之前会话的正常输出与 `runCli` 的输出走进程真实 stdio。
+- 带 IO 跑 `-run` 时，目标程序在运行期间的 stdin 由 `readIn` 喂入、stdout 与 stderr 分别经 `writeOut` 与 `writeErr` 交付；不带 IO 时目标程序用进程真实 stdio。
 
 ## 构建与测试
 

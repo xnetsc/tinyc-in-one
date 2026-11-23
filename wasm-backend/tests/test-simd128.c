@@ -56,15 +56,22 @@ int h_cmp_bitmask(void)
     return wasm_i32x4_bitmask(m);
 }
 
-int h_shifts(void)
+int h_shr_s(void)
 {
     v128_t a = wasm_i32x4_const(-16, 3, 0, 0);
-    v128_t s = wasm_i32x4_shr_s(a, 2);
-    v128_t u = wasm_i32x4_shr_u(a, 2);
-    v128_t l = wasm_i32x4_shl(wasm_i32x4_const(3, 0, 0, 0), 4);
-    return wasm_i32x4_extract_lane(s, 0)
-         + (wasm_i32x4_extract_lane(u, 0) == 1073741820 ? 100 : 0)
-         + wasm_i32x4_extract_lane(l, 0);
+    return wasm_i32x4_extract_lane(wasm_i32x4_shr_s(a, 2), 0);
+}
+
+int h_shr_u(void)
+{
+    v128_t a = wasm_i32x4_const(-16, 3, 0, 0);
+    return wasm_i32x4_extract_lane(wasm_i32x4_shr_u(a, 2), 0);
+}
+
+int h_shl(void)
+{
+    return wasm_i32x4_extract_lane(
+        wasm_i32x4_shl(wasm_i32x4_const(3, 0, 0, 0), 4), 0);
 }
 
 int h_shuffle(void)

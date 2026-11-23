@@ -14,7 +14,7 @@ For each target triple this script compares "outputs" in:
         (only when the browser package carries that target;
          its x86_64-windows is the alias of x86_64-w64-mingw32)
   - packages/npm/packaging-manifest.json
-  - packages/npm/native-packages/@tinyc/native-*/packaging-manifest.json
+  - packages/npm/native-packages/@xnetx/tinyc-native-*/packaging-manifest.json
   - packages/python/tinyc/packaging-manifest.json
   - packages/java/dist/tinyc.jar  (its packaging-manifest.json)
 
@@ -145,7 +145,7 @@ def main():
         "npm", os.path.join(ROOT, "packages", "npm", "packaging-manifest.json"),
         authority)
     for sub in sorted(glob.glob(os.path.join(
-            ROOT, "packages", "npm", "native-packages", "@tinyc", "*",
+            ROOT, "packages", "npm", "native-packages", "@xnetx", "*",
             "packaging-manifest.json"))):
         check_package_manifest("npm-subpackage", sub, authority)
     check_package_manifest(

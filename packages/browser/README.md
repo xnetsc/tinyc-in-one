@@ -121,7 +121,7 @@ TCC's runtime support library (`vendor-tinycc/lib/`) was checked symbol by symbo
 Programs that import symbols outside the WASI shim and the default libc — a host API, a peripheral, anything — get them from JS functions registered as shims. A shim is called as `fn(ctx, ...cArgs)`:
 
 - `ctx.memory()` / `ctx.u8()` — the instance's linear memory and a `Uint8Array` view of it;
-- `ctx.readCString(ptr)`, `ctx.readBytes(ptr, len)`, `ctx.writeBytes(ptr, bytes)` — memory helpers;
+- `ctx.readCString(ptr)`, `ctx.writeCString(ptr, str)` (writes the UTF-8 bytes plus a NUL terminator, returns the byte count including the NUL), `ctx.readBytes(ptr, len)`, `ctx.writeBytes(ptr, bytes)` — memory helpers;
 - `ctx.io` — the run's byte IO (`out`/`err` taking `Uint8Array`, optional `in()`).
 
 C arguments arrive in their wasm types: i32/f32/f64 as numbers, i64 as `BigInt`; the return value goes back the same way, so an i64 result must be returned as a `BigInt`. The JS function declares no signature — the engine coerces the arguments and the return value to the import type the module itself declares.

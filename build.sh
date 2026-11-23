@@ -20,6 +20,19 @@
 # host. On any other host the build reports them as not built and
 # produces no artifact.
 #
+# Host variants (the dual-form file compiled to RUN on another host,
+# target == host) are built with the "host" subcommand:
+#
+#   ./build.sh host [host-triple ...]
+#
+# Supported here: aarch64-linux-gnu and riscv64-linux-gnu (cross gcc;
+# the binary is a native-configured TCC for that machine, verified
+# under qemu-user) and x86_64-w64-mingw32 (MinGW cross gcc; the
+# recipe's CC can be overridden with TINYC_MINGW_CC, e.g. plain gcc
+# on a Windows runner). Host variants land in build/dist-host/<triple>/
+# with the same internal layout as build/dist plus a manifest that
+# records host, target (== host) and how the build was produced.
+#
 # Each triple lands in build/dist/<triple>/ with the layout:
 #   bin/tinyc            dual-form file (executable + dlopen-able)
 #   include/             libtcc.h, tinyc_io.h
@@ -164,6 +177,185 @@ EOF
     echo "built: $DIST"
     file "$DIST/bin/tinyc" | sed 's/^/  /'
 }
+
+# -------------------------------------------------------------------
+# Host variants: ./build.sh host [host-triple ...]
+# -------------------------------------------------------------------
+
+# build_host_linux <triple> <cross-name> <host-gcc> <target-def> <isa> <defs...>
+# Same recipe as build_one's cross path (native build for generated
+# files, cross make target for libtcc1.a), except the dual-form file
+# itself is compiled with the host's cross C compiler, so the result
+# RUNS on the host triple and targets it.
+build_host_linux() {
+    local TRIPLE=$1 CT=$2 HGC=$3 TDEF=$4 ISA=$5
+    shift 5
+    local DEFS=("$@")
+    local DIST=$ROOT/build/dist-host/$TRIPLE
+    local SRC=$ROOT/build/work-host/$TRIPLE/src
+
+    echo "===== host $TRIPLE (cross C compiler: $HGC) ====="
+    rm -rf "$ROOT/build/work-host/$TRIPLE" "$DIST"
+    mkdir -p "$SRC" "$DIST/bin" "$DIST/include" "$DIST/lib/tcc/include"
+
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C vendor-tinycc . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+
+    (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
+    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+    (cd "$SRC" && make "cross-$CT" >/dev/null)
+    cp "$SRC/$CT-libtcc1.a" "$DIST/lib/tcc/libtcc1.a"
+    cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/include/"
+    cp "$SRC/libtcc.h" "$DIST/include/"
+
+    "$HGC" -O2 -fPIC -pie -Wl,--export-dynamic \
+        -o "$DIST/bin/tinyc" "$SRC/tcc.c" "$ROOT/core/tcc_io.c" \
+        -I"$SRC" -I"$ROOT/core" "$TDEF" "${DEFS[@]}" -ldl -lm -lpthread
+    python3 "$ROOT/tools/clear_pie_flag.py" "$DIST/bin/tinyc"
+    ln -sf tinyc "$DIST/bin/tcc"
+    cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
+
+    cat > "$DIST/manifest.json" <<EOF
+{
+  "name": "tinyc",
+  "version": "$VER",
+  "host": "$TRIPLE",
+  "target": "$TRIPLE",
+  "isa": "$ISA",
+$(print_outputs elf)
+  "dual_file": "bin/tinyc",
+  "toolchain_include": "include",
+  "libtcc1": "lib/tcc/libtcc1.a",
+  "built_on": "x86_64-linux-gnu host, cross C compiler $HGC",
+  "verification": "qemu-user smoke test (emulator-level): tests/test_hosts.sh"
+}
+EOF
+    echo "built: $DIST"
+    file "$DIST/bin/tinyc" | sed 's/^/  /'
+}
+
+# build_host_mingw [cc]
+# The Windows dual-form file: an EXE with an export table (main,
+# tinyc_main, tinyc_init and the tcc_* API, listed in a .def generated
+# from libtcc.h). LoadLibrary on an EXE runs no DllMain, so the host
+# calls the exported tinyc_init() after loading (design doc 3.2);
+# CONFIG_TCCDIR is left undefined so libtcc resolves the tcc directory
+# from the executable's own location at runtime. The same recipe runs
+# with a native Windows MinGW gcc (TINYC_MINGW_CC=gcc).
+build_host_mingw() {
+    local CC=${1:-${TINYC_MINGW_CC:-x86_64-w64-mingw32-gcc}}
+    local TRIPLE=x86_64-w64-mingw32
+    local DIST=$ROOT/build/dist-host/$TRIPLE
+    local SRC=$ROOT/build/work-host/$TRIPLE/src
+
+    echo "===== host $TRIPLE (C compiler: $CC) ====="
+    rm -rf "$ROOT/build/work-host/$TRIPLE" "$DIST"
+    mkdir -p "$SRC" "$DIST/bin" "$DIST/include" \
+        "$DIST/lib/tcc/win32/lib" "$DIST/lib/tcc/win32/include"
+
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C vendor-tinycc . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+
+    (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
+    # Windows builds resolve the tcc dir from the exe location; drop
+    # the baked Linux CONFIG_TCCDIR so that fallback engages.
+    python3 - "$SRC/config.h" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+t2 = re.sub(r'#ifndef CONFIG_TCCDIR\n#define CONFIG_TCCDIR "[^"]*"\n#endif\n', '', t)
+assert t2 != t, "CONFIG_TCCDIR block not found in config.h"
+open(p, 'w').write(t2)
+PYEOF
+    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+    (cd "$SRC" && make cross-x86_64-win32 >/dev/null)
+    cp "$SRC/x86_64-win32-libtcc1.a" "$DIST/lib/tcc/win32/lib/libtcc1.a"
+    cp "$SRC"/win32/lib/*.def "$DIST/lib/tcc/win32/lib/"
+    cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/win32/include/"
+    cp -r "$SRC"/win32/include/. "$DIST/lib/tcc/win32/include/"
+    cp "$SRC/libtcc.h" "$DIST/include/"
+    cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
+
+    python3 "$ROOT/tools/gen_windows_def.py" "$SRC/libtcc.h" "$SRC/tinyc.def"
+    "$CC" -O2 -static \
+        -o "$DIST/bin/tinyc.exe" "$SRC/tcc.c" "$SRC/tcc_io.c" \
+        "$ROOT/core/tinyc_win.c" \
+        -I"$SRC" -I"$ROOT/core" \
+        -DTCC_TARGET_X86_64 -DTCC_TARGET_PE \
+        "$SRC/tinyc.def" -lm
+    ln -sf tinyc.exe "$DIST/bin/tcc.exe"
+    # Flat companions next to the exe: with the runtime tccdir being
+    # the exe's own directory, libtcc1.a / include / lib live there in
+    # upstream's Windows layout, so the exe also works standalone.
+    cp "$DIST/lib/tcc/win32/lib/libtcc1.a" "$DIST/bin/libtcc1.a"
+    cp -r "$DIST/lib/tcc/win32/include" "$DIST/bin/include"
+    mkdir -p "$DIST/bin/lib"
+    cp "$SRC"/win32/lib/*.def "$DIST/bin/lib/"
+
+    cat > "$DIST/manifest.json" <<EOF
+{
+  "name": "tinyc",
+  "version": "$VER",
+  "host": "$TRIPLE",
+  "target": "$TRIPLE",
+  "isa": "$ISA_X86_64",
+$(print_outputs pe)
+  "dual_file": "bin/tinyc.exe",
+  "toolchain_include": "include",
+  "libtcc1": "lib/tcc/win32/lib/libtcc1.a",
+  "built_on": "cross C compiler $CC",
+  "verification": "PE format and export table checked with objdump; execution and the LoadLibrary path are exercised on the Windows CI runner (tests/consumer/win_host_test.c)"
+}
+EOF
+    echo "built: $DIST"
+    file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
+}
+
+if [ "${1:-}" = "host" ]; then
+    shift
+    HOSTS=${@:-"aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32"}
+    for H in $HOSTS; do
+        case $H in
+            aarch64-linux-gnu)
+                build_host_linux "$H" arm64 aarch64-linux-gnu-gcc \
+                    "-DTCC_TARGET_ARM64" "$ISA_ARM64" \
+                    '-DCONFIG_SYSROOT="/usr/aarch64-linux-gnu"' \
+                    '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
+                    '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+                ;;
+            riscv64-linux-gnu)
+                build_host_linux "$H" riscv64 riscv64-linux-gnu-gcc \
+                    "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
+                    '-DCONFIG_SYSROOT="/usr/riscv64-linux-gnu"' \
+                    '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
+                    '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+                ;;
+            x86_64-w64-mingw32)
+                build_host_mingw
+                ;;
+            *)
+                echo "unknown host triple: $H" >&2
+                exit 1
+                ;;
+        esac
+    done
+    echo "host build done"
+    exit 0
+fi
 
 for TRIPLE in $TRIPLES; do
     case $TRIPLE in

@@ -1,5 +1,5 @@
 == javac version ==
-javac 17.0.21.1
+javac 25.0.5.1
 android.jar: /home/hatch/workspace/envs/android-toolchain/sdk/platforms/android-35/android.jar
 == compile Java (all main sources, against android.jar) ==
 OK
@@ -31,48 +31,11 @@ PASS OUTPUT_PREPROCESS == 5
 passed=21 failed=0
 == javac -h: generate JNI header ==
 total 8
-drwxrws--- 1 root nogroup   46 Nov 23 16:03 .
-drwxrws--- 1 root nogroup   34 Nov 23 16:03 ..
--rw-rw---- 1 root nogroup 4796 Nov 23 16:03 com_tinyc_TinycNative.h
+drwxrws--- 1 root nogroup   46 Nov 23 17:47 .
+drwxrws--- 1 root nogroup   34 Nov 23 17:46 ..
+-rw-rw---- 1 root nogroup 4796 Nov 23 17:47 com_tinyc_TinycNative.h
 21
 == check JNI glue implements every generated prototype ==
 all native methods implemented
-== NDK compile-check of JNI glue (arm64-v8a, x86_64) ==
-OK aarch64-linux-android
-OK x86_64-linux-android
+== NDK not found, skipping JNI glue compile-check ==
 == jvm-test done ==
-
-== manual AAR assembly (build.sh manual-aar) ==
-        0  2026-11-23 16:04   assets/sysroot/.gitkeep
-        0  2026-11-23 16:04   assets/.gitkeep
-      973  2026-11-23 16:04   assets/README.md
----------                     -------
-    14337                     47 files
-
-== classes.jar content ==
-Archive:  build/manual-aar/stage/classes.jar
-  Length      Date    Time    Name
----------  ---------- -----   ----
-        0  2026-11-23 16:04   META-INF/
-       67  2026-11-23 16:04   META-INF/MANIFEST.MF
-        0  2026-11-23 16:04   com/
-        0  2026-11-23 16:04   com/tinyc/
-      244  2026-11-23 16:04   com/tinyc/Tinyc$ErrorListener.class
-     6189  2026-11-23 16:04   com/tinyc/Tinyc.class
-     1483  2026-11-23 16:04   com/tinyc/TinycArgs.class
-      561  2026-11-23 16:04   com/tinyc/TinycAssets$Paths.class
-     4367  2026-11-23 16:04   com/tinyc/TinycAssets.class
-      349  2026-11-23 16:04   com/tinyc/TinycException.class
-      446  2026-11-23 16:04   com/tinyc/TinycIO$1.class
-      395  2026-11-23 16:04   com/tinyc/TinycIO$2.class
-     1126  2026-11-23 16:04   com/tinyc/TinycIO$3.class
-     1131  2026-11-23 16:04   com/tinyc/TinycIO.class
-     1455  2026-11-23 16:04   com/tinyc/TinycNative.class
----------                     -------
-    17813                     15 files
-
-== aar file ==
-total 24
-drwxrws--- 1 root nogroup    50 Nov 23 16:04 .
-drwxrws--- 1 root nogroup     6 Nov 23 16:04 ..
--rw-rw---- 1 root nogroup 21048 Nov 23 16:04 tinyc-android-release.aar

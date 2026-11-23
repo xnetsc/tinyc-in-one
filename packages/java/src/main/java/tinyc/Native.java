@@ -51,7 +51,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
  *       32 位宿主直接报不支持，不做任何回退。</li>
  * </ol>
  *
- * <p>调用的 C 符号全部出自 libtcc.h 并经导出表核对；libtcc.h 没有
+ * <p>调用的 C 符号出自 libtcc.h 与 tinyc_io.h 并经导出表核对；libtcc.h 没有
  * {@code tcc_compile_file}，编译文件由 {@code tcc_add_file} 承担，见 {@link TccSession#compileFile}。
  */
 final class Native {
@@ -84,10 +84,15 @@ final class Native {
     static final MethodHandle TCC_RUN;
     static final MethodHandle TCC_RELOCATE;
     static final MethodHandle TCC_GET_SYMBOL;
+    static final MethodHandle TCC_IO_CALLBACK;
+    static final MethodHandle TCC_IO_FREE;
 
     /** 导出的 main 入口：tinyc_main 优先，无则 main；原生文件没有时为 null。 */
     static final MethodHandle MAIN;
     static final String MAIN_NAME;
+
+    /** 带 IO 的 main 入口：tinyc_main_io；原生文件没有时为 null。 */
+    static final MethodHandle MAIN_IO;
 
     /** libc 的 fflush，用于 main 调用返回后冲刷 C stdio；取不到时为 null。 */
     static final MethodHandle FFLUSH;
@@ -162,6 +167,9 @@ final class Native {
                     FunctionDescriptor.of(JAVA_INT, ADDRESS));
             TCC_GET_SYMBOL = required(linker, lookup, "tcc_get_symbol",
                     FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS));
+            TCC_IO_CALLBACK = required(linker, lookup, "tcc_io_callback",
+                    FunctionDescriptor.of(ADDRESS, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+            TCC_IO_FREE = required(linker, lookup, "tcc_io_free", vA);
 
             MemorySegment mainSeg = lookup.find("tinyc_main").orElse(null);
             String mainName = "tinyc_main";
@@ -173,6 +181,11 @@ final class Native {
                     ? linker.downcallHandle(mainSeg, FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS))
                     : null;
             MAIN_NAME = MAIN != null ? mainName : null;
+
+            MAIN_IO = lookup.find("tinyc_main_io")
+                    .map(seg -> linker.downcallHandle(seg,
+                            FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, ADDRESS)))
+                    .orElse(null);
 
             FFLUSH = linker.defaultLookup().find("fflush")
                     .map(seg -> linker.downcallHandle(seg, FunctionDescriptor.of(JAVA_INT, ADDRESS)))

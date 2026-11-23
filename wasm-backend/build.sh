@@ -32,8 +32,13 @@ make wasm32-tcc >> "$LOG" 2>&1 || { echo "wasm32-tcc build failed, see build.log
 ls -la wasm32-tcc >> "$LOG" 2>&1
 
 # the wasm target's sysroot include: this package's headers
-# (wasm_simd128.h, arm_neon.h, xmmintrin.h, emmintrin.h)
+# (wasm_simd128.h, arm_neon.h, xmmintrin.h, emmintrin.h).
+# sysroot/include is the distribution copy; the compiler's own
+# include search path (CONFIG_TCCDIR/include under the configure
+# prefix) gets the same headers so they resolve without -I.
 mkdir -p "$ROOT/sysroot/include"
 cp "$ROOT"/include/*.h "$ROOT/sysroot/include"/
+mkdir -p "$ROOT/build-install/lib/tcc/include"
+cp "$ROOT"/include/*.h "$ROOT/build-install/lib/tcc/include"/
 
 echo "BUILD OK: $SRC/wasm32-tcc"

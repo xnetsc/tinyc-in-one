@@ -240,10 +240,13 @@ def _argv(args):
 
 # --------------------------------------------------------------------- IO
 
+# The buffer argument is c_void_p, not c_char_p: a c_char_p argument
+# would hand the callback a NUL-truncated bytes copy of the buffer,
+# and writes through it would never reach the C buffer.
 _IO_WRITE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
-                             ctypes.c_char_p, ctypes.c_size_t)
+                             ctypes.c_void_p, ctypes.c_size_t)
 _IO_READ = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
-                            ctypes.c_char_p, ctypes.c_size_t)
+                            ctypes.c_void_p, ctypes.c_size_t)
 
 
 class IO:

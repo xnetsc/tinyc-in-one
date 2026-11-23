@@ -1,7 +1,10 @@
-== compile test-input.c ==
+== build ==
+BUILD OK: /home/hatch/workspace/tinyc-embedded/wasm-backend/build-src/wasm32-tcc
+build exit=0
+== compile test-input.c (scalar) ==
 compile exit=0
-== node instantiate + assert ==
-wasm size: 834
+== scalar assertions ==
+wasm size: 1028
 magic ok: true
 exports: add, memory, mix, poly, triple
 add(2,3) = 5
@@ -10,9 +13,204 @@ poly(3) = 29
 mix(17,5) = 14
 ALL ASSERTIONS PASSED
 node exit=0
-== p8 regression (live value in REG_IRET across a call) ==
-p8 poly(3)= 11
-p8 exit=0
+== compile test-scalar2.c (float/control/conversions/i64) ==
+compile exit=0
+== scalar2 assertions ==
+PASS d_add() = 3.75
+PASS d_sub() = 3.5
+PASS d_mul() = 6
+PASS d_div() = 3.5
+PASS f_add() = 3.75
+PASS f_mul() = 10
+PASS f_div() = 0.25
+PASS d_neg() = -3.5
+PASS f_neg() = -3.5
+PASS d_from_f() = 0.10000000149011612
+PASS d_roundtrip() = 0.10000000149011612
+PASS cmp_vals_lt() = 25
+PASS cmp_vals_eq() = 10
+PASS cmp_vals_gt() = 20
+PASS fcmp_vals_lt() = 1
+PASS fcmp_vals_eq() = 6
+PASS fcmp_vals_gt() = 4
+PASS cmp_and() = 1
+PASS cmp_and_f() = 0
+PASS cmp_or() = 1
+PASS cmp_or_f() = 0
+PASS cmp_not() = 0
+PASS cmp_not_f() = 1
+PASS cmp_chain() = 1
+PASS if_else_t() = 1
+PASS if_else_f() = 2
+PASS if_float_t() = 1
+PASS if_float_f() = 0
+PASS fcond_and_t() = 1
+PASS fcond_and_f() = 0
+PASS while_sum() = 55
+PASS while_float() = 4
+PASS for_loop() = 21
+PASS do_while() = 3
+PASS nested_bc() = 64
+PASS sw_1() = 10
+PASS sw_2() = 21
+PASS sw_3() = 1
+PASS sw_d() = 99
+PASS tern_t() = 111
+PASS tern_f() = 222
+PASS go_fwd_t() = 11
+PASS go_fwd_f() = 12
+PASS go_loop() = 10
+PASS loop_float_mix() = 10
+PASS f2i() = 3
+PASS f2i_neg() = -3
+PASS d2i() = 9
+PASS f2u() = 3
+PASS i2d() = -3
+PASS u2d() = 4000000000
+PASS i2f_round() = 16777216
+PASS f2ll() = 3
+PASS d2ll() = -9
+PASS d2ull() = 9
+PASS d2i_sat() = 2147483647
+PASS d2i_sat_neg() = -2147483648
+PASS d2ull_neg() = 0
+PASS f2ll_sat() = 9223372036854775807
+PASS ll2d() = 5000000000
+PASS ll2f() = 16777216
+PASS ull2d() = 18446744073709552000
+PASS mix1() = 5.5
+PASS mix2() = 6
+PASS mix3() = 11
+PASS mix_cmp_t() = 1
+PASS mix_cmp_f() = 0
+PASS ll_const() = 5000000000
+PASS ll_const_neg() = -5000000000
+PASS ll_hi() = 1
+PASS ll_lo() = 705032704
+PASS ll_id() = 5000000000
+PASS ll_add_carry() = 4294967296
+PASS ll_sub_borrow() = 4294967295
+PASS ll_mul() = 8589934590
+PASS ll_shr() = 1
+PASS ll_shl() = 1099511627776
+PASS ll_cmp() = 1
+PASS ll_mix() = 705032704
+PASS v64_a() = 5000000000
+PASS v64_b() = 3
+PASS gv64_a() = 9000000000
+PASS gv64_b() = -2
+PASS vec_rvalue_sub() = 40
+PASS vec_op_sub() = 22
+PASS vec_ucmp_init() = -2
+scalar2 assertions: 86 passed, 0 failed
+ALL SCALAR2 ASSERTIONS PASSED
+node exit=0
 == -run must be an explicit wasm error ==
 tcc: error: wasm: -run is not supported for the wasm target; instantiate the generated module with a host wasm engine
 run exit=1
+== compile test-vec.c ==
+compile exit=0
+== vector assertions ==
+wasm size: 6335
+magic ok: true
+exports: memory, sz, t_abs, t_add, t_arr, t_call, t_cmp, t_fadd, t_glob, t_i8mul, t_id, t_init, t_rep, t_sat, t_shl, t_shuf, t_sub, t_un, t_v2
+PASS sz() = 16
+PASS t_add(30,12) = 42
+PASS t_arr() = 30
+PASS t_init() = 100
+PASS t_sub() = 7100
+PASS t_cmp(20) = -1
+PASS t_cmp(10) = -1
+PASS t_cmp(5) = 0
+PASS t_call(21) = 42
+PASS typeof t_id = function
+PASS t_fadd() = -2
+PASS t_i8mul() = -30
+PASS t_v2() = 68
+PASS t_shl(3,4) = 48
+PASS t_shl(1,31) = -2147483648
+PASS t_shuf() = 41
+PASS t_rep() = 100
+PASS t_un() = 2
+PASS t_glob() = 600
+PASS t_abs() = 6
+PASS t_sat() = 199
+vec assertions: 21 passed, 0 failed
+ALL VEC ASSERTIONS PASSED
+node exit=0
+== compile test-simd128.c (wasm_simd128.h) ==
+compile exit=0
+== wasm_simd128.h assertions ==
+PASS h_load_store() = 12344
+PASS h_const() = 1234
+PASS h_sat() = -1
+PASS h_minmax() = 48
+PASS h_farith() = 7
+PASS h_cmp_bitmask() = 5
+PASS h_shr_s() = -4
+PASS h_shr_u() = 1073741820
+PASS h_shl() = 48
+PASS h_shuffle() = 255
+PASS h_convert() = 28
+PASS h_extend_narrow() = -864
+PASS h_dot_extmul() = 17077
+PASS h_avgr_popcnt() = 767
+PASS h_reduce() = 6
+PASS h_f64() = 4.5
+PASS h_replace() = 100
+PASS h_load_splat() = 7
+PASS h_bitops() = 15420
+simd128 assertions: 19 passed, 0 failed
+ALL SIMD128 ASSERTIONS PASSED
+node exit=0
+== compile test-neon.c (arm_neon.h) ==
+compile exit=0
+== arm_neon.h assertions ==
+PASS n_add() = 13574
+PASS n_sat() = 32767
+PASS n_minmax() = 47
+PASS n_cmp() = -1
+PASS n_absneg() = 105
+PASS n_zip() = 5736
+PASS n_zip8() = 177
+PASS n_tbl() = 240
+PASS n_duplane() = 33
+PASS n_shift() = 2
+PASS n_ldst() = 10987
+PASS n_f32() = 6
+PASS n_setlane() = 991
+PASS n_mul64()[0] = 3000000
+PASS n_mul64()[1] = 35
+PASS n_reinterpret() = -2
+neon assertions: 16 passed, 0 failed
+ALL NEON ASSERTIONS PASSED
+node exit=0
+== compile test-sse.c (xmmintrin.h/emmintrin.h) ==
+compile exit=0
+== SSE/SSE2 assertions ==
+PASS x_add_ps() = 13
+PASS x_add_ss_hi() = 4
+PASS x_add_ss_lo() = 11
+PASS x_movemask() = 10
+PASS x_comi() = 3
+PASS x_cvtss() = 43
+PASS x_cvtsi32() = 42
+PASS x_sqrt_minmax() = 30
+PASS x_unpack_movehl() = 30
+PASS e_add_epi32() = 112334
+PASS e_sat_epu8() = 255
+PASS e_madd() = 1753
+PASS e_packs() = 127007
+PASS e_shuffle_epi32() = 4321
+PASS e_byte_shifts() = 404
+PASS e_shuffle_epi8() = 41
+PASS e_unpacklo_epi8() = 1526
+PASS e_cvtepi32_roundtrip() = 28
+PASS e_srai() = -4
+PASS e_srli() = 1073741820
+PASS e_movemask_epi8() = 8
+PASS e_add_pd() = 3
+PASS e_cvtsd() = 87
+sse assertions: 23 passed, 0 failed
+ALL SSE ASSERTIONS PASSED
+node exit=0

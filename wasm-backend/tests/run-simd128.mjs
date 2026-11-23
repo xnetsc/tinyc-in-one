@@ -26,7 +26,9 @@ check("h_sat()", ex.h_sat(), -1);                    // 32767 + -32768
 check("h_minmax()", ex.h_minmax(), 48);              // lo[2]=50, hi[1]=-3, hi[3]=1
 check("h_farith()", ex.h_farith(), 7.0);
 check("h_cmp_bitmask()", ex.h_cmp_bitmask(), 5);     // lanes 0,2 set -> 0b0101
-check("h_shifts()", ex.h_shifts(), 144);             // -4 + 100 + 48
+check("h_shr_s()", ex.h_shr_s(), -4);
+check("h_shr_u()", ex.h_shr_u(), 1073741820);
+check("h_shl()", ex.h_shl(), 48);
 check("h_shuffle()", ex.h_shuffle(), 255);           // 15*16 + 0 + swizzle lane0=15
 check("h_convert()", ex.h_convert(), 28);            // 3*10 + -2
 check("h_extend_narrow()", ex.h_extend_narrow(), -864); // -1000+2 + 127 + 7

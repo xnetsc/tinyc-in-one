@@ -37,7 +37,7 @@ class TinyCError extends Error {}
  * cross target, defaulting to the host), look the (host, target)
  * combination up in packaging-manifest.json, and locate the variant
  * under natives/. Roots are searched in order: $TINYC_DIST, the
- * platform subpackage @tinyc/native-<host> (optional dependency),
+ * platform subpackage @xnetx/tinyc-native-<host> (optional dependency),
  * then this package itself (single-package mode). Hosts and targets
  * are 64-bit only: a 32-bit host throws instead of falling back to
  * some other platform's files.
@@ -86,7 +86,7 @@ function packageRoots() {
   const roots = [];
   if (process.env.TINYC_DIST) roots.push(process.env.TINYC_DIST);
   try {
-    const pkgJson = require.resolve(`@tinyc/native-${hostTriple()}/package.json`);
+    const pkgJson = require.resolve(`@xnetx/tinyc-native-${hostTriple()}/package.json`);
     roots.push(path.dirname(pkgJson));
   } catch { /* subpackage not installed: single-package mode */ }
   roots.push(__dirname);

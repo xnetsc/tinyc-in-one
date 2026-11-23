@@ -502,6 +502,26 @@ const WASM_CUSTOM = new Uint8Array([
 ]);
 
 // (module
+//   (import "env" "host_fill" (func (param i32) (result i32)))
+//   (import "env" "host_log" (func (param i32)))
+//   (memory (export "memory") 1)
+//   (func (export "run") (result i32) (local $n i32)
+//     (local.set $n (call 0 (i32.const 1024)))  ;; host_fill(buf)
+//     (call 1 (i32.const 1024))                 ;; host_log(buf)
+//     (local.get $n)))
+const WASM_WRITE = new Uint8Array([
+  0x00,0x61,0x73,0x6d,0x01,0x00,0x00,0x00,0x01,0x0e,0x03,0x60,
+  0x01,0x7f,0x01,0x7f,0x60,0x01,0x7f,0x00,0x60,0x00,0x01,0x7f,
+  0x02,0x20,0x02,0x03,0x65,0x6e,0x76,0x09,0x68,0x6f,0x73,0x74,
+  0x5f,0x66,0x69,0x6c,0x6c,0x00,0x00,0x03,0x65,0x6e,0x76,0x08,
+  0x68,0x6f,0x73,0x74,0x5f,0x6c,0x6f,0x67,0x00,0x01,0x03,0x02,
+  0x01,0x02,0x05,0x03,0x01,0x00,0x01,0x07,0x10,0x02,0x06,0x6d,
+  0x65,0x6d,0x6f,0x72,0x79,0x02,0x00,0x03,0x72,0x75,0x6e,0x00,
+  0x02,0x0a,0x14,0x01,0x12,0x01,0x01,0x7f,0x41,0x80,0x08,0x10,
+  0x00,0x21,0x00,0x41,0x80,0x08,0x10,0x01,0x20,0x00,0x0b,
+]);
+
+// (module
 //   (import "env" "my_custom_add" (func (param i32 i32) (result i32)))
 //   (import "wasi_snapshot_preview1" "proc_exit" (func (param i32)))
 //   (memory (export "memory") 1)
@@ -740,6 +760,24 @@ test('custom shims: instance-level registration serves state.run; ctx reads modu
   assert.equal(rc, 42);
   assert.deepEqual(seen, [[19, 23]]); // the C arguments arrived as numbers
   assert.deepEqual(logs, ['custom says hi']); // read from the module's memory via ctx
+  state.delete();
+});
+
+test('custom shims: ctx.writeCString writes a NUL-terminated string read back via ctx.readCString', async () => {
+  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_WRITE);
+  const logs = [];
+  let written = -1;
+  tinyc.registerShim('host_fill', (ctx, ptr) => {
+    written = ctx.writeCString(ptr, 'filled by shim');
+    return written;
+  });
+  tinyc.registerShim('host_log', (ctx, ptr) => { logs.push(ctx.readCString(ptr)); });
+  const state = tinyc.createState();
+  const rc = state.run([], { entry: 'run' });
+  assert.equal(rc, 15); // 'filled by shim' is 14 chars + the NUL terminator
+  assert.equal(written, 15);
+  assert.deepEqual(logs, ['filled by shim']); // the module's buffer now holds the string
   state.delete();
 });
 

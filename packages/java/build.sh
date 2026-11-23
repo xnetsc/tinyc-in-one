@@ -80,7 +80,8 @@ EOF
 mkdir -p "$BUILD/test-classes" "$BUILD/test-runtime"
 "$JAVAC" -cp "$DIST/tinyc.jar" -d "$BUILD/test-classes" $(find src/test/java -name '*.java' | sort)
 cp "$STAGED_BIN" "$BUILD/test-runtime/$NATIVE_NAME"
-cp "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/libtcc1.a" "$BUILD/test-runtime/libtcc1.a"
-cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/include" "$BUILD/test-runtime/include"
+# 整个 lib/tcc 目录平铺进 test-runtime：除 libtcc1.a 与 include 外，
+# -run 需要的 runmain.o 等辅助目标文件也在其中
+cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/." "$BUILD/test-runtime/"
 
 echo "built: $PWD/$DIST/tinyc.jar (version $VERSION, host $HOST_TRIPLE)"

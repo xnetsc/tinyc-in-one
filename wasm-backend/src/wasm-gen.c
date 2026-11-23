@@ -353,6 +353,9 @@ static int wcur_started;
 static int wloc_reg(int r)   { return wcur_func->nparams + r; }       /* TCC reg r */
 static int wloc_fp(void)     { return wcur_func->nparams + NB_REGS; } /* frame base */
 static int wloc_scratch(int i) { return wcur_func->nparams + NB_REGS + 1 + i; }
+static int wloc_pc(void)     { return wcur_func->nparams + 63; } /* basic-block dispatch $pc */
+static int wloc_carry(void)  { return wcur_func->nparams + 64; } /* carry between ADDC1/ADDC2 */
+static int wloc_i64(void)    { return wcur_func->nparams + 65; } /* i64 scratch (cvt/llong call glue) */
 
 static void we(int c) /* emit one byte, mirrored into the ELF text section */
 {
@@ -377,6 +380,125 @@ static void we_local_set(int idx) { we(0x21); we_uleb(idx); }
 static void we_global_get(int idx) { we(0x23); we_uleb(idx); }
 static void we_global_set(int idx) { we(0x24); we_uleb(idx); }
 static void we_i32_const(int32_t v) { we(0x41); we_sleb5(v); }
+static void we_sleb(int64_t v)
+{
+    for (;;) {
+        int c = v & 0x7f; v >>= 7;
+        if ((v == 0 && !(c & 0x40)) || (v == -1 && (c & 0x40))) { we(c); break; }
+        we(c | 0x80);
+    }
+}
+static void we_i64_const(int64_t v) { we(0x42); we_sleb(v); }
+
+/* ------------------------------------------------------------------ */
+/* control flow: basic-block dispatch                                  */
+/*                                                                     */
+/* Wasm has no patchable jumps, so the function body is assembled at   */
+/* epilog into a dispatch loop: blocks start at every jump target,     */
+/* a $pc local selects the block through a br_table, and every jump    */
+/* site in the emitted stream is a 5-byte placeholder that the         */
+/* assembly replaces with "pc = target block; br $dispatch".           */
+/* Jump chains keep the generic tccgen protocol: a chain node is the   */
+/* absolute ind of a site's second byte, the previous head is threaded */
+/* through the word in the text-section mirror at that offset, and     */
+/* gsym_addr records the resolution target on every site of the chain. */
+
+typedef struct WJmp {
+    int node;   /* chain node value (absolute ind), 0 when not chained */
+    int off;    /* stream offset of the 5 placeholder bytes */
+    int cond;   /* site sits inside an `if` (gjmp_cond): one more
+                   enclosing construct when branching to the loop */
+    int target; /* target absolute ind, -1 until resolved */
+} WJmp;
+
+static WJmp *wjmps;
+static int nb_wjmps, cap_wjmps;
+static int wfunc_ind0; /* ind of the first byte of the current
+                          function's stream (wcur offset 0) */
+
+/* record a jump site whose 5 placeholder bytes were just emitted
+   starting at absolute ind 'site'; returns the record index */
+static int wasm_jmp_record(int site, int node, int cond, int target)
+{
+    WJmp *j;
+    if (nb_wjmps >= cap_wjmps) {
+        cap_wjmps = cap_wjmps ? cap_wjmps * 2 : 32;
+        wjmps = tcc_realloc(wjmps, cap_wjmps * sizeof(WJmp));
+    }
+    j = &wjmps[nb_wjmps];
+    j->node = node;
+    j->off = site - wfunc_ind0;
+    j->cond = cond;
+    j->target = target;
+    return nb_wjmps++;
+}
+
+static void wasm_jmp_placeholders(void)
+{
+    we(0x01); we(0x01); we(0x01); we(0x01); we(0x01); /* nops */
+}
+
+/* cmp_r operand marker: the operand is the constant 0 (used for the
+   bool register produced by a floating-point comparison) */
+#define WCMP_ZERO 63
+
+/* The operands of the most recent integer comparison this backend
+   turned into a VT_CMP.  gen_opl's high-word dance (tccgen.c) is
+   written for flag-based backends: after gvtst() consumes the
+   high-word comparison it tests the SAME comparison again with
+   TOK_NE via a VT_CMP whose cmp_r is zero (vpushi + vset_VT_CMP),
+   relying on the condition still being live.  Wasm has no flags,
+   so a VT_CMP with cmp_r == 0 arriving at gjmp_cond/load uses
+   these ambient operands instead.  A genuine VT_CMP always records
+   its own operands here when created, so the substitution is a
+   no-op for it. */
+static int amb_cmp_a, amb_cmp_b, amb_cmp_valid;
+
+static void wasm_cmp_operands(SValue *sv, int *a, int *b)
+{
+    if (sv->cmp_r == 0 && amb_cmp_valid) {
+        *a = amb_cmp_a;
+        *b = amb_cmp_b;
+    } else {
+        *a = sv->cmp_r & 0xff;
+        *b = (sv->cmp_r >> 8) & 0xff;
+    }
+}
+
+static void wasm_cmp_operand(int r)
+{
+    if (r == WCMP_ZERO) we_i32_const(0);
+    else we_local_get(wloc_reg(r));
+}
+
+static int wasm_icmp_opc(int op)
+{
+    switch (op) {
+    case TOK_EQ:  return 0x46; /* i32.eq */
+    case TOK_NE:  return 0x47; /* i32.ne */
+    case TOK_LT:  return 0x48; /* i32.lt_s */
+    case TOK_ULT: return 0x49; /* i32.lt_u */
+    case TOK_GT:  return 0x4a; /* i32.gt_s */
+    case TOK_UGT: return 0x4b; /* i32.gt_u */
+    case TOK_LE:  return 0x4c; /* i32.le_s */
+    case TOK_ULE: return 0x4d; /* i32.le_u */
+    case TOK_GE:  return 0x4e; /* i32.ge_s */
+    case TOK_UGE: return 0x4f; /* i32.ge_u */
+    }
+    tcc_error("wasm: comparison operator 0x%x not implemented", op);
+    return 0;
+}
+
+/* emit the integer comparison described by a VT_CMP SValue's
+   cmp_op/cmp_r onto the wasm stack (an i32 0/1) */
+static void wasm_cmp_emit(SValue *sv)
+{
+    int a, b;
+    wasm_cmp_operands(sv, &a, &b);
+    wasm_cmp_operand(a);
+    wasm_cmp_operand(b);
+    we(wasm_icmp_opc(sv->cmp_op));
+}
 
 /* TCC's byte emitter: for wasm only the low byte is meaningful. */
 ST_FUNC void o(unsigned int c)
@@ -409,8 +531,14 @@ static void wasm_push_addr(SValue *sv)
         return;
     }
     if (v < VT_CONST) { /* address held in a register */
+        /* The register holds the exact address: pointer arithmetic
+           is materialised into the register value by gen_op, and
+           sv->c.i on a register lvalue is a stale leftover of the
+           lvalue the pointer was loaded from (e.g. the frame offset
+           of the pointer variable itself after indir()'s gv()).
+           The riscv64 backend discards it the same way
+           ("fc = 0; // XXX store ofs in LVAL(reg)"). */
         we_local_get(wloc_reg(v));
-        if (sv->c.i) { we_i32_const((int32_t)sv->c.i); we(0x6a); }
         return;
     }
     if (v == VT_CONST) { /* constant is the address */
@@ -540,6 +668,19 @@ static int wasm_vec_ensure(SValue *sv, SValue *keep)
 ST_FUNC void gen_vec_gv(void)
 {
     (void)wasm_vec_ensure(vtop, NULL);
+}
+
+/* give the vector value in vtop a memory home (spill it to a frame
+   slot) so that lvalue operations - element subscript in
+   particular - can address it; used for vector rvalues such as
+   function-call results */
+ST_FUNC void gen_vec_home(void)
+{
+    if (vtop->r & VT_LVAL)
+        return;
+    if (wasm_vec_sv_slot(vtop) < 0)
+        (void)wasm_vec_ensure(vtop, NULL);
+    wasm_vec_spill_sv(vtop);
 }
 
 /* the return value must end up in slot 0 (gfunc_epilog reads it);
@@ -1002,7 +1143,11 @@ static int wasm_load_op(CType *type, int *is_float)
         return 0x28; /* i32.load */
     case 8:
         if (bt == VT_DOUBLE || bt == VT_LDOUBLE) { *is_float = 1; return 0x2b; } /* f64.load */
-        tcc_error("wasm: 64-bit load needs a register pair (unsupported)");
+        /* a 64-bit integer reaches load() one word at a time: the
+           generic layer splits register pairs into PTRDIFF_T words
+           itself, and save/load of a spilled pair member passes the
+           full type with a single register */
+        return 0x28; /* i32.load */
     }
     tcc_error("wasm: unsupported load size %d", size);
     return 0;
@@ -1022,7 +1167,10 @@ static int wasm_store_op(CType *type, int *is_float)
         return 0x36; /* i32.store */
     case 8:
         if (bt == VT_DOUBLE || bt == VT_LDOUBLE) { *is_float = 1; return 0x39; } /* f64.store */
-        tcc_error("wasm: 64-bit store needs a register pair (unsupported)");
+        /* single word of a 64-bit integer pair, as in load() above:
+           save_reg_upstack stores a spilled pair member this way and
+           issues the second word's store itself */
+        return 0x36; /* i32.store */
     }
     tcc_error("wasm: unsupported store size %d", size);
     return 0;
@@ -1085,7 +1233,12 @@ ST_FUNC void load(int r, SValue *sv)
             we(0x44); for (i = 0; i < 8; i++) we((u >> (8 * i)) & 0xff);
             break; }
         case VT_LLONG:
-            tcc_error("wasm: 64-bit constant load unsupported in skeleton");
+            /* gv()'s register-pair protocol loads a 64-bit constant
+               as two 32-bit words: this call loads the low word of
+               c.i; gv then pushes the high word as a separate int
+               constant and loads it into the second register */
+            we_i32_const((int32_t)sv->c.i);
+            break;
         default:
             we_i32_const((int32_t)sv->c.i);
             break;
@@ -1105,10 +1258,31 @@ ST_FUNC void load(int r, SValue *sv)
         we(0x28); we(0x02); we(0x00);
         we_local_set(wloc_reg(r));
         return;
-    case VT_CMP: case VT_JMP: case VT_JMPI:
-        tcc_error("wasm: load of a comparison/jump value is not implemented "
-                  "in the skeleton (control flow subset)");
+    case VT_CMP:
+        /* materialise the comparison described by cmp_op/cmp_r */
+        if (sv->cmp_op < 2)
+            we_i32_const(sv->cmp_op); /* folded constant test */
+        else
+            wasm_cmp_emit(sv);
+        we_local_set(wloc_reg(r));
+        return;
     default:
+        if ((v & ~1) == VT_JMP) {
+            /* a conditional value with pending jump chains (from
+               &&/||): fall through with one truth value, resolve the
+               chain to the other assignment, hop over it (the same
+               shape as riscv64-gen.c's load of VT_JMP) */
+            int t = v & 1, hop;
+            we_i32_const(t);
+            we_local_set(wloc_reg(r));
+            hop = wasm_jmp_record(ind, 0, 0, -1);
+            wasm_jmp_placeholders();
+            gsym(sv->c.i); /* chain lands on the second assignment */
+            we_i32_const(t ^ 1);
+            we_local_set(wloc_reg(r));
+            wjmps[hop].target = ind;
+            return;
+        }
         if (v < VT_CONST) { /* register to register */
             if (r != v) { we_local_get(wloc_reg(v)); we_local_set(wloc_reg(r)); }
             return;
@@ -1151,63 +1325,87 @@ ST_FUNC void store(int r, SValue *sv)
 }
 
 /* ------------------------------------------------------------------ */
-/* jumps / labels: return-to-epilog only in this skeleton              */
+/* jumps / labels: basic-block dispatch (see the WJmp comment above)   */
 
 /* Jump chains follow the generic tccgen protocol (tccgen.c:173):
    gsym(t) calls gsym_addr(t, ind); the chain is threaded through
    32-bit link words stored in the *text section mirror* at the
-   offsets returned by gjmp.  The wasm body itself needs no patching:
-   the br emitted by gjmp already targets the function-exit block.
-   gsym_addr therefore only walks the chain.  (gsym itself is
-   provided by tccgen.c and must not be redefined here.) */
+   offsets returned by gjmp/gjmp_cond.  gsym_addr walks the chain
+   and records the resolution target on every site in it; the
+   epilog's dispatch assembly turns each site into a real branch.
+   (gsym itself is provided by tccgen.c and must not be redefined
+   here.) */
 ST_FUNC void gsym_addr(int t, int a)
 {
-    (void)a;
     while (t) {
         unsigned char *ptr = cur_text_section->data + t;
         uint32_t next = read32le(ptr);
+        int i;
+        for (i = 0; i < nb_wjmps; i++)
+            if (wjmps[i].node == t) { wjmps[i].target = a; break; }
         t = (int)next;
     }
 }
 
 ST_FUNC int gjmp(int t)
 {
-    /* Unconditional jump.  In the skeleton the only unconditional
-       jumps tccgen emits for the supported subset are the return
-       chain (rsym): emit br to the function-exit block (depth 0,
-       the outermost block emitted by gfunc_epilog assembly).
-       The emitted site is 5 bytes (br + padded nops); the chain
-       link word overwrites mirror bytes at site+1..site+4, which
-       exist only in the mirror, not in the wasm body semantics -
-       the wasm body keeps the br and three nops. */
+    /* Unconditional jump: a 5-byte placeholder site, replaced at
+       epilog by "pc = target block; br $dispatch".  The chain link
+       word overwrites mirror bytes at site+1..site+4, which exist
+       only in the mirror; the body keeps the placeholder bytes. */
     int site;
     if (nocode_wanted) return t;
     site = ind;
-    we(0x0c); we(0x00);             /* br 0 */
-    we(0x01); we(0x01); we(0x01);   /* wasm nop x3 */
+    wasm_jmp_record(site, site + 1, 0, -1);
+    wasm_jmp_placeholders();
     write32le(cur_text_section->data + site + 1, (uint32_t)t);
     return site + 1;
 }
 
 ST_FUNC void gjmp_addr(int a)
 {
-    (void)a;
-    tcc_error("wasm: gjmp_addr (absolute jump) not implemented in skeleton");
+    /* Jump to an already-emitted address (loop back-edges, defined
+       labels): the target is known here, no chain is involved. */
+    int site = ind;
+    wasm_jmp_record(site, 0, 0, a);
+    wasm_jmp_placeholders();
 }
 
 ST_FUNC int gjmp_cond(int op, int t)
 {
-    (void)op; (void)t;
-    tcc_error("wasm: conditional branches not implemented in skeleton "
-              "(basic-block dispatch framework only, see wasm-gen.c gfunc_epilog)");
-    return 0;
+    /* Conditional jump on the VT_CMP value in vtop: emit the
+       comparison, and inside an `if` a placeholder site that the
+       epilog turns into the dispatch branch taken when the
+       comparison (op, already inverted by the caller as needed)
+       is true.  False falls through to the next stream position. */
+    int site, a, b;
+    /* the operands come from vtop's cmp_r, the condition from the
+       'op' argument (gvtst passes cmp_op ^ inv) */
+    wasm_cmp_operands(vtop, &a, &b);
+    wasm_cmp_operand(a);
+    wasm_cmp_operand(b);
+    we(wasm_icmp_opc(op));
+    we(0x04); we(0x40); /* if, void block type */
+    site = ind;
+    wasm_jmp_record(site, site + 1, 1, -1);
+    wasm_jmp_placeholders();
+    write32le(cur_text_section->data + site + 1, (uint32_t)t);
+    we(0x0b); /* end if */
+    return site + 1;
 }
 
 ST_FUNC int gjmp_append(int n, int t)
 {
-    (void)n; (void)t;
-    tcc_error("wasm: gjmp_append not implemented in skeleton");
-    return 0;
+    /* insert jump list n into t (chain merge through mirror words,
+       same shape as riscv64-gen.c) */
+    if (n) {
+        uint32_t n1 = n, n2;
+        while ((n2 = read32le(cur_text_section->data + n1)))
+            n1 = n2;
+        write32le(cur_text_section->data + n1, t);
+        t = n;
+    }
+    return t;
 }
 
 ST_FUNC void ggoto(void)
@@ -1234,11 +1432,86 @@ ST_FUNC void gen_opi(int op)
        gv both operands, pop two, push one result in a fresh reg.
        A constant operand is simply loaded into a register by gv -
        wasm has no separate immediate form to exploit here.
-       Comparisons are materialised to a 0/1 register value instead
-       of riscv's lazy VT_CMP; the skeleton never creates VT_CMP. */
+       Comparisons follow the generic protocol: the operands stay
+       in their registers, the result is a VT_CMP SValue describing
+       them (materialised by load(), branched on by gjmp_cond). */
     gv2(RC_INT, RC_INT);
     a = vtop[-1].r & VT_VALMASK;
     b = vtop[0].r & VT_VALMASK;
+    if (op == TOK_ADDC1 || op == TOK_ADDC2 ||
+        op == TOK_SUBC1 || op == TOK_SUBC2) {
+        /* the frontend's long long add/sub (gen_opl) works on word
+           pairs through a carry: C1 produces it, C2 consumes it.
+           Wasm has no flags register, so the carry lives in its own
+           local between the two calls (nothing else is emitted in
+           between). */
+        int with_carry = op == TOK_ADDC2 || op == TOK_SUBC2;
+        int is_sub = op == TOK_SUBC1 || op == TOK_SUBC2;
+        vtop -= 2;
+        d = get_reg(RC_INT);
+        vtop++;
+        vtop[0].r = d;
+        if (!with_carry) {
+            /* the carry out depends only on the operands; compute
+               it before the result store, which may overwrite an
+               operand register (d can be a's or b's register):
+               add: a + b overflows iff a > ~b; sub: borrow iff a < b */
+            we_local_get(wloc_reg(a));
+            if (is_sub) {
+                we_local_get(wloc_reg(b));
+                we(0x49); /* i32.lt_u */
+            } else {
+                we_local_get(wloc_reg(b));
+                we_i32_const(-1);
+                we(0x73); /* i32.xor: ~b */
+                we(0x4b); /* i32.gt_u */
+            }
+            we_local_set(wloc_carry());
+        }
+        we_local_get(wloc_reg(a));
+        we_local_get(wloc_reg(b));
+        we(is_sub ? 0x6b : 0x6a); /* i32.sub / i32.add */
+        if (with_carry) {
+            we_local_get(wloc_carry());
+            we(is_sub ? 0x6b : 0x6a);
+        }
+        we_local_set(wloc_reg(d));
+        return;
+    }
+    if (op == TOK_UMULL) {
+        /* unsigned 32x32 -> 64 multiply (gen_opl): result pair in
+           r (low) / r2 (high), computed through the i64 scratch */
+        int d2;
+        vtop -= 2;
+        d = get_reg(RC_INT);
+        vtop++;
+        vtop[0].r = d;
+        d2 = get_reg(RC_INT);
+        vtop[0].r2 = d2;
+        we_local_get(wloc_reg(a));
+        we(0xad); /* i64.extend_i32_u */
+        we_local_get(wloc_reg(b));
+        we(0xad); /* i64.extend_i32_u */
+        we(0x7e); /* i64.mul */
+        we_local_set(wloc_i64());
+        we_local_get(wloc_i64());
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(d));
+        we_local_get(wloc_i64());
+        we_i64_const(32);
+        we(0x88); /* i64.shr_u */
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(d2));
+        return;
+    }
+    if (op >= TOK_ULT && op <= TOK_GT) {
+        vtop -= 2;
+        vtop++;
+        vset_VT_CMP(op);
+        vtop->cmp_r = a | b << 8;
+        amb_cmp_a = a; amb_cmp_b = b; amb_cmp_valid = 1;
+        return;
+    }
     vtop -= 2;
     d = get_reg(RC_INT);
     vtop++;
@@ -1258,16 +1531,6 @@ ST_FUNC void gen_opi(int op)
     case TOK_SHL: opc = 0x74; break; /* shl */
     case TOK_SAR: opc = 0x75; break; /* shr_s */
     case TOK_SHR: opc = 0x76; break; /* shr_u */
-    case TOK_EQ: opc = 0x46; break;
-    case TOK_NE: opc = 0x47; break;
-    case TOK_LT: opc = 0x48; break;
-    case TOK_ULT: opc = 0x49; break;
-    case TOK_GT: opc = 0x4a; break;
-    case TOK_UGT: opc = 0x4b; break;
-    case TOK_LE: opc = 0x4c; break;
-    case TOK_ULE: opc = 0x4d; break;
-    case TOK_GE: opc = 0x4e; break;
-    case TOK_UGE: opc = 0x4f; break;
     default:
         tcc_error("wasm: gen_opi operator 0x%x not implemented in skeleton", op);
     }
@@ -1279,21 +1542,201 @@ ST_FUNC void gen_opi(int op)
 
 ST_FUNC void gen_opf(int op)
 {
+    int a, b, d, bt, opc;
     if ((vtop[-1].type.t & VT_VECTOR) || (vtop[0].type.t & VT_VECTOR)) {
         gen_opv(op);
         return;
     }
-    (void)op;
-    tcc_error("wasm: floating-point operators not implemented in skeleton");
+    /* both operands were cast to the common type by gen_op, so
+       vtop's type is the operation's float type; float registers
+       hold f64, with float (f32) values promoted into them */
+    bt = vtop[0].type.t & VT_BTYPE;
+    gv2(RC_FLOAT, RC_FLOAT);
+    a = vtop[-1].r & VT_VALMASK;
+    b = vtop[0].r & VT_VALMASK;
+    if (op >= TOK_ULT && op <= TOK_GT) {
+        /* float comparison: compute the 0/1 result into an int
+           register, then describe it as VT_CMP against zero (the
+           riscv64-gen.c shape), so load()/gjmp_cond only ever see
+           integer comparisons */
+        switch (op) {
+        case TOK_EQ: opc = 0x61; break; /* f64.eq */
+        case TOK_NE: opc = 0x62; break; /* f64.ne */
+        case TOK_LT: opc = 0x63; break; /* f64.lt */
+        case TOK_GT: opc = 0x64; break; /* f64.gt */
+        case TOK_LE: opc = 0x65; break; /* f64.le */
+        case TOK_GE: opc = 0x66; break; /* f64.ge */
+        default:
+            tcc_error("wasm: float comparison operator 0x%x not implemented", op);
+            return;
+        }
+        vtop -= 2;
+        d = get_reg(RC_INT);
+        vtop++;
+        we_local_get(wloc_reg(a));
+        we_local_get(wloc_reg(b));
+        we(opc);
+        we_local_set(wloc_reg(d));
+        vset_VT_CMP(TOK_NE);
+        vtop->cmp_r = d | WCMP_ZERO << 8;
+        return;
+    }
+    switch (op) {
+    case '+': opc = bt == VT_FLOAT ? 0x92 : 0xa0; break; /* f32/f64.add */
+    case '-': opc = bt == VT_FLOAT ? 0x93 : 0xa1; break; /* f32/f64.sub */
+    case '*': opc = bt == VT_FLOAT ? 0x94 : 0xa2; break; /* f32/f64.mul */
+    case '/': case TOK_PDIV:
+              opc = bt == VT_FLOAT ? 0x95 : 0xa3; break; /* f32/f64.div */
+    default:
+        tcc_error("wasm: floating-point operator 0x%x not implemented", op);
+        return;
+    }
+    vtop -= 2;
+    d = get_reg(RC_FLOAT);
+    vtop++;
+    vtop[0].r = d;
+    we_local_get(wloc_reg(a));
+    if (bt == VT_FLOAT) we(0xb6); /* f32.demote_f64 */
+    we_local_get(wloc_reg(b));
+    if (bt == VT_FLOAT) we(0xb6);
+    we(opc);
+    if (bt == VT_FLOAT) we(0xbb); /* f64.promote_f32 */
+    we_local_set(wloc_reg(d));
 }
 
-ST_FUNC void gen_cvt_itof(int t) { (void)t; tcc_error("wasm: gen_cvt_itof not implemented in skeleton"); }
-ST_FUNC void gen_cvt_ftoi(int t) { (void)t; tcc_error("wasm: gen_cvt_ftoi not implemented in skeleton"); }
-ST_FUNC void gen_cvt_ftof(int t) { (void)t; tcc_error("wasm: gen_cvt_ftof not implemented in skeleton"); }
+/* combine the register pair in vtop (r = low word, r2 = high word)
+   into the i64 scratch local: the high word's bits land in bits
+   32..63 either way, so one shape serves signed and unsigned */
+static void wasm_pair_to_i64(void)
+{
+    we_local_get(wloc_reg(vtop->r2 & VT_VALMASK));
+    we(0xac); /* i64.extend_i32_s */
+    we_i64_const(32);
+    we(0x86); /* i64.shl */
+    we_local_get(wloc_reg(vtop->r & VT_VALMASK));
+    we(0xad); /* i64.extend_i32_u */
+    we(0x84); /* i64.or */
+    we_local_set(wloc_i64());
+}
+
+ST_FUNC void gen_cvt_itof(int t)
+{
+    int u = vtop->type.t & VT_UNSIGNED;
+    int l = (vtop->type.t & VT_BTYPE) == VT_LLONG;
+    int rr, dr;
+    if (l) {
+        /* 64-bit source: a register pair; combine it in the i64
+           scratch local and convert from there */
+        gv(RC_INT);
+        wasm_pair_to_i64();
+        vtop--;
+        dr = get_reg(RC_FLOAT);
+        vtop++;
+        vtop->r = dr;
+        we_local_get(wloc_i64());
+        if (t == VT_FLOAT) {
+            we(u ? 0xb5 : 0xb4); /* f32.convert_i64_u/s */
+            we(0xbb); /* f64.promote_f32: float registers hold f64 */
+        } else
+            we(u ? 0xba : 0xb9); /* f64.convert_i64_u/s */
+        we_local_set(wloc_reg(dr));
+        return;
+    }
+    rr = gv(RC_INT);
+    vtop--;
+    dr = get_reg(RC_FLOAT);
+    vtop++;
+    vtop->r = dr;
+    we_local_get(wloc_reg(rr));
+    if (t == VT_FLOAT) {
+        we(u ? 0xb3 : 0xb2); /* f32.convert_i32_u/s */
+        we(0xbb); /* f64.promote_f32: float registers hold f64 */
+    } else
+        we(u ? 0xb8 : 0xb7); /* f64.convert_i32_u/s */
+    we_local_set(wloc_reg(dr));
+}
+
+ST_FUNC void gen_cvt_ftoi(int t)
+{
+    int l = (t & VT_BTYPE) == VT_LLONG;
+    int u = t & VT_UNSIGNED;
+    int rr, dr;
+    rr = gv(RC_FLOAT);
+    if (l) {
+        /* 64-bit result: truncate into the i64 scratch local, then
+           split it into the register pair.  trunc_sat (not the
+           trapping trunc) keeps out-of-range conversions defined:
+           they saturate, the same choice the SSE headers document. */
+        int r2;
+        we_local_get(wloc_reg(rr));
+        we(0xfc); we_uleb(u ? 7 : 6); /* i64.trunc_sat_f64_u/s */
+        we_local_set(wloc_i64());
+        vtop--;
+        dr = get_reg(RC_INT);
+        vtop++;
+        vtop->r = dr; /* on the stack before r2 is allocated, so
+                         get_reg cannot hand out dr twice */
+        r2 = get_reg(RC_INT);
+        vtop->r2 = r2;
+        we_local_get(wloc_i64());
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(dr));
+        we_local_get(wloc_i64());
+        we_i64_const(32);
+        we(u ? 0x88 : 0x87); /* i64.shr_u/s */
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(r2));
+        return;
+    }
+    vtop--;
+    dr = get_reg(RC_INT);
+    vtop++;
+    vtop->r = dr;
+    we_local_get(wloc_reg(rr));
+    we(0xfc); we_uleb(u ? 3 : 2); /* i32.trunc_sat_f64_u/s */
+    we_local_set(wloc_reg(dr));
+}
+
+ST_FUNC void gen_cvt_ftof(int t)
+{
+    int st = vtop->type.t & VT_BTYPE;
+    int dt = t & VT_BTYPE;
+    int rs, rd;
+    if (st == dt)
+        return;
+    rs = gv(RC_FLOAT);
+    if (dt == VT_DOUBLE) {
+        /* the register already holds the exact value as an f64
+           (float values are kept promoted) */
+        vtop->r = rs;
+        return;
+    }
+    /* double -> float: round to f32 precision, keep in f64 form */
+    vtop--;
+    rd = get_reg(RC_FLOAT);
+    vtop++;
+    vtop->r = rd;
+    we_local_get(wloc_reg(rs));
+    we(0xb6); /* f32.demote_f64 */
+    we(0xbb); /* f64.promote_f32 */
+    we_local_set(wloc_reg(rd));
+}
 
 ST_FUNC void gen_cvt_sxtw(void)
 {
-    tcc_error("wasm: gen_cvt_sxtw not implemented in skeleton (no 64-bit pairs)");
+    /* sign-extend vtop's 32-bit register into a register pair
+       (r2 = sign bits).  On this 32-bit target the frontend's
+       int -> long long path builds the pair itself (gv_dup + SAR),
+       so this hook is not reached; it is defined in pair terms for
+       completeness. */
+    int r, r2;
+    r = gv(RC_INT);
+    r2 = get_reg(RC_INT);
+    we_local_get(wloc_reg(r));
+    we_i32_const(31);
+    we(0x75); /* i32.shr_s */
+    we_local_set(wloc_reg(r2));
+    vtop->r2 = r2;
 }
 
 /* sign/zero extend the value in vtop's register to type t (real impl:
@@ -1346,6 +1789,18 @@ ST_FUNC void gfunc_call(int nb_args)
         tcc_error("wasm: indirect calls (function pointers) not implemented "
                   "in skeleton; call_indirect table is emitted by wasm-link "
                   "but gen does not emit it yet");
+    if ((func_sv->sym->type.t & VT_INLINE) && !func_sv->sym->c) {
+        /* A static inline callee has no out-of-line body unless it is
+           marked used.  Native backends mark it in greloca() when
+           they emit the call relocation, and gen_inline_functions()
+           then emits the body at the end of the translation unit.
+           This backend records calls by name instead of emitting
+           relocations, so mark the callee here; without this, calls
+           to header-defined static inline functions (the SIMD
+           headers are all static inline) would stay unresolved and
+           turn into imports. */
+        put_extern_sym(func_sv->sym, NULL, 0, 0);
+    }
     if (func_sv->type.ref && func_sv->type.ref->f.func_type == FUNC_OLD) {
         /* Undeclared (K&R) callee: the frontend's helper functions
            (memset, memcpy, ... reached through vpush_helper_func)
@@ -1411,6 +1866,30 @@ ST_FUNC void gfunc_call(int nb_args)
         if (sv->type.t & VT_VECTOR) {
             int s = wasm_vec_ensure(sv, NULL);
             we_local_get(wloc_vec(s));
+        } else if ((sv->type.t & VT_BTYPE) == VT_LLONG) {
+            /* the wasm signature takes one i64 operand; TCC holds
+               the value as a constant or a register pair - combine
+               it on the operand stack, low word first */
+            if ((sv->r & (VT_VALMASK | VT_LVAL)) == VT_CONST) {
+                we_i64_const(sv->c.i);
+            } else if (sv->r & VT_LVAL) {
+                wasm_push_addr(sv);
+                we(0x28); we(0x00); we(0x00); /* i32.load (low word) */
+                we(0xad); /* i64.extend_i32_u */
+                wasm_push_addr(sv);
+                we_i32_const(4); we(0x6a); /* i32.add */
+                we(0x28); we(0x00); we(0x00); /* i32.load (high word) */
+                we(0xac); /* i64.extend_i32_s */
+                we_i64_const(32); we(0x86); /* i64.shl */
+                we(0x84); /* i64.or */
+            } else {
+                we_local_get(wloc_reg(sv->r & VT_VALMASK));
+                we(0xad); /* i64.extend_i32_u */
+                we_local_get(wloc_reg(sv->r2 & VT_VALMASK));
+                we(0xac); /* i64.extend_i32_s */
+                we_i64_const(32); we(0x86); /* i64.shl */
+                we(0x84); /* i64.or */
+            }
         } else if ((sv->type.t & VT_BTYPE) == VT_FLOAT ||
                    (sv->type.t & VT_BTYPE) == VT_DOUBLE ||
                    (sv->type.t & VT_BTYPE) == VT_LDOUBLE) {
@@ -1438,7 +1917,23 @@ ST_FUNC void gfunc_call(int nb_args)
     vtop -= nb_args + 1;
     if (callee->rettype == WT_V128)
         we_local_set(wloc_vec(0)); /* vector return value: slot 0 */
-    else if (callee->rettype == WT_F32 || callee->rettype == WT_F64)
+    else if (callee->rettype == WT_I64) {
+        /* split the i64 result into the REG_IRET/REG_IRE2 pair */
+        we_local_set(wloc_i64());
+        we_local_get(wloc_i64());
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(REG_IRET));
+        we_local_get(wloc_i64());
+        we_i64_const(32);
+        we(0x87); /* i64.shr_s */
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(REG_IRE2));
+    }
+    else if (callee->rettype == WT_F32) {
+        we(0xbb); /* f64.promote_f32: float registers hold f64 */
+        we_local_set(wloc_reg(REG_FRET));
+    }
+    else if (callee->rettype == WT_F64)
         we_local_set(wloc_reg(REG_FRET));
     else if (callee->rettype != -1)
         we_local_set(wloc_reg(REG_IRET));
@@ -1468,6 +1963,9 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     wcur_func->is_import = 0;
     wb_init(&wcur);
     wcur_started = 1;
+    wfunc_ind0 = ind; /* stream offset 0 of this function's body */
+    nb_wjmps = 0;     /* jump records are per-function */
+    amb_cmp_valid = 0;
     loc = 0;
     /* define parameters: each gets a frame slot at a negative offset
        from $fp; the incoming wasm argument is stored there */
@@ -1498,6 +1996,9 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
                 we_v128_op(91); /* v128.store64_lane */
                 we(0x00); we(0x00); we(0x00); /* memarg, lane 0 */
             }
+        } else if (size == 8 && (sym->type.t & VT_BTYPE) == VT_LLONG) {
+            /* the incoming wasm argument is the whole i64 value */
+            we(0x37); we(0x00); we(0x00); /* i64.store */
         } else {
             int isf = 0; int op = wasm_store_op(&sym->type, &isf);
             we(op); we(0x00); we(0x00);
@@ -1506,10 +2007,19 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     (void)param_addr;
 }
 
+/* append a "pc = block; br $dispatch" transfer to 'final'; 'depth'
+   is the br depth of the dispatch loop at the emission point */
+static void wb_transfer(WBuf *final, int block, int depth, int pc)
+{
+    wb_putc(final, 0x41); wb_sleb5(final, block);   /* i32.const */
+    wb_putc(final, 0x21); wb_uleb(final, pc);       /* local.set $pc */
+    wb_putc(final, 0x0c); wb_uleb(final, depth);    /* br */
+}
+
 ST_FUNC void gfunc_epilog(void)
 {
     WBuf final, pro;
-    int frame, shift, i;
+    int frame, i;
     if (!wcur_started) return;
     frame = (-loc + 15) & -16;
     wfunc_frame_size = frame;
@@ -1518,50 +2028,144 @@ ST_FUNC void gfunc_epilog(void)
        global.get $sp ; i32.const frame ; i32.sub ; global.set $sp
        local.get scratch0 ; local.set $fp */
     wb_init(&pro);
+    wb_putc(&pro, 0x23); wb_uleb(&pro, 0);                 /* global.get $sp */
+    wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_scratch(0));   /* local.set save */
+    wb_putc(&pro, 0x23); wb_uleb(&pro, 0);
+    wb_putc(&pro, 0x41); wb_sleb5(&pro, frame);            /* i32.const frame */
+    wb_putc(&pro, 0x6b);                                   /* i32.sub */
+    wb_putc(&pro, 0x24); wb_uleb(&pro, 0);                 /* global.set $sp */
+    wb_putc(&pro, 0x20); wb_uleb(&pro, wloc_scratch(0));   /* local.get save */
+    wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_fp());         /* local.set $fp */
+
+    /* ---- basic-block dispatch assembly -----------------------------
+       Blocks start at offset 0, at the end of the stream (an empty
+       exit block) and at every jump target.  Layout:
+         block $exit
+           prolog ; pc = 0
+           loop $dispatch
+             block $case_{N-1} ... block $case_0
+               local.get $pc ; br_table case_0..case_{N-1}, default $exit
+             end $case_0   ; block 0 code ; transfer to block 1
+             end $case_1   ; block 1 code ; transfer to block 2
+             ...
+             end $case_{N-1} ; block N-1 code ; transfer to block N
+           end loop
+         end $exit
+         restore $sp ; return value ; end function
+       Branching to $case_i lands on block i's code; pc == N (one
+       past the last block) takes the br_table default out of $exit.
+       A jump site inside block i branches to the loop at depth
+       N-1-i (a gjmp_cond site, nested in its `if`, at depth N-i);
+       fixup operands are copied verbatim and their positions are
+       rewritten to the assembled body as they are placed. */
     {
-        WBuf save = wcur; /* emit into pro via the we() machinery is not
-                             possible (we writes to wcur); build manually */
-        wcur = pro;
-        we_global_get(0);
-        we_local_set(wloc_scratch(0));
-        we_global_get(0);
-        we_i32_const(frame);
-        we(0x6b); /* i32.sub */
-        we_global_set(0);
-        we_local_get(wloc_scratch(0));
-        we_local_set(wloc_fp());
-        pro = wcur;
-        wcur = save;
-    }
-    /* final body = block ; prolog ; body ; end-block ;
-       restore $sp = $fp ; [local.get IRET] ; end */
-    wb_init(&final);
-    wb_putc(&final, 0x02); wb_putc(&final, 0x40); /* block, void */
-    wb_write(&final, pro.data, pro.len);
-    shift = final.len;
-    wb_write(&final, wcur.data, wcur.len);
-    wb_putc(&final, 0x0b); /* end block */
-    /* restore stack pointer */
-    {
-        WBuf save = wcur; wcur = final;
-        we_local_get(wloc_fp());
-        we_global_set(0);
-        if (wcur_func->rettype == WT_V128)
-            we_local_get(wloc_vec(0)); /* vector return value: slot 0 */
-        else if (wcur_func->rettype == WT_F32) {
-            we_local_get(wloc_reg(REG_FRET));
-            we(0xb6); /* f32.demote_f64: float registers hold f64 */
+        int stream_len = wcur.len;
+        int *bounds, nb = 0, N, bi, ji = 0, fi = 0, pc = wloc_pc();
+        bounds = tcc_malloc((nb_wjmps + 2) * sizeof(int));
+        bounds[nb++] = 0;
+        for (i = 0; i < nb_wjmps; i++) {
+            int toff;
+            if (wjmps[i].target < 0)
+                tcc_error("wasm: unresolved jump in function '%s'",
+                          wcur_func->name);
+            toff = wjmps[i].target - wfunc_ind0;
+            if (toff < 0 || toff > stream_len ||
+                wjmps[i].off < 0 || wjmps[i].off + 5 > stream_len)
+                tcc_error("wasm: jump outside the body in function '%s'",
+                          wcur_func->name);
+            bounds[nb++] = toff;
         }
-        else if (wcur_func->rettype == WT_F64)
-            we_local_get(wloc_reg(REG_FRET));
-        else if (wcur_func->rettype != -1)
-            we_local_get(wloc_reg(REG_IRET));
-        we(0x0b); /* end function */
-        final = wcur; wcur = save;
+        bounds[nb++] = stream_len;
+        /* sort + unique */
+        for (i = 1; i < nb; i++) {
+            int v = bounds[i], k = i - 1;
+            while (k >= 0 && bounds[k] > v) { bounds[k + 1] = bounds[k]; k--; }
+            bounds[k + 1] = v;
+        }
+        {
+            int w = 1;
+            for (i = 1; i < nb; i++)
+                if (bounds[i] != bounds[w - 1]) bounds[w++] = bounds[i];
+            nb = w;
+        }
+        N = nb; /* every boundary starts a block; the last block is
+                   the empty range at the end of the stream */
+        wb_init(&final);
+        wb_putc(&final, 0x02); wb_putc(&final, 0x40); /* block $exit */
+        wb_write(&final, pro.data, pro.len);
+        wb_putc(&final, 0x41); wb_sleb5(&final, 0);   /* i32.const 0 */
+        wb_putc(&final, 0x21); wb_uleb(&final, pc);   /* local.set $pc */
+        wb_putc(&final, 0x03); wb_putc(&final, 0x40); /* loop $dispatch */
+        for (i = 0; i < N; i++) { wb_putc(&final, 0x02); wb_putc(&final, 0x40); }
+        wb_putc(&final, 0x20); wb_uleb(&final, pc);   /* local.get $pc */
+        wb_putc(&final, 0x0e); wb_uleb(&final, N);    /* br_table */
+        for (i = 0; i < N; i++) wb_uleb(&final, i);   /* pc i -> depth i */
+        wb_uleb(&final, N + 1);                       /* default -> $exit */
+        for (bi = 0; bi < N; bi++) {
+            int bstart = bounds[bi];
+            int bend = bi + 1 < N ? bounds[bi + 1] : stream_len;
+            int cursor = bstart;
+            wb_putc(&final, 0x0b); /* end $case_bi: block bi's code follows */
+            for (;;) {
+                int joff = ji < nb_wjmps && wjmps[ji].off < bend
+                           ? wjmps[ji].off : -1;
+                int foff = fi < wcur_func->nfixs && wcur_func->fixs[fi].pos < bend
+                           ? wcur_func->fixs[fi].pos : -1;
+                if (joff < 0 && foff < 0) break;
+                if (foff >= 0 && (joff < 0 || foff < joff)) {
+                    WFix *x = &wcur_func->fixs[fi];
+                    if (foff + 5 > bend)
+                        tcc_error("wasm: fixup straddles a block boundary "
+                                  "in function '%s'", wcur_func->name);
+                    wb_write(&final, wcur.data + cursor, foff - cursor);
+                    x->pos = final.len; /* assembled position of the operand */
+                    wb_write(&final, wcur.data + foff, 5);
+                    cursor = foff + 5;
+                    fi++;
+                } else {
+                    WJmp *j = &wjmps[ji];
+                    int toff = j->target - wfunc_ind0, tb = 0;
+                    if (joff + 5 > bend)
+                        tcc_error("wasm: jump site straddles a block boundary "
+                                  "in function '%s'", wcur_func->name);
+                    while (bounds[tb] != toff) tb++;
+                    wb_write(&final, wcur.data + cursor, joff - cursor);
+                    wb_transfer(&final, tb, N - 1 - bi + j->cond, pc);
+                    cursor = joff + 5;
+                    ji++;
+                }
+            }
+            wb_write(&final, wcur.data + cursor, bend - cursor);
+            /* fall through to the next block (or out, past the last) */
+            wb_transfer(&final, bi + 1, N - 1 - bi, pc);
+        }
+        wb_putc(&final, 0x0b); /* end loop */
+        wb_putc(&final, 0x0b); /* end $exit */
+        /* restore stack pointer and fetch the return value */
+        wb_putc(&final, 0x20); wb_uleb(&final, wloc_fp());
+        wb_putc(&final, 0x24); wb_uleb(&final, 0);    /* global.set $sp */
+        if (wcur_func->rettype == WT_V128) {
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_vec(0));
+        } else if (wcur_func->rettype == WT_F32) {
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_FRET));
+            wb_putc(&final, 0xb6); /* f32.demote_f64 */
+        } else if (wcur_func->rettype == WT_F64) {
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_FRET));
+        } else if (wcur_func->rettype == WT_I64) {
+            /* combine the REG_IRET/REG_IRE2 pair into the i64 result */
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_IRE2));
+            wb_putc(&final, 0xac); /* i64.extend_i32_s */
+            wb_putc(&final, 0x42); wb_sleb(&final, 32); /* i64.const 32 */
+            wb_putc(&final, 0x86); /* i64.shl */
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_IRET));
+            wb_putc(&final, 0xad); /* i64.extend_i32_u */
+            wb_putc(&final, 0x84); /* i64.or */
+        } else if (wcur_func->rettype != -1) {
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_IRET));
+        }
+        wb_putc(&final, 0x0b); /* end function */
+        tcc_free(bounds);
     }
-    /* adjust this function's fixups by the shift of the body start */
-    for (i = 0; i < wcur_func->nfixs; i++)
-        wcur_func->fixs[i].pos += shift;
     wb_free(&wcur_func->final_body);
     wcur_func->final_body = final;
     wb_free(&pro);

@@ -4,6 +4,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.io.ByteArrayOutputStream;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -37,6 +38,8 @@ public final class TinyCTest {
         testRunCli();
         testDynamicInclude();
         testIoCaptureAndUpcall();
+        testCliWithIo();
+        testCliRunStdioThroughIo();
 
         System.out.println("ALL TESTS PASSED (" + passed + " checks)");
     }
@@ -96,7 +99,7 @@ public final class TinyCTest {
         }
     }
 
-    /** 用例 4：IO——错误通道经 upcall 进 Capturing；写跳板做一次往返调用。 */
+    /** 用例 4：IO——错误通道经 upcall 进 Capturing；写/读跳板各做一次往返调用。 */
     private static void testIoCaptureAndUpcall() throws Throwable {
         TccIO.Capturing cap = TccIO.capturing();
         try (TccSession s = TinyC.newSession()) {
@@ -121,5 +124,184 @@ public final class TinyCTest {
             check(cap2.outText().equals("abc"), "io: write upcall delivered bytes 'abc'");
             check(sink.get() == null, "io: no callback error stored");
         }
+
+        // 读跳板往返：把 upcall stub 当作 C 函数指针经 downcall 调，
+        // readIn 备好的字节写进 C 缓冲区，耗尽后返回 0 (EOF)
+        byte[] feed = "hello".getBytes(StandardCharsets.UTF_8);
+        TccIO feeder = new TccIO() {
+            private int pos;
+
+            @Override
+            public int writeOut(byte[] data) {
+                return data.length;
+            }
+
+            @Override
+            public int writeErr(byte[] data) {
+                return data.length;
+            }
+
+            @Override
+            public int readIn(byte[] buf) {
+                if (pos >= feed.length) {
+                    return 0;
+                }
+                int n = Math.min(buf.length, feed.length - pos);
+                System.arraycopy(feed, pos, buf, 0, n);
+                pos += n;
+                return n;
+            }
+        };
+        AtomicReference<Throwable> sink2 = new AtomicReference<>();
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment stub = TccIoUpcalls.readStub(feeder, arena, sink2);
+            MethodHandle call = TinyC.functionHandle(stub, TccIoUpcalls.READ_DESCRIPTOR);
+            MemorySegment buf = arena.allocate(16);
+            int n = (int) call.invokeExact(MemorySegment.NULL, buf, 16L);
+            check(n == 5, "io: read upcall returned 5 (got " + n + ")");
+            check(buf.getString(0, StandardCharsets.UTF_8).equals("hello"),
+                    "io: read upcall delivered bytes 'hello'");
+            int n2 = (int) call.invokeExact(MemorySegment.NULL, buf, 16L);
+            check(n2 == 0, "io: read upcall EOF returns 0 (got " + n2 + ")");
+            check(sink2.get() == null, "io: no read callback error stored");
+        }
+
+        // 读跳板异常：readIn 抛异常时 stub 向 C 返回 -1、异常存进 sink，不穿 C 边界
+        TccIO throwingRead = new TccIO() {
+            @Override
+            public int writeOut(byte[] data) {
+                return data.length;
+            }
+
+            @Override
+            public int writeErr(byte[] data) {
+                return data.length;
+            }
+
+            @Override
+            public int readIn(byte[] buf) {
+                throw new IllegalStateException("boom-read");
+            }
+        };
+        AtomicReference<Throwable> sink3 = new AtomicReference<>();
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment stub = TccIoUpcalls.readStub(throwingRead, arena, sink3);
+            MethodHandle call = TinyC.functionHandle(stub, TccIoUpcalls.READ_DESCRIPTOR);
+            MemorySegment buf = arena.allocate(8);
+            int n = (int) call.invokeExact(MemorySegment.NULL, buf, 8L);
+            check(n == -1, "io: read upcall exception returns -1 (got " + n + ")");
+            check(sink3.get() instanceof IllegalStateException,
+                    "io: read exception stored in sink");
+        }
+    }
+
+    /**
+     * 用例 5：runCli 带 IO——三通道经 tcc_io_callback 组成 TCCIO 传给
+     * tinyc_main_io：编译器自身输出（--version、-E）经 writeOut 捕获、
+     * 诊断经 writeErr 捕获、writeOut 抛异常时原生调用返回后以
+     * TccException 重抛。readIn 随 TCCIO 一并传给内核，其跳板往返
+     * 见用例 4；-run 目标程序经同一 IO 读 stdin、写 stdout/stderr，
+     * 见用例 6。
+     */
+    private static void testCliWithIo() throws Exception {
+        TccIO.Capturing cap = TccIO.capturing();
+        int rc = TinyC.runCli(cap, "--version");
+        check(rc == 0, "cli-io: --version rc==0 (got " + rc + ")");
+        check(cap.outText().contains("version"),
+                "cli-io: --version output captured by writeOut (got: " + cap.outText().trim() + ")");
+
+        Path dir = Files.createTempDirectory("tinyc-cli-io");
+        Path src = dir.resolve("pp.c");
+        Files.writeString(src, "#define MARKER 1234\nint marker_value = MARKER;\n");
+        TccIO.Capturing capPp = TccIO.capturing();
+        rc = TinyC.runCli(capPp, "-E", src.toString());
+        check(rc == 0, "cli-io: -E rc==0 (got " + rc + ")");
+        check(capPp.outText().contains("marker_value = 1234"),
+                "cli-io: preprocessed output captured by writeOut");
+
+        Path bad = dir.resolve("bad.c");
+        Files.writeString(bad, "int broken( { return 1; }\n");
+        TccIO.Capturing capErr = TccIO.capturing();
+        rc = TinyC.runCli(capErr, "-c", bad.toString(), "-o", dir.resolve("bad.o").toString());
+        check(rc != 0, "cli-io: broken source rc!=0 (got " + rc + ")");
+        check(capErr.errText().contains("error"),
+                "cli-io: diagnostics captured by writeErr (got: " + capErr.errText().trim() + ")");
+
+        TccIO throwingOut = new TccIO() {
+            @Override
+            public int writeOut(byte[] data) {
+                throw new IllegalStateException("boom-out");
+            }
+
+            @Override
+            public int writeErr(byte[] data) {
+                return data.length;
+            }
+
+            @Override
+            public int readIn(byte[] buf) {
+                return 0;
+            }
+        };
+        boolean rethrown = false;
+        try {
+            TinyC.runCli(throwingOut, "--version");
+        } catch (TccException e) {
+            rethrown = e.getCause() instanceof IllegalStateException;
+        }
+        check(rethrown, "cli-io: writeOut exception rethrown as TccException after the native call");
+    }
+
+    /**
+     * 用例 6：runCli 带 IO 跑 -run——目标程序的 stdin 由 readIn 喂入、
+     * stdout 回到 writeOut、stderr 回到 writeErr：程序把 stdin 原样
+     * 回显到 stdout，另向 stderr 写一行标记，退出码原样返回。
+     */
+    private static void testCliRunStdioThroughIo() throws Exception {
+        byte[] feed = "java-stdin-echo\n".getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream outBuf = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBuf = new ByteArrayOutputStream();
+        TccIO io = new TccIO() {
+            private int pos;
+
+            @Override
+            public int writeOut(byte[] data) {
+                outBuf.write(data, 0, data.length);
+                return data.length;
+            }
+
+            @Override
+            public int writeErr(byte[] data) {
+                errBuf.write(data, 0, data.length);
+                return data.length;
+            }
+
+            @Override
+            public int readIn(byte[] buf) {
+                if (pos >= feed.length) {
+                    return 0;
+                }
+                int n = Math.min(buf.length, feed.length - pos);
+                System.arraycopy(feed, pos, buf, 0, n);
+                pos += n;
+                return n;
+            }
+        };
+
+        Path dir = Files.createTempDirectory("tinyc-cli-run-io");
+        Path src = dir.resolve("echo.c");
+        Files.writeString(src, "#include <stdio.h>\n"
+                + "int main(void) { int c;\n"
+                + "  while ((c = getchar()) != EOF) putchar(c);\n"
+                + "  fprintf(stderr, \"run-err\\n\");\n"
+                + "  return 5; }\n");
+        int rc = TinyC.runCli(io, "-run", src.toString());
+        check(rc == 5, "cli-run-io: -run rc==5 (got " + rc + ")");
+        check(new String(outBuf.toByteArray(), StandardCharsets.UTF_8).equals("java-stdin-echo\n"),
+                "cli-run-io: stdin echoed to writeOut (got: "
+                        + new String(outBuf.toByteArray(), StandardCharsets.UTF_8).trim() + ")");
+        check(new String(errBuf.toByteArray(), StandardCharsets.UTF_8).equals("run-err\n"),
+                "cli-run-io: program stderr delivered to writeErr (got: "
+                        + new String(errBuf.toByteArray(), StandardCharsets.UTF_8).trim() + ")");
     }
 }

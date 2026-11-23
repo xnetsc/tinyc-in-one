@@ -1,0 +1,24 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tinyc.consumertest'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.tinyc.consumertest'
+        minSdk 24
+        targetSdk 35
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+}
+
+dependencies {
+    // The package under test: the AAR built by the release pipeline
+    // (packages/android/build.sh), consumed as an opaque artifact.
+    implementation files('../../build/outputs/aar/tinyc-android-release.aar')
+    androidTestImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}

@@ -16,7 +16,7 @@
     "packaging-manifest.json"
   ],
   "optionalDependencies": {
-    "@tinyc/native-x86_64-linux-gnu": "0.1.0"
+    "@xnetx/tinyc-native-x86_64-linux-gnu": "0.1.0"
   },
   "dependencies": {
     "koffi": "^2.9.0"

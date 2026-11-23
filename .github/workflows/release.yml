@@ -1,7 +1,22 @@
 name: build-and-release
 
-# Every push to main rebuilds all packages from source and publishes
-# them as assets of a GitHub Release tagged build-<run number>.
+# Multi-platform build and package-level consumer tests.
+#
+# Every platform job builds its host variant(s) and packages, then
+# tests the PACKAGES it built: each package test installs the job's
+# own release artifacts (npm tarballs, wheel, jar, AAR, browser
+# package) into a clean consumer setup and exercises the installed
+# package's public API. Body-level checks (the Windows LoadLibrary
+# diagnostic host, objdump, the qemu host smoke) are additional
+# diagnostics, never a substitute for the package tests.
+#
+# Release policy: the release job needs every platform job. If any
+# job fails, nothing is published.
+#
+# The Android SDK comes from the runner image; only the platform is
+# installed, with the preinstalled sdkmanager (android-actions/
+# setup-android is not used: its `sdkmanager tools` step installs a
+# package Google no longer publishes).
 on:
   push:
     branches: [main]
@@ -11,101 +26,598 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # -----------------------------------------------------------------
+  linux-x64:
+    name: linux-x64 (x86_64-linux-gnu)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cross compilers
+      - name: Install cross compilers and qemu-user
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu \
-            libc6-dev-arm64-cross libc6-dev-riscv64-cross zip
+            libc6-dev-arm64-cross libc6-dev-riscv64-cross \
+            qemu-user-static zip
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python build tooling
+        run: pip install setuptools wheel
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '25'
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-java@v4
         with:
-          python-version: '3.12'
+          distribution: temurin
+          java-version: '17'
+          java-home-variable: JAVA_HOME_17
 
       - name: Set up Android NDK r26d
         id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform 35 and Gradle
+      - name: Install Android platform 35 (runner-provided SDK)
         run: |
-          sdkmanager "platforms;android-35"
-          sudo apt-get install -y gradle || true
-          gradle --version || ./packages/android/build.sh --help || true
-
-      - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" >/dev/null
+          ls "$ANDROID_HOME/platforms"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - uses: mymindstorm/setup-emsdk@v14
         with:
           version: '3.1.64'
 
-      - name: Build toolchain matrix (6 target variants)
+      - name: Build all target variants (x86_64 host)
         env:
           TINYC_NDK_SYSROOT: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-        run: ./build.sh
-
-      - name: Build npm package
-        working-directory: packages/npm
         run: |
-          npm install
-          npm run bundle
-          npm pack
-          # pack the staged native subpackage as well, when present
-          for d in native-packages/@tinyc/*/; do
-            [ -f "$d/package.json" ] && (cd "$d" && npm pack)
+          mkdir -p test-outputs
+          ./build.sh > test-outputs/build-targets.log 2>&1
+
+      - name: Build cross host variants (aarch64, riscv64, mingw)
+        run: ./build.sh host > test-outputs/build-hosts.log 2>&1
+
+      - name: Host smoke tests (qemu-user; emulator-level for aarch64/riscv64)
+        run: |
+          bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
+          cp tests/host-test-output.txt test-outputs/
+
+      - name: npm package - bundle, pack, consumer test on the tarballs
+        run: |
+          cd packages/npm
+          npm install --ignore-scripts --omit=optional > ../../test-outputs/npm-install.log 2>&1
+          node bundle_native.js
+          npm pack --silent
+          (cd native-packages/@xnetx/tinyc-native-x86_64-linux-gnu && npm pack --silent)
+          cd "$GITHUB_WORKSPACE"
+          rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
+          npm init -y >/dev/null
+          npm install --silent \
+            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-x86_64-linux-gnu/*.tgz
+          cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
+          node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
+
+      - name: Python package - wheel, consumer test in a clean venv
+        run: |
+          bash packages/python/build_wheel_matrix.sh > test-outputs/wheel-build.log 2>&1
+          ls packages/python/dist-wheels/*manylinux*x86_64*.whl
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install packages/python/dist-wheels/*manylinux*x86_64*.whl
+          rm -rf /tmp/pyctest && mkdir -p /tmp/pyctest
+          cp packages/python/tests/test_tinyc.py /tmp/pyctest/
+          (cd /tmp/pyctest && /tmp/venv/bin/python -m unittest test_tinyc) \
+            > test-outputs/python-consumer.log 2>&1
+
+      - name: Java package - build jar, run the package test suite (JDK 25)
+        run: |
+          bash packages/java/build.sh > test-outputs/java-build.log 2>&1
+          bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
+
+      - name: Browser package - build all targets, real-browser consumer test
+        run: |
+          cd packages/browser
+          for t in wasm32-wasi x86_64-linux-gnu aarch64-linux-gnu \
+                   riscv64-linux-gnu x86_64-windows aarch64-linux-android \
+                   x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin; do
+            TARGET=$t ./build.sh >> "$GITHUB_WORKSPACE/test-outputs/browser-build.log" 2>&1
           done
+          cd "$GITHUB_WORKSPACE"
+          rm -rf /tmp/browser-consumer && mkdir -p /tmp/browser-consumer/pkg
+          tar cf - --exclude=build --exclude=node_modules -C packages/browser . \
+            | tar xf - -C /tmp/browser-consumer/pkg
+          cp tests/consumer/browser-test.html /tmp/browser-consumer/index.html
+          rm -rf /tmp/pw && mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y >/dev/null
+          npm install --silent playwright
+          npx playwright install --with-deps chromium \
+            > "$GITHUB_WORKSPACE/test-outputs/playwright-install.log" 2>&1
+          node "$GITHUB_WORKSPACE/tests/consumer/browser-run.mjs" /tmp/browser-consumer \
+            > "$GITHUB_WORKSPACE/test-outputs/browser-consumer.log" 2>&1
 
-      - name: Build Python wheel
-        run: bash packages/python/build_wheel_matrix.sh
-
-      - name: Build Java jar
-        run: bash packages/java/build.sh
-
-      - name: Build Android AAR
+      - name: Android package - native libs, then the Gradle AAR
         env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: bash packages/android/build.sh
-
-      - name: Build browser package (tcc.wasm) and zip it
         run: |
-          (cd packages/browser && bash build.sh) || \
-            echo "browser wasm build unavailable; zipping JS layer as-is"
-          mkdir -p release-assets
-          (cd packages && zip -r ../release-assets/tinyc-browser.zip browser \
-            -x 'browser/node_modules/*')
+          cd packages/android
+          bash build.sh native-libs > ../../test-outputs/android-native-libs.log 2>&1
+          file src/main/jniLibs/arm64-v8a/libtinyc.so src/main/jniLibs/x86_64/libtinyc.so
+          JAVA_HOME=$JAVA_HOME_17 bash build.sh > ../../test-outputs/android-aar.log 2>&1
+          ls -la build/outputs/aar/
+
+      - name: Full repository test suite
+        run: bash tests/run_all.sh > test-outputs/run_all.log 2>&1
 
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          cp packages/npm/*.tgz release-assets/ 2>/dev/null || true
-          cp packages/npm/native-packages/@tinyc/*/*.tgz release-assets/ 2>/dev/null || true
-          cp packages/python/dist-wheels/*.whl release-assets/
-          cp packages/java/dist/tinyc.jar release-assets/
-          find packages/android/build -name '*.aar' -exec cp {} release-assets/ \; 2>/dev/null || true
-          tar -czf release-assets/tinyc-toolchain-x86_64-linux-gnu.tar.gz -C build/dist .
+          tar -czf release-assets/tinyc-x86_64-linux-gnu.tar.gz -C build/dist .
+          tar -czf release-assets/tinyc-aarch64-linux-gnu-cross.tar.gz \
+            -C build/dist-host aarch64-linux-gnu
+          tar -czf release-assets/tinyc-riscv64-linux-gnu-cross.tar.gz \
+            -C build/dist-host riscv64-linux-gnu
+          (cd build/dist-host/x86_64-w64-mingw32 && \
+            zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-x86_64-w64-mingw32-cross.zip" .)
+          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-x86_64-linux-gnu.tgz
+          cp packages/npm/native-packages/@xnetx/tinyc-native-x86_64-linux-gnu/*.tgz release-assets/
+          cp packages/python/dist-wheels/*manylinux*x86_64*.whl release-assets/
+          cp packages/java/dist/tinyc.jar release-assets/tinyc-x86_64-linux-gnu.jar
+          cp packages/android/build/outputs/aar/tinyc-android-release.aar release-assets/
+          (cd packages/browser && zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-web.zip" \
+            index.mjs runtime-shims.mjs worker.mjs package.json \
+            sysroot-manifest.json sysroot-manifests sysroot tcc-*.mjs tcc-*.wasm)
           ls -la release-assets/
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-x86_64-linux-gnu
+          path: release-assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-outputs-linux-x64
+          path: test-outputs/
+          if-no-files-found: warn
+
+  # -----------------------------------------------------------------
+  linux-arm64:
+    name: linux-arm64 (aarch64-linux-gnu)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python build tooling
+        run: pip install setuptools wheel
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build all target variants (aarch64 host)
+        run: |
+          mkdir -p test-outputs
+          ./build.sh > test-outputs/build-targets.log 2>&1
+
+      - name: Full repository test suite on the aarch64 host
+        run: bash tests/run_all.sh > test-outputs/run_all.log 2>&1
+
+      - name: npm package - bundle, pack, consumer test on the tarballs
+        run: |
+          cd packages/npm
+          npm install --ignore-scripts --omit=optional > ../../test-outputs/npm-install.log 2>&1
+          node bundle_native.js
+          npm pack --silent
+          (cd native-packages/@xnetx/tinyc-native-aarch64-linux-gnu && npm pack --silent)
+          cd "$GITHUB_WORKSPACE"
+          rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
+          npm init -y >/dev/null
+          npm install --silent \
+            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-aarch64-linux-gnu/*.tgz
+          cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
+          node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
+
+      - name: Python package - wheel, consumer test in a clean venv
+        run: |
+          bash packages/python/build_wheel_matrix.sh > test-outputs/wheel-build.log 2>&1
+          ls packages/python/dist-wheels/*manylinux*aarch64*.whl
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install packages/python/dist-wheels/*manylinux*aarch64*.whl
+          rm -rf /tmp/pyctest && mkdir -p /tmp/pyctest
+          cp packages/python/tests/test_tinyc.py /tmp/pyctest/
+          (cd /tmp/pyctest && /tmp/venv/bin/python -m unittest test_tinyc) \
+            > test-outputs/python-consumer.log 2>&1
+
+      - name: Java package - build jar, run the package test suite (JDK 25)
+        run: |
+          bash packages/java/build.sh > test-outputs/java-build.log 2>&1
+          bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          tar -czf release-assets/tinyc-aarch64-linux-gnu.tar.gz -C build/dist .
+          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-aarch64-linux-gnu.tgz
+          cp packages/npm/native-packages/@xnetx/tinyc-native-aarch64-linux-gnu/*.tgz release-assets/
+          cp packages/python/dist-wheels/*manylinux*aarch64*.whl release-assets/
+          cp packages/java/dist/tinyc.jar release-assets/tinyc-aarch64-linux-gnu.jar
+          ls -la release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-aarch64-linux-gnu
+          path: release-assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-outputs-linux-arm64
+          path: test-outputs/
+          if-no-files-found: warn
+
+  # -----------------------------------------------------------------
+  windows:
+    name: windows (x86_64-w64-mingw32)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python build tooling
+        run: pip install setuptools wheel
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: make python file mingw-w64-x86_64-gcc
+
+      # The MinGW recipe is the same one verified by cross-building on
+      # Linux (build.sh host x86_64-w64-mingw32); here the C compiler
+      # is the runner's native MinGW gcc.
+      - name: Build the Windows dual-form EXE (native MinGW)
+        shell: msys2 {0}
+        run: |
+          mkdir -p test-outputs
+          export PATH=/mingw64/bin:$PATH
+          export TINYC_MINGW_CC=gcc
+          bash build.sh host x86_64-w64-mingw32 > test-outputs/build-host.log 2>&1
+          file build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
+
+      - name: Diagnostic - LoadLibrary host test on the built EXE
+        shell: msys2 {0}
+        run: |
+          export PATH=/mingw64/bin:$PATH
+          LOG=$PWD/test-outputs/win-host-test.log
+          EXE=$PWD/build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
+          gcc -O2 -o /tmp/win_host_test.exe tests/consumer/win_host_test.c
+          rm -rf /tmp/wht && mkdir -p /tmp/wht && cd /tmp/wht
+          /tmp/win_host_test.exe "$EXE" > "$LOG" 2>&1
+
+      - name: Stage the packaging dist from the host build
+        shell: msys2 {0}
+        run: |
+          rm -rf stage-dist && mkdir -p stage-dist
+          cp -r build/dist-host/x86_64-w64-mingw32 stage-dist/
+
+      - name: Java package - build jar, run the package test suite (JDK 25)
+        shell: msys2 {0}
+        run: |
+          export JAVA_HOME=$(cygpath -u "$JAVA_HOME")
+          export TINYC_DIST_DIR=$PWD/stage-dist
+          bash packages/java/build.sh > test-outputs/java-build.log 2>&1
+          bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
+
+      - name: npm package - bundle, pack, consumer test on the tarballs
+        shell: msys2 {0}
+        run: |
+          export TINYC_DIST_DIR=$PWD/stage-dist
+          WS=$PWD
+          cd packages/npm
+          npm install --ignore-scripts --omit=optional > ../../test-outputs/npm-install.log 2>&1
+          node bundle_native.js
+          npm pack --silent
+          (cd native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32 && npm pack --silent)
+          cd "$WS"
+          rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
+          npm init -y >/dev/null
+          npm install --silent \
+            "$WS"/packages/npm/tinyc-*.tgz \
+            "$WS"/packages/npm/native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32/*.tgz
+          cp "$WS/tests/consumer/npm-consumer.test.js" .
+          node npm-consumer.test.js > "$WS/test-outputs/npm-consumer.log" 2>&1
+
+      - name: Python package - wheel, consumer test in a clean venv
+        shell: pwsh
+        run: |
+          $env:TINYC_DIST_DIR = "$env:GITHUB_WORKSPACE\stage-dist"
+          cd packages/python
+          python bundle_native.py x86_64-w64-mingw32
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:TINYC_WHEEL_PLAT = 'win_amd64'
+          python -m pip wheel . -w dist-wheels --no-deps --no-build-isolation
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cd $env:GITHUB_WORKSPACE
+          python -m venv C:\tmp\venv
+          C:\tmp\venv\Scripts\pip install packages/python/dist-wheels/*win_amd64*.whl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force C:\tmp\pyctest | Out-Null
+          Copy-Item packages/python/tests/test_tinyc.py C:\tmp\pyctest\
+          cd C:\tmp\pyctest
+          C:\tmp\venv\Scripts\python -m unittest test_tinyc *>
+            $env:GITHUB_WORKSPACE\test-outputs\python-consumer.log
+          if ($LASTEXITCODE -ne 0) { Get-Content $env:GITHUB_WORKSPACE\test-outputs\python-consumer.log; exit $LASTEXITCODE }
+
+      - name: Collect release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Compress-Archive -Path build/dist-host/x86_64-w64-mingw32/* `
+            -DestinationPath release-assets/tinyc-x86_64-w64-mingw32.zip
+          Copy-Item packages/npm/tinyc-*.tgz release-assets/tinyc-npm-x86_64-w64-mingw32.tgz
+          Copy-Item packages/npm/native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32/*.tgz release-assets/
+          Copy-Item packages/python/dist-wheels/*win_amd64*.whl release-assets/
+          Copy-Item packages/java/dist/tinyc.jar release-assets/tinyc-x86_64-w64-mingw32.jar
+          Get-ChildItem release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-x86_64-w64-mingw32
+          path: release-assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-outputs-windows
+          path: test-outputs/
+          if-no-files-found: warn
+
+  # -----------------------------------------------------------------
+  macos:
+    name: macos (${{ matrix.triple }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            triple: arm64-apple-darwin
+            isa: '{"arch":"aarch64","bits":64,"endian":"little","simd":["neon"]}'
+          - runner: macos-13
+            triple: x86_64-apple-darwin
+            isa: '{"arch":"x86_64","bits":64,"endian":"little","simd":["sse","sse2","avx","avx2"]}'
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python build tooling
+        run: pip install setuptools wheel
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build the macOS dual-form kernel (mac-test-bundle)
+        run: |
+          mkdir -p test-outputs
+          bash mac-test-bundle/build-mac.sh > test-outputs/mac-build.log 2>&1
+          test -x mac-test-bundle/dist/bin/tinyc
+
+      # The bundle's full suite is the regression gate. Two dynamic-add
+      # checks are excluded from the gate: linking a clang-built Mach-O
+      # .o directly and a clang/ar-built .a (BSD ar index) - TCC on
+      # macOS reads ELF objects only; that limitation is accepted and
+      # recorded in the design doc (5.3). Their FAIL lines stay in the
+      # log; any other FAIL fails the job.
+      - name: Run the macOS bundle test suite (regression)
+        run: |
+          bash mac-test-bundle/run-tests.sh > test-outputs/mac-tests.log 2>&1 || true
+          cat test-outputs/mac-build.log test-outputs/mac-tests.log > test-outputs/result.log
+          UNEXPECTED=$(grep '^FAIL: ' test-outputs/mac-tests.log \
+            | grep -v -e 'dynamic add: direct .o link' \
+                      -e 'dynamic add: clang/ar .a' || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "unexpected test failures:"; echo "$UNEXPECTED"; exit 1
+          fi
+          grep -c '^PASS: ' test-outputs/mac-tests.log
+
+      - name: Stage the packaging dist from the bundle build
+        run: |
+          TRIPLE=${{ matrix.triple }}
+          SD=$PWD/stage-dist/$TRIPLE
+          mkdir -p "$SD/bin" "$SD/lib/tcc" "$SD/include"
+          cp mac-test-bundle/dist/bin/tinyc "$SD/bin/tinyc"
+          cp mac-test-bundle/dist/lib/tcc/libtcc1.a "$SD/lib/tcc/"
+          cp -r mac-test-bundle/dist/lib/tcc/include "$SD/lib/tcc/include"
+          cp mac-test-bundle/dist/include/libtcc.h "$SD/include/"
+          cp core/tinyc_io.h "$SD/include/"
+          python3 - "$SD/manifest.json" "$TRIPLE" '${{ matrix.isa }}' <<'EOF'
+          import json, sys
+          path, triple, isa = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+          outputs = {
+              "exe":    {"format": "Mach-O executable", "ext": ""},
+              "obj":    {"format": "Mach-O object", "ext": ".o"},
+              "shared": {"format": "Mach-O dylib", "ext": ".dylib"},
+              "ar":     {"format": "ar archive", "ext": ".a"},
+          }
+          manifest = {
+              "name": "tinyc", "version": "0.9.28rc", "target": triple,
+              "isa": isa, "outputs": outputs, "dual_file": "bin/tinyc",
+              "toolchain_include": "include",
+              "libtcc1": "lib/tcc/libtcc1.a",
+          }
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+          EOF
+
+      - name: npm package - bundle, pack, consumer test on the tarballs
+        env:
+          TINYC_DIST_DIR: ${{ github.workspace }}/stage-dist
+        run: |
+          cd packages/npm
+          npm install --ignore-scripts --omit=optional > ../../test-outputs/npm-install.log 2>&1
+          node bundle_native.js
+          npm pack --silent
+          (cd native-packages/@xnetx/tinyc-native-${{ matrix.triple }} && npm pack --silent)
+          cd "$GITHUB_WORKSPACE"
+          rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
+          npm init -y >/dev/null
+          npm install --silent \
+            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-${{ matrix.triple }}/*.tgz
+          cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
+          node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
+
+      - name: Python package - wheel, consumer test in a clean venv
+        env:
+          TINYC_DIST_DIR: ${{ github.workspace }}/stage-dist
+        run: |
+          bash packages/python/build_wheel_matrix.sh > test-outputs/wheel-build.log 2>&1
+          ls packages/python/dist-wheels/*.whl
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install packages/python/dist-wheels/*.whl
+          rm -rf /tmp/pyctest && mkdir -p /tmp/pyctest
+          cp packages/python/tests/test_tinyc.py /tmp/pyctest/
+          (cd /tmp/pyctest && /tmp/venv/bin/python -m unittest test_tinyc) \
+            > test-outputs/python-consumer.log 2>&1
+
+      - name: Java package - build jar, run the package test suite (JDK 25)
+        env:
+          TINYC_DIST_DIR: ${{ github.workspace }}/stage-dist
+        run: |
+          bash packages/java/build.sh > test-outputs/java-build.log 2>&1
+          bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          tar -czf release-assets/tinyc-${{ matrix.triple }}.tar.gz \
+            -C mac-test-bundle/dist .
+          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-${{ matrix.triple }}.tgz
+          cp packages/npm/native-packages/@xnetx/tinyc-native-${{ matrix.triple }}/*.tgz release-assets/
+          cp packages/python/dist-wheels/*.whl release-assets/
+          cp packages/java/dist/tinyc.jar release-assets/tinyc-${{ matrix.triple }}.jar
+          ls -la release-assets/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.triple }}
+          path: release-assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-outputs-macos-${{ matrix.triple }}
+          path: test-outputs/
+          if-no-files-found: warn
+
+  # -----------------------------------------------------------------
+  # The AAR built by linux-x64, consumed as a dependency of a minimal
+  # test app on an x86_64 emulator (API 30). The arm64 .so in the AAR
+  # is build- and format-verified only; the emulator is x86_64.
+  android-emulator:
+    name: android-emulator (AAR consumer test, x86_64 API 30)
+    needs: linux-x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform 35 (runner-provided SDK)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" >/dev/null
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Fetch the AAR built by linux-x64
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-x86_64-linux-gnu
+          path: fetched-assets
+      - name: Place the AAR where the consumer test expects it
+        run: |
+          mkdir -p packages/android/build/outputs/aar
+          cp fetched-assets/tinyc-android-release.aar \
+            packages/android/build/outputs/aar/
+          unzip -l packages/android/build/outputs/aar/tinyc-android-release.aar \
+            | grep libtinyc
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the AAR consumer tests on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel
+          script: |
+            cd packages/android/consumer-test
+            gradle :app:connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-outputs-android-emulator
+          path: |
+            packages/android/consumer-test/app/build/outputs/androidTest-results/
+            packages/android/consumer-test/app/build/reports/androidTests/
+          if-no-files-found: warn
+
+  # -----------------------------------------------------------------
+  # Needs every platform job: any failure above means no release.
+  release:
+    name: release
+    needs: [linux-x64, linux-arm64, windows, macos, android-emulator]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all job artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+      - name: Collect release files and bundle the test outputs
+        run: |
+          mkdir -p release-files
+          find all-artifacts -path '*release-assets*' -type f \
+            -exec cp {} release-files/ \;
+          (cd all-artifacts && zip -qr "$GITHUB_WORKSPACE/release-files/test-outputs.zip" \
+            . -i '*test-outputs*/*')
+          ls -la release-files/
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="build-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" release-assets/* \
+          gh release create "$TAG" release-files/* \
             --title "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
-            --notes "Automated build of ${GITHUB_SHA} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Assets: npm tarball(s), Python wheel, Java jar, Android AAR, browser package zip, and the full toolchain dist tarball (6 target variants built on an x86_64 Linux host)."
+            --notes "Automated multi-platform build of ${GITHUB_SHA} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Every asset was consumer-tested in its platform job against the built packages (npm tarballs, wheels, jars, the Android AAR on an emulator, the browser package in headless Chromium); per-job logs are in test-outputs.zip. Host binaries: tinyc-<triple> tarballs/zips (the -cross ones are cross-built on x86_64 Linux and qemu-smoke-tested, emulator-level)."

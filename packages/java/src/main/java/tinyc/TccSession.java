@@ -283,9 +283,11 @@ public final class TccSession implements AutoCloseable {
     }
 
     /**
-     * 设置 IO：当前接入的是错误通道，libtcc 错误文本经 upcall 跳板以字节
-     * 交给 {@code io.writeErr}。writeOut / readIn 的跳板见 {@link TccIoUpcalls}，
-     * 待内核提供 {@code tcc_set_io} 后接入；在此之前正常输出走进程真实 stdio。
+     * 设置 IO：错误通道经 {@code tcc_set_error_func} 接入本会话，libtcc 的
+     * 错误/警告文本经 upcall 跳板以字节交给 {@code io.writeErr}。
+     * writeOut / readIn 在命令行式入口 {@link TinyC#runCli(TccIO, String...)}
+     * 生效：三通道在那里经 {@code tcc_io_callback} 组成 TCCIO 传给
+     * {@code tinyc_main_io}。
      */
     public void setIO(TccIO io) {
         installErrorCallback(io);

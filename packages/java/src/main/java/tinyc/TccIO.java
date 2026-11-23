@@ -15,11 +15,15 @@ import java.nio.charset.StandardCharsets;
  * 跳板层会抓住异常、让当前原生调用中止，并在原生调用返回后以 {@link TccException}
  * 重新抛给调用方。
  *
- * <p>当前 libtcc 的接法：错误通道（writeErr）经 {@code tcc_set_error_func} 回调接入，
- * 见 {@link TccSession#setIO(TccIO)}。libtcc 本体没有 {@code tcc_set_io} 符号，
- * writeOut / readIn 的 upcall 跳板由 {@link TccIoUpcalls} 提供，待内核提供
- * {@code tcc_set_io} 后接入；在此之前，会话的正常输出与 {@code runCli} 的输出
- * 走进程真实 stdio，与命令行一致。
+ * <p>接法有二：会话式 API 的诊断经 {@code tcc_set_error_func} 交给 writeErr，
+ * 见 {@link TccSession#setIO(TccIO)}；命令行式入口
+ * {@link TinyC#runCli(TccIO, String...)} 把三个通道的 upcall 跳板
+ * （{@link TccIoUpcalls}）经内核 {@code tcc_io_callback} 组成回调型 TCCIO，
+ * 传给 {@code tinyc_main_io}，在该次调用期间作为编译器的当前 IO：
+ * 编译器自身的输出走 writeOut、诊断走 writeErr、readIn 随 TCCIO 一并
+ * 传给内核。不带 IO 的 {@code runCli} 走进程真实 stdio，与命令行一致。
+ * 带 IO 跑 {@code -run} 时，目标程序在运行期间的 stdin 由 readIn
+ * 喂入，stdout 与 stderr 分别经 writeOut 与 writeErr 交付。
  */
 public interface TccIO {
 

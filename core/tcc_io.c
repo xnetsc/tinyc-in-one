@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#if defined(__GLIBC__)
+#include <stdio_ext.h> /* __fpurge */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* registry                                                            */
@@ -370,7 +373,7 @@ TCCIO *tcc_io_tee(TCCIO *a, TCCIO *b)
 /* ------------------------------------------------------------------ */
 /* out stream as FILE* (for the preprocessor output path)              */
 
-#if defined(__linux__)
+#if defined(__GLIBC__)
 static ssize_t cookie_write(void *c, const char *b, size_t n)
 {
     (void)c;
@@ -388,6 +391,160 @@ FILE *tinyc_io_open_out_stream(void)
 #else
 FILE *tinyc_io_open_out_stream(void) { return NULL; }
 #endif
+
+/* ------------------------------------------------------------------ */
+/* -run stdio redirection                                              */
+/*                                                                     */
+/* The host's global stdio is never replaced; for the duration of one  */
+/* run the process's fd 0/1/2 are pointed at temporary files. fd 0's   */
+/* file is pre-filled from the current IO's read_in, fd 1/2's files    */
+/* are drained into write_out/write_err after the run, and the real    */
+/* fds are restored. Temporary files (not pipes) are what make this    */
+/* deadlock-free at any output size: the program can write without a   */
+/* concurrent reader, and its stdin is fully materialized before it    */
+/* starts. One file per channel, so out and err never interleave.      */
+/* On Windows both functions are no-ops.                               */
+
+#ifdef _WIN32
+
+void tinyc_run_redirect_begin(int keep_stdin) { (void)keep_stdin; }
+void tinyc_run_redirect_end(void) {}
+
+#else
+
+typedef struct {
+    int depth;          /* nesting count; the redirect lives at depth 1 */
+    TCCIO *io;          /* IO captured at the outermost begin */
+    int saved[3];       /* dup of the original fd; -1 = channel untouched,
+                           -2 = the fd was closed at begin */
+    FILE *tmp[3];       /* per-channel temporary file, NULL if unused */
+} RunRedir;
+
+static RunRedir g_run_redir;
+
+/* Point fd at tmp's file, remembering how to restore it. */
+static void redir_install(RunRedir *r, int fd, FILE *tmp)
+{
+    int saved = dup(fd);
+    r->saved[fd] = saved >= 0 ? saved : -2;
+    if (dup2(fileno(tmp), fd) < 0) {
+        if (saved >= 0) close(saved);
+        r->saved[fd] = -1;
+    }
+}
+
+void tinyc_run_redirect_begin(int keep_stdin)
+{
+    RunRedir *r = &g_run_redir;
+    if (r->depth > 0) { r->depth++; return; }
+    TCCIO *io = g_current_io;
+    if (!io || io == &g_stdio_io) return;
+
+    /* Output buffered so far belongs to the real fds / the IO itself,
+     * not to the run program's channels. */
+    tinyc_io_flush_all();
+    fflush(stdout);
+    fflush(stderr);
+
+    FILE *out_tmp = tmpfile();
+    FILE *err_tmp = tmpfile();
+    if (!out_tmp || !err_tmp) {
+        if (out_tmp) fclose(out_tmp);
+        if (err_tmp) fclose(err_tmp);
+        return;
+    }
+    r->io = io;
+    r->tmp[0] = NULL;
+    r->tmp[1] = out_tmp;
+    r->tmp[2] = err_tmp;
+    r->saved[0] = r->saved[1] = r->saved[2] = -1;
+    redir_install(r, 1, out_tmp);
+    redir_install(r, 2, err_tmp);
+
+    if (!keep_stdin) {
+        FILE *in_tmp = tmpfile();
+        if (in_tmp) {
+            /* Drain read_in up front; the program then reads the
+             * file to EOF at its own pace. A read error ends the
+             * input the same way EOF does. A NULL read_in is EOF. */
+            char buf[8192];
+            for (;;) {
+                int n = io->read_in ? io->read_in(io->ctx, buf, sizeof buf) : 0;
+                if (n <= 0) break;
+                if (fwrite(buf, 1, (size_t)n, in_tmp) != (size_t)n) break;
+            }
+            rewind(in_tmp);
+            r->tmp[0] = in_tmp;
+            /* The stdin FILE still carries the previous fd 0's state:
+             * a sticky EOF flag and possibly bytes buffered from it.
+             * Both belong to the old stream, not to read_in's bytes;
+             * reset the FILE before the program reads through it. */
+            clearerr(stdin);
+#if defined(__GLIBC__)
+            __fpurge(stdin);
+#endif
+            redir_install(r, 0, in_tmp);
+        }
+    }
+    r->depth = 1;
+}
+
+void tinyc_run_redirect_end(void)
+{
+    RunRedir *r = &g_run_redir;
+    if (r->depth == 0) return;
+    if (--r->depth > 0) return;
+
+    /* The run program's stdio buffers empty into the capture files
+     * while the fds still point at them. */
+    fflush(stdout);
+    fflush(stderr);
+
+    int fd;
+    for (fd = 0; fd < 3; fd++) {
+        if (r->saved[fd] >= 0) {
+            dup2(r->saved[fd], fd);
+            close(r->saved[fd]);
+        } else if (r->saved[fd] == -2) {
+            close(fd);
+        }
+        r->saved[fd] = -1;
+    }
+    if (r->tmp[0]) {
+        /* Leave the host a clean stdin FILE: drop the run program's
+         * EOF flag and any input it left buffered. */
+        clearerr(stdin);
+#if defined(__GLIBC__)
+        __fpurge(stdin);
+#endif
+    }
+
+    /* Deliver each captured channel through the IO, now that the real
+     * fds are back (an IO channel that falls back to stdio writes to
+     * the real stream). A NULL channel function discards, matching
+     * tinyc_io_write_out/err. */
+    TCCIO *io = r->io;
+    char buf[8192];
+    size_t n;
+    if (r->tmp[1] && io->write_out) {
+        rewind(r->tmp[1]);
+        while ((n = fread(buf, 1, sizeof buf, r->tmp[1])) > 0)
+            io->write_out(io->ctx, buf, n);
+    }
+    if (r->tmp[2] && io->write_err) {
+        rewind(r->tmp[2]);
+        while ((n = fread(buf, 1, sizeof buf, r->tmp[2])) > 0)
+            io->write_err(io->ctx, buf, n);
+    }
+    for (fd = 0; fd < 3; fd++) {
+        if (r->tmp[fd]) fclose(r->tmp[fd]);
+        r->tmp[fd] = NULL;
+    }
+    r->io = NULL;
+    if (io && io->flush) io->flush(io->ctx);
+}
+
+#endif /* _WIN32 */
 
 /* ------------------------------------------------------------------ */
 /* main entry with IO                                                  */

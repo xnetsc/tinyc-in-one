@@ -49,6 +49,7 @@ PATCHES = [
      "ST_FUNC int wasm_output_file(TCCState *s1, const char *filename);\n"
      "ST_FUNC void gen_opv(int op);\n"
      "ST_FUNC void gen_vec_gv(void);\n"
+     "ST_FUNC void gen_vec_home(void);\n"
      "ST_FUNC void gen_vec_ret(void);\n"
      "ST_FUNC void gen_vec_neg(void);\n"
      "ST_FUNC void gen_vec_not(void);\n"
@@ -558,8 +559,17 @@ PATCHES = [
      "            next();\n"
      "            if (vtop->type.t & VT_VECTOR) {\n"
      "                CType etype;\n"
-     "                if (!(vtop->r & VT_LVAL))\n"
+     "                if (!(vtop->r & VT_LVAL)) {\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "                    /* an rvalue vector (call result, operation\n"
+     "                       result) has no memory home yet: the\n"
+     "                       backend spills it to a frame slot, after\n"
+     "                       which the array path below applies */\n"
+     "                    gen_vec_home();\n"
+     "#else\n"
      "                    tcc_error(\"subscript of a vector rvalue is not supported\");\n"
+     "#endif\n"
+     "                }\n"
      "                etype = vtop->type.ref->type;\n"
      "                vtop->type = etype;\n"
      "                mk_pointer(&vtop->type);\n"
@@ -606,7 +616,16 @@ PATCHES = [
      "        no_oblock = 1;",
      "    if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {\n"
      "        if ((type->t & VT_VECTOR) && (flags & DIF_HAVE_ELEM)\n"
-     "            && is_compatible_unqualified_types(type, &vtop->type))\n"
+     "            && (is_compatible_unqualified_types(type, &vtop->type)\n"
+     "                /* a vector value of the same total size also\n"
+     "                   initializes the whole vector (bitcast, the\n"
+     "                   gen_cast rule): element signedness alone -\n"
+     "                   e.g. a comparison result assigned to an\n"
+     "                   unsigned-element vector - must not force the\n"
+     "                   brace path */\n"
+     "                || ((vtop->type.t & VT_VECTOR)\n"
+     "                    && type_size(type, &align1)\n"
+     "                       == type_size(&vtop->type, &align1))))\n"
      "            goto one_elem;\n"
      "        no_oblock = 1;",
      1),
@@ -679,6 +698,57 @@ PATCHES = [
      "riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c",
      "riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c\n"
      "wasm32_FILES = $(CORE_FILES) wasm-gen.c wasm-link.c",
+     1),
+
+    # 27. Vector values are not subject to the scalar char/short
+    #     delayed cast (VT_MUSTCAST): a vector type carries its element
+    #     type in VT_BTYPE, so a char/short-element vector value (a
+    #     function-call result, a variable load) picked up VT_MUSTCAST
+    #     and force_charshort_cast then rewrote its type to VT_INT and
+    #     failed with "cannot convert 'int' to 'short'".  Never set the
+    #     flag on vector values, and clear it defensively in gen_cast.
+    ("tccgen.c",
+     "    /* special delayed cast for char/short */\n"
+     "    if (vtop->r & VT_MUSTCAST)\n"
+     "        force_charshort_cast();",
+     "    /* vector values are not subject to the scalar char/short\n"
+     "       delayed cast: the element type only rides in VT_BTYPE */\n"
+     "    if ((type->t & VT_VECTOR) || (vtop->type.t & VT_VECTOR))\n"
+     "        vtop->r &= ~VT_MUSTCAST;\n"
+     "    /* special delayed cast for char/short */\n"
+     "    if (vtop->r & VT_MUSTCAST)\n"
+     "        force_charshort_cast();",
+     1),
+    ("tccgen.c",
+     "    t = ct.t & VT_BTYPE;\n"
+     "    if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {",
+     "    t = ct.t & VT_BTYPE;\n"
+     "    if (!(ct.t & VT_VECTOR)\n"
+     "        && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {",
+     1),
+    ("tccgen.c",
+     "                t = s->type.t & VT_BTYPE;\n"
+     "                if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {",
+     "                t = s->type.t & VT_BTYPE;\n"
+     "                if (!(s->type.t & VT_VECTOR)\n"
+     "                    && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {",
+     1),
+    # 28. tccgen.c: the wasm backend converts to/from unsigned
+    #     long long natively (i64 scratch local), like ARM64/RISCV64;
+    #     route gen_cvt_itof1/gen_cvt_ftoi1 straight to the backend
+    #     hooks instead of the libtcc1 helper functions
+    #     (__floatundidf/__fixunsdfdi do not exist for this target).
+    ("tccgen.c",
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_ARM\n"
+     "#define gen_cvt_itof1 gen_cvt_itof",
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_ARM || defined TCC_TARGET_WASM32\n"
+     "#define gen_cvt_itof1 gen_cvt_itof",
+     1),
+    ("tccgen.c",
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64\n"
+     "#define gen_cvt_ftoi1 gen_cvt_ftoi",
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_WASM32\n"
+     "#define gen_cvt_ftoi1 gen_cvt_ftoi",
      1),
 ]
 

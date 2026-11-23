@@ -1,0 +1,6 @@
+// Consumer test for the tinyc Android AAR: a minimal app that takes
+// the built AAR as a file dependency and exercises its public Java
+// API on a device/emulator. See app/src/androidTest.
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+}

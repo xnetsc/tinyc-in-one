@@ -83,6 +83,22 @@ void tinyc_io_flush_all(void);
  * channel, or NULL when the current IO is the stdio default. */
 FILE *tinyc_io_open_out_stream(void);
 
+/* ---- -run stdio redirection ----------------------------------------- */
+
+/* Called by tcc_run around the run program's entry point. When the
+ * current IO is a non-stdio TCCIO, the process's fd 0/1/2 are
+ * redirected through it for the duration of the run: fd 0 is fed the
+ * bytes read_in returns (then EOF), and what the program writes to
+ * fd 1/2 is delivered to write_out/write_err, per channel, when the
+ * run ends. The host's fds are restored by tinyc_run_redirect_end.
+ * With no IO installed, or the stdio IO, both functions are no-ops
+ * and the run program uses the process's real stdio.
+ * keep_stdin != 0 leaves fd 0 alone (tcc_run has already reopened
+ * stdin from a file for the program). Nested calls are counted:
+ * only the outermost pair redirects. */
+void tinyc_run_redirect_begin(int keep_stdin);
+void tinyc_run_redirect_end(void);
+
 /* ---- dual-form entry points ----------------------------------------- */
 
 /* The compiler's real main, exported from the dual-form file. */

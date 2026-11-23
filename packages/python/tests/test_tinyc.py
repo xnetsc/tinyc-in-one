@@ -149,6 +149,37 @@ class IoTests(unittest.TestCase):
             with open(log, "rb") as f:
                 self.assertIn(b"tcc version", f.read())
 
+    def test_run_program_stdio_goes_through_io(self):
+        # -run with an IO installed: the program's stdin is fed by
+        # read_in, its stdout is delivered to write_out and its
+        # stderr to write_err, in separate channels.
+        feed = b"echo-me-123\n"
+        state = {"pos": 0}
+
+        def read_in(cap):
+            if state["pos"] >= len(feed):
+                return b""
+            chunk = feed[state["pos"]:state["pos"] + cap]
+            state["pos"] += len(chunk)
+            return chunk
+
+        out_chunks, err_chunks = [], []
+        io = tinyc.IO.callback(out=out_chunks.append,
+                               err=err_chunks.append, read_in=read_in)
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "echo.c")
+            with open(src, "w") as f:
+                f.write('#include <stdio.h>\n'
+                        'int main(){ int c;\n'
+                        '  while ((c = getchar()) != EOF) putchar(c);\n'
+                        '  fprintf(stderr, "run-marker\\n");\n'
+                        '  return 3; }\n')
+            code = tinyc.run_cli(["-run", src], io=io)
+        io.close()
+        self.assertEqual(code, 3)
+        self.assertEqual(b"".join(out_chunks), feed)
+        self.assertEqual(b"".join(err_chunks), b"run-marker\n")
+
     def test_io_null_swallows(self):
         code, out = tinyc.run_cli_capture(["--version"])
         self.assertIn(b"tcc version", out)  # sanity: capture works

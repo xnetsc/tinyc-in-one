@@ -12,7 +12,16 @@
 /packages/python/dist-wheels/
 /packages/java/dist/
 /packages/android/local.properties
+# Staged by packages/android/build.sh native-libs (NDK build outputs).
+/packages/android/src/main/jniLibs/*/libtinyc.so
+/packages/android/src/main/assets/toolchain/*/include/*.h
+/packages/android/src/main/assets/toolchain/*/lib/*.a
 /wasm-backend/build-src/
 /wasm-backend/work/
 mac-test-bundle/tinyc-mac-test.tar.gz
 .DS_Store
+/packages/java/build/
+/packages/npm/*.tgz
+/wasm-backend/build-install/
+/wasm-backend/build.log
+/wasm-backend/sysroot/

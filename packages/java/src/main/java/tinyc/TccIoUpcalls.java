@@ -27,11 +27,11 @@ import java.util.concurrent.atomic.AtomicReference;
  *       Panama 已处理好线程附着。</li>
  * </ul>
  *
- * <p>当前实际接入的是错误回调跳板（{@link #errorFuncStub}），
- * 经 {@code tcc_set_error_func} 注册到 libtcc。写/读跳板
- * （{@link #writeStub}、{@link #readStub}）是 TCCIO 的
- * {@code int (void*, const char*, size_t)} 与 {@code int (void*, char*, size_t)}
- * 签名的现成映射，待内核提供 {@code tcc_set_io} 符号后接入。
+ * <p>接入点有二：错误回调跳板（{@link #errorFuncStub}）经
+ * {@code tcc_set_error_func} 注册到 libtcc，供会话式 API 的诊断使用；
+ * 写/读跳板（{@link #writeStub}、{@link #readStub}）由 {@link #mainIoStubs}
+ * 组成三通道集合，经内核 {@code tcc_io_callback} 组成回调型 TCCIO 后
+ * 传给 {@code tinyc_main_io}，供 {@link TinyC#runCli(TccIO, String...)} 使用。
  */
 public final class TccIoUpcalls {
 
@@ -121,6 +121,19 @@ public final class TccIoUpcalls {
                         MemorySegment.class, MemorySegment.class, long.class));
         mh = MethodHandles.insertArguments(mh, 0, io, errSink);
         return Linker.nativeLinker().upcallStub(mh, READ_DESCRIPTOR, arena);
+    }
+
+    /**
+     * 为一次 {@code tinyc_main_io} 调用备齐三通道跳板，顺序为
+     * {@code {write_out, write_err, read_in}}，与 {@code tcc_io_callback}
+     * 的参数顺序一致。三个 stub 同钉在 {@code arena} 上，生命周期由调用方管理。
+     */
+    public static MemorySegment[] mainIoStubs(TccIO io, Arena arena,
+                                              AtomicReference<Throwable> errSink) {
+        return new MemorySegment[]{
+                writeStub(false, io, arena, errSink),
+                writeStub(true, io, arena, errSink),
+                readStub(io, arena, errSink)};
     }
 
     /**

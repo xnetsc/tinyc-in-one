@@ -17,6 +17,6 @@ if(NOT DEFINED TINYC_LIBTCC OR NOT DEFINED LIBTCC_INCLUDE)
         "dual-form kernel build for the same Android ABI.")
 endif()
 
-add_library(tinyc SHARED tinyc_jni.c)
+add_library(tinyc SHARED tinyc_jni.c tinyc_kernel_adapter.c)
 target_include_directories(tinyc PRIVATE ${LIBTCC_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(tinyc PRIVATE ${TINYC_LIBTCC} log)

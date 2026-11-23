@@ -201,12 +201,12 @@
 - **AVX/AVX2（256 位）表示策略**：一个 `__m256/__m256i` 用**两个 v128 局部变量（lo/hi 对）**表示，签名与变量布局在前端/头文件层按此约定。逐 lane 运算成对发射（如 `_mm256_add_ps` → 2 条 `f32x4.add`），三操作数形式对栈机无影响（AVX 的非破坏性目的寄存器在 wasm 里由 locals 天然满足）。跨 128 lane 的操作是分水岭：`_mm256_shuffle_ps` 的 lane 内 shuffle 可成对 shuffle 解决（直接），`_mm256_permute*`、`_mm256_broadcastss`（内存广播可由 splat 解决、寄存器广播要 extract+splat）、`_mm256_extractf128/insertf128`（就是取/换 lo/hi 局部变量，直接）里，凡涉及任意跨 lane 重排的，用 `i8x16.shuffle` 对 lo/hi 分别选源 + 必要时经内存中转（store 到帧槽再 load_lane）实现，列**部分支持**并在头文件注释里标明代价。
 - **AVX-512 与掩码操作**：列**不支持**（数据并行、无掩码的 512 位子集理论上可 4×v128 分半，但不列入支持范围）。原因不是宽度而是掩码语义：掩码寄存器、merging/zeroing 两种写回、以及**掩码加载的故障抑制**（被掩掉的 lane 不得触发内存访问错误）在 wasm 里没有对应物——逐条用 blend 模拟写回尚可，故障抑制无法模拟（wasm 的 load 要么整条执行要么不执行）。头文件层面对掩码 intrinsics 直接不提供声明，让编译期就失败，而不是生成语义错的代码。
 
-### 8.4 骨架已落地的 v128 发射（src/wasm-gen.c）
+### 8.4 已落地的 v128 发射（src/wasm-gen.c）
 
-- `load`/`store` 的向量分支（键于 §8.1 的占位标志 `VT_VECTOR` + 尺寸 16）：`v128.load`（0xFD 0）、`v128.store`（0xFD 11），向量值住 4 个专用 v128 locals（槽号以伪寄存器 `WREG_VEC + slot` 表示，locals 布局与 wasm-link 的声明一致）。
-- `gen_opi` 的向量分支：整数 i8x16/i16x8/i32x4/i64x2 与浮点 f32x4/f64x2 的 **add/sub/mul 真发射**（操作码：整数加 110/142/174/192、减 113/145/177/195、乘 117/149/181/213；f32x4 加减乘除 228/229/230/231、f64x2 240/241/242/243，均为 0xFD 前缀的定版编号），浮点除法一并给了（NEON/SSE 都有直接对应）；元素类型取自 `type->ref->type`（前端落地时必须遵守此约定）。
-- 其余向量操作（比较、min/max、饱和、shuffle/swizzle、转换、移位、splat/lane 操作等 §8.2 中"直接对应"的那些，以及全部"标量模拟/不支持"项）在 gen 里没有分支：向量类型带着这些算子到达 gen_opi 时落到默认报错，清单以 §8.2/§8.3 表格为准逐项补。
-- 可达性声明：因 §8.1 的前端现状，这些分支目前**不能从 C 源码触发**（向量类型不存在），它们是按定版映射先行落地的后端半成品；验证方式是代码审查与构建通过，不冒充端到端 SIMD 验证。前端三步（属性、类型表示、tccgen 分发）落地后，用 `v4f` 加减乘的 C 用例补端到端测试，测试形态与 tests/ 现有套件一致（编 .wasm 后 Node 实例化断言；Node 的 WebAssembly 默认开启 SIMD，验证环境现成）。
+- 前端三步（vector_size 属性解析、`VT_VECTOR` 类型表示、tccgen 向量语义分发）与六个后端 builtin 已落地，向量操作可从 C 源码端到端触发；元素类型取自 `type->ref->type`。
+- 发射面：`v128.load/store`（8/16 字节）、splat/extract/replace、shuffle/swizzle、表驱动的一元/二元操作（算术、饱和、min/max、比较、移位、abs/neg/sqrt/ceil/floor/trunc/nearest/popcnt、narrow、extend、extmul、dot、trunc_sat/convert/demote/promote、bitmask/all_true/any_true）；向量值住 4 个 v128 槽（伪寄存器 `WREG_VEC + slot`，含 spill），向量参数/返回值走槽 0 约定。
+- 三个头文件已落地：`include/wasm_simd128.h`、`include/arm_neon.h`（§8.2 直接对应子集）、`include/xmmintrin.h`/`include/emmintrin.h`（SSE/SSE2 直接对应子集）。逐项状态（已实现/不提供/仍报错）见 SIMD-STATUS.md，与 §8.2/§8.3 表格逐行对应。
+- 端到端验证：tests/test-vec.c 21 项、test-simd128.c 19 项、test-neon.c 16 项、test-sse.c 23 项 Node 数值断言全过，标量回归不坏；全量记录在 tests/test-output.txt（tests/run-regression.sh）。
 
 ---
 

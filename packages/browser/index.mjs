@@ -545,7 +545,8 @@ class NativeBridge {
 //   6. options.imports, merged as-is (raw escape hatch)
 // A registered shim is called as fn(ctx, ...cArgs). ctx exposes the
 // running instance: { memory(), u8(), readCString(ptr),
-// readBytes(ptr, len), writeBytes(ptr, bytes), io }, where io is
+// writeCString(ptr, str), readBytes(ptr, len),
+// writeBytes(ptr, bytes), io }, where io is
 // the run's byte IO. C arguments arrive in their wasm types (i32 /
 // f32 / f64 as numbers, i64 as BigInt) and the return value goes
 // back the same way — an i64 result must be returned as a BigInt.
@@ -808,6 +809,13 @@ function createShimContext(holder, byteIO) {
       let end = ptr;
       while (end < m.length && end - ptr < maxLength && m[end] !== 0) end++;
       return textDecoder.decode(m.subarray(ptr, end));
+    },
+    writeCString(ptr, str) {
+      const bytes = textEncoder.encode(str);
+      const m = new Uint8Array(holder.memory.buffer);
+      m.set(bytes, ptr);
+      m[ptr + bytes.length] = 0;
+      return bytes.length + 1;
     },
     readBytes(ptr, length) {
       return new Uint8Array(holder.memory.buffer).slice(ptr, ptr + length);

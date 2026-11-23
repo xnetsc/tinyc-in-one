@@ -68,7 +68,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True, help="package root to stage into")
     ap.add_argument("--host", required=True, help="host triple the binaries run on")
-    ap.add_argument("--dist", default=DEFAULT_DIST, help="build/dist directory")
+    ap.add_argument("--dist", default=os.environ.get("TINYC_DIST_DIR", DEFAULT_DIST),
+                    help="build/dist directory (or $TINYC_DIST_DIR)")
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)

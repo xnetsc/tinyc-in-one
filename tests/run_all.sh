@@ -39,6 +39,10 @@ section "native target matrix smoke tests"
 bash tests/test_matrix.sh
 ok $? "matrix smoke (details: tests/matrix-test-output.txt)"
 
+section "host variant smoke tests (cross-built hosts, qemu-user)"
+bash tests/test_hosts.sh
+ok $? "host smoke (details: tests/host-test-output.txt)"
+
 echo
 if [ $FAIL -eq 0 ]; then echo "ALL SUITES PASS"; else echo "SOME SUITES FAILED"; fi
 exit $FAIL

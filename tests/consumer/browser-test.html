@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>tinyc browser consumer test</title>
+<!--
+  Browser consumer test page. Serve the directory containing this
+  file over HTTP with ./pkg/ holding the built browser package
+  (index.mjs, tcc-<target>.mjs/.wasm, sysroot manifests and files),
+  then drive it with browser-run.mjs (Playwright) or any headless
+  Chrome. Results land on window.__TINYC_LOG__ / __TINYC_OK__ /
+  __TINYC_DONE__.
+
+  The test consumes the built package only:
+    1. wasm32-wasi: compile a hello that writes through the WASI
+       fd_write import, then run the product through the package's
+       shim layer (runWasmModule) and assert the captured output and
+       the return value.
+    2. x86_64-linux-gnu: cross-compile an object file and verify the
+       ELF header and e_machine (format check only; the product is
+       not runnable in a browser).
+-->
+<script type="module">
+import { loadTinyc, runWasmModule } from './pkg/index.mjs';
+
+const log = [];
+let ok = true;
+function check(name, cond) {
+  log.push((cond ? 'PASS: ' : 'FAIL: ') + name);
+  if (!cond) ok = false;
+}
+
+try {
+  const t = await loadTinyc({ target: 'wasm32-wasi' });
+  const src = [
+    'typedef struct { const void *buf; unsigned int len; } ciovec_t;',
+    'extern int fd_write(int fd, const void *iovs, int iovs_len, void *nwritten);',
+    'static const char msg[] = "hello from wasm32\\n";',
+    'int hello(void) {',
+    '    ciovec_t iov;',
+    '    int nw = 0;',
+    '    iov.buf = msg;',
+    '    iov.len = sizeof(msg) - 1;',
+    '    fd_write(1, &iov, 1, &nw);',
+    '    return nw;',
+    '}',
+    '',
+  ].join('\n');
+  t.addFile('/hello.c', src);
+  const rc = t.callMain(['/hello.c', '-nostdlib', '-o', '/hello.wasm']);
+  check('wasm32-wasi compile via callMain returns 0', rc === 0);
+  const bytes = t.exportFile('/hello.wasm');
+  check('wasm32 product has the wasm magic',
+    bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d);
+  const dec = new TextDecoder();
+  let text = '';
+  const io = {
+    out: (b) => { text += dec.decode(b, { stream: true }); },
+    err: (b) => { text += dec.decode(b, { stream: true }); },
+  };
+  const ret = await runWasmModule(bytes, { entry: 'hello', io });
+  check('wasm32 hello returns the byte count it wrote (18)', ret === 18);
+  check('wasm32 hello output arrives through the fd_write shim',
+    text === 'hello from wasm32\n');
+
+  const t2 = await loadTinyc({ target: 'x86_64-linux-gnu' });
+  t2.addFile('/h.c', 'int add(int a, int b) { return a + b; }\n');
+  const rc2 = t2.callMain(['-c', '/h.c', '-o', '/h.o']);
+  check('x86_64-linux-gnu cross compile returns 0', rc2 === 0);
+  const obj = t2.exportFile('/h.o');
+  check('x86_64 product is an ELF object',
+    obj[0] === 0x7f && obj[1] === 0x45 && obj[2] === 0x4c && obj[3] === 0x46);
+  check('x86_64 product e_machine is 62 (EM_X86_64)',
+    obj[18] === 62 && obj[19] === 0);
+} catch (e) {
+  ok = false;
+  log.push('ERROR: ' + ((e && e.stack) || e));
+}
+
+window.__TINYC_LOG__ = log;
+window.__TINYC_OK__ = ok;
+window.__TINYC_DONE__ = true;
+document.title = ok ? 'TINYC-BROWSER-PASS' : 'TINYC-BROWSER-FAIL';
+</script>
+<body>tinyc browser consumer test</body>

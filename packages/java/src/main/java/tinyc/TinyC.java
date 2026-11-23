@@ -9,6 +9,7 @@ import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * TinyC 的 Java 绑定入口：双入口封装。
@@ -89,6 +90,7 @@ public final class TinyC {
 
     /**
      * 以命令行方式运行一次编译，参数与 tcc 命令行一致（不含程序名），返回退出码。
+     * 输出走进程真实 stdio。带 IO 的版本见 {@link #runCli(TccIO, String...)}。
      *
      * <p>封装层规则：{@code argv[0]} 由本方法填原生文件的真实路径（TCC 按可执行文件
      * 位置找运行时）；已知运行时目录且参数里没有 {@code -B} 时，自动在最前面补
@@ -97,23 +99,29 @@ public final class TinyC {
      * 它返回即返回，不结束宿主进程。
      */
     public static int runCli(String... args) {
-        if (Native.MAIN == null) {
-            throw new TccException("native file exports neither tinyc_main nor main: " + Native.FILE);
-        }
-        synchronized (CLI_LOCK) {
-            List<String> cli = new ArrayList<>();
-            boolean hasB = false;
-            for (String a : args) {
-                if (a.equals("-B") || a.startsWith("-B")) {
-                    hasB = true;
-                    break;
-                }
-            }
-            if (Native.RUNTIME_DIR != null && !hasB) {
-                cli.add("-B" + Native.RUNTIME_DIR);
-            }
-            cli.addAll(List.of(args));
+        return runCli(null, args);
+    }
 
+    /**
+     * 带 IO 的命令行式运行：{@code io} 的三个通道经 Panama upcall 跳板
+     * （{@link TccIoUpcalls#mainIoStubs}）组成回调型 TCCIO，经
+     * {@code tcc_io_callback} 建好后传给原生入口 {@code tinyc_main_io}，
+     * 在本次调用期间作为编译器的当前 IO：编译器自身的输出走
+     * {@code writeOut}、诊断走 {@code writeErr}、{@code readIn} 随 TCCIO
+     * 一并传给内核。{@code io} 为 null 时与 {@link #runCli(String...)}
+     * 完全一致，走 {@code tinyc_main}、输出走进程真实 stdio。
+     * 带 IO 跑 {@code -run} 时，目标程序在运行期间的 stdin 由
+     * {@code io.readIn} 喂入，stdout 与 stderr 分别经
+     * {@code io.writeOut} 与 {@code io.writeErr} 交付。
+     *
+     * <p>跳板与 TCCIO 结构体钉在本次调用的 Arena 上，调用结束即释放
+     * （TCCIO 结构体经 {@code tcc_io_free} 释放）。IO 回调里抛出的异常
+     * 不穿 C 边界：跳板向 C 返回 -1 并存下异常，本方法在原生调用返回后
+     * 以 {@link TccException} 重抛。
+     */
+    public static int runCli(TccIO io, String... args) {
+        synchronized (CLI_LOCK) {
+            List<String> cli = cliArgs(args);
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment argv = arena.allocate(ValueLayout.ADDRESS, (long) cli.size() + 2);
                 argv.setAtIndex(ValueLayout.ADDRESS, 0, Native.cstr(arena, Native.FILE.toString()));
@@ -121,15 +129,62 @@ public final class TinyC {
                     argv.setAtIndex(ValueLayout.ADDRESS, i + 1, Native.cstr(arena, cli.get(i)));
                 }
                 int argc = cli.size() + 1;
-                int rc = (int) Native.MAIN.invokeExact(argc, argv);
+                if (io == null) {
+                    if (Native.MAIN == null) {
+                        throw new TccException("native file exports neither tinyc_main nor main: "
+                                + Native.FILE);
+                    }
+                    int rc = (int) Native.MAIN.invokeExact(argc, argv);
+                    Native.flushStdio();
+                    return rc;
+                }
+                if (Native.MAIN_IO == null) {
+                    throw new TccException("native file does not export tinyc_main_io: "
+                            + Native.FILE);
+                }
+                AtomicReference<Throwable> callbackError = new AtomicReference<>();
+                MemorySegment[] stubs = TccIoUpcalls.mainIoStubs(io, arena, callbackError);
+                MemorySegment ioPtr = (MemorySegment) Native.TCC_IO_CALLBACK.invokeExact(
+                        stubs[0], stubs[1], stubs[2], MemorySegment.NULL);
+                if (ioPtr == null || ioPtr.address() == 0) {
+                    throw new TccException("tcc_io_callback returned NULL");
+                }
+                int rc;
+                try {
+                    rc = (int) Native.MAIN_IO.invokeExact(argc, argv, ioPtr);
+                } finally {
+                    Native.TCC_IO_FREE.invokeExact(ioPtr);
+                }
                 Native.flushStdio();
+                Throwable t = callbackError.get();
+                if (t != null) {
+                    throw new TccException("IO callback threw", t);
+                }
                 return rc;
             } catch (TccException e) {
                 throw e;
             } catch (Throwable t) {
-                throw new TccException("calling " + Native.MAIN_NAME + " failed", t);
+                throw new TccException("calling " + (io == null ? Native.MAIN_NAME : "tinyc_main_io")
+                        + " failed", t);
             }
         }
+    }
+
+    /** 命令行参数整备：已知运行时目录且参数里没有 -B 时在最前面补 -B<运行时目录>。 */
+    private static List<String> cliArgs(String[] args) {
+        List<String> cli = new ArrayList<>();
+        boolean hasB = false;
+        for (String a : args) {
+            if (a.equals("-B") || a.startsWith("-B")) {
+                hasB = true;
+                break;
+            }
+        }
+        if (Native.RUNTIME_DIR != null && !hasB) {
+            cli.add("-B" + Native.RUNTIME_DIR);
+        }
+        cli.addAll(List.of(args));
+        return cli;
     }
 
     /**

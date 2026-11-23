@@ -26,7 +26,16 @@ def load():
     lib.tcc_io_buffer_data.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                        ctypes.POINTER(ctypes.c_size_t)]
     lib.tcc_io_free.argtypes = [ctypes.c_void_p]
+    lib.tcc_io_callback.restype = ctypes.c_void_p
+    lib.tcc_io_callback.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p]
     return lib
+
+
+_IO_WRITE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
+                             ctypes.c_char_p, ctypes.c_size_t)
+_IO_READ = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
+                            ctypes.c_void_p, ctypes.c_size_t)
 
 
 def argv_of(args):
@@ -142,6 +151,115 @@ class LibraryModeTests(unittest.TestCase):
         fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int)(addr)
         self.assertEqual(fn(6, 7), 42)
         lib.tcc_delete(ctypes.c_void_p(s))
+
+
+class RunRedirectTests(unittest.TestCase):
+    """-run through tinyc_main_io: the run program's process stdio is
+    redirected through the installed IO for the duration of the run
+    (fd 0 fed from read_in, fd 1/2 delivered to write_out/write_err)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.lib = load()
+
+    def write_src(self, d, body):
+        src = os.path.join(d, "prog.c")
+        with open(src, "w") as f:
+            f.write(body)
+        return src
+
+    def run_buffer(self, src, merged=False):
+        # argv[0] is the real file path, as the package wrappers do.
+        io = (self.lib.tcc_io_buffer_merged() if merged
+              else self.lib.tcc_io_buffer())
+        try:
+            code = self.lib.tinyc_main_io(
+                3, argv_of([DUAL, "-run", src]), io)
+            n = ctypes.c_size_t()
+            p = self.lib.tcc_io_buffer_data(io, 0, ctypes.byref(n))
+            out = ctypes.string_at(p, n.value) if p else b""
+            p = self.lib.tcc_io_buffer_data(io, 1, ctypes.byref(n))
+            err = ctypes.string_at(p, n.value) if p else b""
+            return code, out, err
+        finally:
+            self.lib.tcc_io_free(io)
+
+    def test_run_stdout_captured(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self.write_src(
+                d, '#include <stdio.h>\n'
+                   'int main(){ printf("run-out\\n"); return 3; }\n')
+            code, out, err = self.run_buffer(src)
+            self.assertEqual(code, 3)
+            self.assertEqual(out, b"run-out\n")
+            self.assertEqual(err, b"")
+
+    def test_run_stderr_kept_separate(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self.write_src(
+                d, '#include <stdio.h>\n'
+                   'int main(){ printf("to-out\\n");\n'
+                   '  fprintf(stderr, "to-err\\n"); return 0; }\n')
+            code, out, err = self.run_buffer(src)
+            self.assertEqual(code, 0)
+            self.assertEqual(out, b"to-out\n")
+            self.assertEqual(err, b"to-err\n")
+
+    def test_run_stdin_fed_from_read_in(self):
+        feed = b"kernel-stdin-echo\n"
+        state = {"pos": 0}
+        out_chunks = []
+
+        def _w(ctx, buf, n):
+            out_chunks.append(ctypes.string_at(buf, n))
+            return n
+
+        def _r(ctx, buf, cap):
+            if state["pos"] >= len(feed):
+                return 0
+            chunk = feed[state["pos"]:state["pos"] + cap]
+            state["pos"] += len(chunk)
+            ctypes.memmove(buf, chunk, len(chunk))
+            return len(chunk)
+
+        keep = [_IO_WRITE(_w), _IO_READ(_r)]
+        io = self.lib.tcc_io_callback(keep[0], keep[0], keep[1], None)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                src = self.write_src(
+                    d, '#include <stdio.h>\n'
+                       'int main(){ int c;\n'
+                       '  while ((c = getchar()) != EOF) putchar(c);\n'
+                       '  return 0; }\n')
+                code = self.lib.tinyc_main_io(
+                    3, argv_of([DUAL, "-run", src]), io)
+            self.assertEqual(code, 0)
+            self.assertEqual(b"".join(out_chunks), feed)
+        finally:
+            self.lib.tcc_io_free(io)
+
+    def test_run_stdin_echo_repeated_in_one_process(self):
+        # A run program that reads stdin to EOF leaves the host's
+        # stdin FILE with a sticky EOF flag; the next run must still
+        # see read_in's bytes. Run the echo three times back to back.
+        for _ in range(3):
+            self.test_run_stdin_fed_from_read_in()
+
+    def test_run_large_output_does_not_deadlock(self):
+        # 8192 lines x 40 bytes = 320 KiB, far beyond a pipe buffer.
+        with tempfile.TemporaryDirectory() as d:
+            src = self.write_src(
+                d, '#include <stdio.h>\n'
+                   'int main(){ int i;\n'
+                   '  for (i = 0; i < 8192; i++)\n'
+                   '    printf("line-%06d-012345678901234567890123456\\n", i);\n'
+                   '  return 0; }\n')
+            code, out, err = self.run_buffer(src)
+            self.assertEqual(code, 0)
+            self.assertEqual(len(out), 8192 * 40)
+            self.assertTrue(out.startswith(b"line-000000-"))
+            self.assertTrue(out.endswith(b"line-008191-012345678901234567890123456\n"))
+            self.assertEqual(err, b"")
 
 
 if __name__ == "__main__":

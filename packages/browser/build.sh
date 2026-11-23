@@ -19,9 +19,14 @@
 # means one run of this script per target:
 #   TARGET=x86_64-linux-gnu ./build.sh
 #   TARGET=aarch64-linux-gnu ./build.sh
-# TARGET defaults to x86_64-linux-gnu. The wasm32-wasi build needs a
-# wasm code generation backend in TCC, which does not exist yet; the
-# script says so and stops for that target.
+# TARGET defaults to x86_64-linux-gnu. The wasm32-wasi target is
+# built from the project's wasm-backend tree (the wasm32 code
+# generator lives there, not in upstream TCC): the branch below
+# assembles vendor + wasm-gen.c/wasm-link.c + the backend patches
+# the same way wasm-backend/build.sh does, generates tccdefs_.h with
+# the native make, and compiles that tree. The glue layer drives the
+# module through its exported main (the backend tree has no
+# tinyc_main; index.mjs prefers tinyc_main and falls back to main).
 set -eu
 
 cd "$(dirname "$0")"
@@ -58,7 +63,37 @@ case "$TARGET" in
     # or verified in this environment.
     x86_64-apple-darwin) TARGET_DEFS="-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO"; TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/x86_64-asm.c $UPSTREAM/tccmacho.c" ;;
     arm64-apple-darwin)  TARGET_DEFS="-DTCC_TARGET_ARM64 -DTCC_TARGET_MACHO";  TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c $UPSTREAM/tccmacho.c" ;;
-    wasm32-wasi) echo "build.sh: target wasm32-wasi needs a wasm code generation backend in TCC, which does not exist yet" >&2; exit 1 ;;
+    wasm32-wasi)
+        WB=../../wasm-backend
+        ASRC=build/wasm32-src
+        if [ ! -f "$WB/patches/apply-patches.py" ]; then
+            echo "build.sh: wasm-backend tree not found at $WB" >&2; exit 1
+        fi
+        rm -rf "$ASRC"
+        mkdir -p "$ASRC"
+        tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+            --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+            --exclude='./c2str.exe' --exclude='./config.h' \
+            --exclude='./config.mak' --exclude='./tccdefs_.h' \
+            -C "$UPSTREAM" . | tar xf - --no-same-owner -C "$ASRC"
+        cp "$WB/src/wasm-gen.c" "$WB/src/wasm-link.c" "$ASRC/"
+        python3 "$WB/patches/apply-patches.py" "$ASRC" >/dev/null
+        ABS_ASRC=$PWD/$ASRC
+        (cd "$ASRC" && ./configure --prefix="$ABS_ASRC/install" >/dev/null)
+        # configure's config.h guard would define the native target
+        # even for the cross build; extend it with WASM32 (same edit
+        # as wasm-backend/build.sh).
+        grep -q 'TCC_TARGET_C67)' "$ASRC/config.h"
+        sed -i 's/|| TCC_TARGET_C67)/|| TCC_TARGET_C67 || TCC_TARGET_WASM32)/' "$ASRC/config.h"
+        grep -q 'TCC_TARGET_WASM32' "$ASRC/config.h"
+        # native build first: generates tccdefs_.h for the emcc compile
+        (cd "$ASRC" && make -j"$(nproc)" >/dev/null)
+        UPSTREAM=$ASRC
+        TARGET_DEFS="-DTCC_TARGET_WASM32"
+        TARGET_SRC="$ASRC/wasm-gen.c $ASRC/wasm-link.c"
+        # the backend tree has no tinyc_main; export main only
+        EXPORTED_FUNCTIONS_OVERRIDE='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func"]'
+        ;;
     *) echo "build.sh: unsupported TARGET=$TARGET (supported: x86_64-linux-gnu, aarch64-linux-gnu, riscv64-linux-gnu, x86_64-windows, aarch64-linux-android, x86_64-linux-android, arm64-apple-darwin, x86_64-apple-darwin, wasm32-wasi)" >&2; exit 1 ;;
 esac
 
@@ -79,6 +114,8 @@ $UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TAR
 # and malloc/free, which the glue layer needs to assemble argv and
 # pass strings.
 EXPORTED_FUNCTIONS='["_main","_tinyc_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func"]'
+
+EXPORTED_FUNCTIONS="${EXPORTED_FUNCTIONS_OVERRIDE:-$EXPORTED_FUNCTIONS}"
 
 EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","UTF8ToString","stringToUTF8","lengthBytesUTF8","addFunction","removeFunction"]'
 

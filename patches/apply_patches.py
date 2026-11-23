@@ -132,6 +132,37 @@ patch("tcc.c",
                 ppfp = tinyc_io_open_out_stream();
             }""")
 
+# ---- tccrun.c: -run program stdio goes through the current IO -------
+# The wrapper calls bracket the program's entry point; tcc_run's own
+# semantics (arguments, return value, exit handling) are unchanged.
+# With no IO or the stdio IO installed both calls are no-ops.
+patch("tccrun.c",
+      """    errno = 0; /* clean errno value */
+    fflush(stdout);
+    fflush(stderr);""",
+      """    /* tinyc: with a non-stdio IO installed, redirect the run
+     * program's process stdio through it for the duration of the
+     * run (no-op for the stdio IO). run_stdin means tcc_run has
+     * already reopened stdin from a file: leave fd 0 alone. */
+    tinyc_run_redirect_begin(s1->run_stdin != NULL);
+
+    errno = 0; /* clean errno value */
+    fflush(stdout);
+    fflush(stderr);""")
+patch("tccrun.c",
+      """    if (0 == ret) {
+        ret = prog_main(argc, argv, envp);
+    } else if (RT_EXIT_ZERO == ret) {
+        ret = 0;
+    }""",
+      """    if (0 == ret) {
+        ret = prog_main(argc, argv, envp);
+    } else if (RT_EXIT_ZERO == ret) {
+        ret = 0;
+    }
+
+    tinyc_run_redirect_end();""")
+
 # ---- tcc.c: real process entry forwards to tinyc_main ----------------
 p = SRC / "tcc.c"
 text = p.read_text()

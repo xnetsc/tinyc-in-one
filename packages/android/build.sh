@@ -4,6 +4,14 @@
 #   ./build.sh           full AAR build via Gradle (needs JDK 17,
 #                        Android SDK platform 35, and gradle on PATH
 #                        or GRADLE_HOME set)
+#   ./build.sh native-libs
+#                        build the real libtinyc.so for arm64-v8a and
+#                        x86_64 with the NDK clang (kernel unity build
+#                        + JNI glue + kernel adapter, one shared library
+#                        per ABI) into src/main/jniLibs/<abi>/, and
+#                        stage the toolchain assets (TCC builtin
+#                        headers + libtcc1.a) into src/main/assets/.
+#                        Needs an NDK (NDK_HOME / ANDROID_NDK_HOME).
 #   ./build.sh jvm-test  JVM-side checks only: compiles all Java sources
 #                        against android.jar (from ANDROID_HOME or
 #                        ANDROID_JAR), generates the JNI header with
@@ -152,6 +160,96 @@ EOF
     (cd "$WORK/stage" && zip -q -r "$OLDPWD/build/outputs/aar/tinyc-android-release.aar" .)
     unzip -l build/outputs/aar/tinyc-android-release.aar
     echo "AAR: build/outputs/aar/tinyc-android-release.aar"
+    exit 0
+fi
+
+# ---- native libraries: real libtinyc.so for both ABIs ----
+if [ "$MODE" = "native-libs" ]; then
+    ROOT=$(cd ../.. && pwd)
+    NDK=${NDK_HOME:-${ANDROID_NDK_HOME:-}}
+    if [ -z "$NDK" ] && [ -d "$HOME/workspace/envs/android-toolchain/sdk/ndk" ]; then
+        NDK=$HOME/workspace/envs/android-toolchain/sdk/ndk
+    fi
+    if [ -z "$NDK" ] || [ ! -d "$NDK/toolchains/llvm/prebuilt" ]; then
+        echo "Android NDK not found; set NDK_HOME" >&2
+        exit 1
+    fi
+    PREBUILT=$(ls "$NDK/toolchains/llvm/prebuilt" | head -1)
+    TC=$NDK/toolchains/llvm/prebuilt/$PREBUILT/bin
+    SYSROOT=$NDK/toolchains/llvm/prebuilt/$PREBUILT/sysroot
+    API=${TINYC_ANDROID_API:-30}
+
+    # Assemble the patched kernel tree the same way the top-level
+    # build.sh does; the native make also produces the libtcc1.a
+    # files staged into the toolchain assets below.
+    SRC=build/native-src
+    rm -rf "$SRC" build/native-dist
+    mkdir -p "$SRC"
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C "$ROOT/vendor-tinycc" . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+    (cd "$SRC" && ./configure --prefix="$PWD/build/native-dist" >/dev/null)
+    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+    (cd "$SRC" && make cross-arm64 >/dev/null)
+
+    build_so() {
+        local abi=$1 triple=$2 tdef=$3
+        local cc=$TC/$triple$API-clang
+        [ -x "$cc" ] || cc=$TC/$triple-clang
+        echo "building libtinyc.so for $abi ($cc)"
+        "$cc" -shared -fPIC -O2 \
+            -o "src/main/jniLibs/$abi/libtinyc.so" \
+            "$SRC/tcc.c" "$SRC/tcc_io.c" \
+            src/main/jni/tinyc_jni.c src/main/jni/tinyc_kernel_adapter.c \
+            -I"$SRC" -I"$ROOT/core" -Isrc/main/jni \
+            "$tdef" -DTARGETOS_ANDROID=1 \
+            "-DCONFIG_SYSROOT=\"$SYSROOT\"" \
+            "-DCONFIG_TCC_CRTPREFIX=\"{R}/usr/lib/$triple/$API\"" \
+            "-DCONFIG_TCC_LIBPATHS=\"{R}/usr/lib/$triple/$API:{B}\"" \
+            "-DCONFIG_TCC_SYSINCLUDEPATHS=\"{B}/include:{R}/usr/include:{R}/usr/include/$triple\"" \
+            '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"' \
+            -llog -ldl -lm
+        file "src/main/jniLibs/$abi/libtinyc.so"
+    }
+    build_so arm64-v8a aarch64-linux-android -DTCC_TARGET_ARM64
+    build_so x86_64 x86_64-linux-android -DTCC_TARGET_X86_64
+    rm -f src/main/jniLibs/arm64-v8a/.gitkeep src/main/jniLibs/arm64-v8a/PLACEHOLDER.md \
+          src/main/jniLibs/x86_64/.gitkeep src/main/jniLibs/x86_64/PLACEHOLDER.md
+
+    # Stage the toolchain assets from the same tree. If the assets
+    # were placeholders before, the assets version changes (the Java
+    # side keys its extraction cache on ASSETS_VERSION).
+    PLACEHOLDER_ASSETS=0
+    [ -f src/main/assets/toolchain/aarch64-linux-android/include/.gitkeep ] && PLACEHOLDER_ASSETS=1
+    for triple in aarch64-linux-android x86_64-linux-android; do
+        dst=src/main/assets/toolchain/$triple
+        mkdir -p "$dst/include" "$dst/lib"
+        cp "$SRC"/include/*.h "$SRC/tcclib.h" "$dst/include/"
+        if [ "$triple" = aarch64-linux-android ]; then
+            cp "$SRC/arm64-libtcc1.a" "$dst/lib/libtcc1.a"
+        else
+            cp "$SRC/libtcc1.a" "$dst/lib/libtcc1.a"
+        fi
+        rm -f "$dst/.gitkeep" "$dst/include/.gitkeep" "$dst/lib/.gitkeep"
+    done
+    if [ $PLACEHOLDER_ASSETS -eq 1 ]; then
+        python3 - <<'PYEOF'
+import re
+p = "src/main/java/com/tinyc/TinycAssets.java"
+t = open(p).read()
+m = re.search(r'ASSETS_VERSION = "(\d+)"', t)
+assert m, "ASSETS_VERSION not found"
+t = t.replace(m.group(0), 'ASSETS_VERSION = "%d"' % (int(m.group(1)) + 1))
+open(p, "w").write(t)
+print("ASSETS_VERSION bumped to", int(m.group(1)) + 1)
+PYEOF
+    fi
+    echo "native libs built: src/main/jniLibs/{arm64-v8a,x86_64}/libtinyc.so"
     exit 0
 fi
 

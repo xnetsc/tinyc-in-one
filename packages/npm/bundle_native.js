@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Stage the unified (host x target) layout into this package and into
- * the esbuild-style platform subpackage @tinyc/native-<host-triple>.
+ * the esbuild-style platform subpackage @xnetx/tinyc-native-<host-triple>.
  *
  *   node bundle_native.js [host-triple]     (default: current host)
  *
@@ -8,7 +8,7 @@
  *   packaging-manifest.json
  *   natives/<host>/toolchain/<target>/tinyc
  *   sysroot/<target>/...
- * and refreshes node_modules/@tinyc/native-<host> so the subpackage
+ * and refreshes node_modules/@xnetx/tinyc-native-<host> so the subpackage
  * resolution path works in this repo. Run after ../../build.sh.
  */
 const fs = require('fs');
@@ -48,10 +48,10 @@ function stageInto(root) {
 
 stageInto(__dirname);
 
-// ---- platform subpackage skeleton (@tinyc/native-<host>) ----
+// ---- platform subpackage skeleton (@xnetx/tinyc-native-<host>) ----
 const mainPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-const subName = `@tinyc/native-${host}`;
-const subDir = path.join(__dirname, 'native-packages', '@tinyc', `native-${host}`);
+const subName = `@xnetx/tinyc-native-${host}`;
+const subDir = path.join(__dirname, 'native-packages', '@xnetx', `tinyc-native-${host}`);
 fs.mkdirSync(subDir, { recursive: true });
 stageInto(subDir);
 const osCpu = NPM_OS_CPU[host] || {};
@@ -67,7 +67,7 @@ fs.writeFileSync(path.join(subDir, 'package.json'), JSON.stringify({
 console.log(`subpackage ${subName} -> ${subDir}`);
 
 // ---- make the subpackage resolvable from this repo ----
-const nmDir = path.join(__dirname, 'node_modules', '@tinyc', `native-${host}`);
+const nmDir = path.join(__dirname, 'node_modules', '@xnetx', `tinyc-native-${host}`);
 fs.rmSync(nmDir, { recursive: true, force: true });
 fs.mkdirSync(path.dirname(nmDir), { recursive: true });
 fs.cpSync(subDir, nmDir, { recursive: true });
