@@ -70,6 +70,15 @@ typedef int (*outtype_fn)(void *, int);
 typedef int (*reloc_fn)(void *, void *);
 typedef int (*run_fn)(void *, int, char **);
 
+/* TCC_OUTPUT_MEMORY, as defined in libtcc.h. The value matters on
+ * the PE path: tcc_set_output_type must select it before compiling,
+ * or pe_add_runtime links the run as a file executable (PE_EXE
+ * instead of PE_RUN) and pe_build_imports leaves hint/name RVAs in
+ * the guest's IAT slots instead of resolving them through
+ * GetProcAddress - the first imported call in the guest then jumps
+ * through an RVA and faults. */
+#define TCC_OUTPUT_MEMORY 1
+
 static int failures = 0;
 static void check(int ok, const char *what)
 {
@@ -504,17 +513,18 @@ int main(int argc, char **argv)
     }
 
     /* tcc_* API: compile in memory and run; no external symbols, so
-     * no library path is needed. TCC_OUTPUT_MEMORY == 0. relocate
-     * and run get separate states: tcc_run relocates its state
-     * itself, and a state must not be relocated twice - the second
-     * link pass would redefine the linker symbols (_etext and
-     * friends, __stop_<section>) the first pass already set. */
+     * no library path is needed. The output type is set to
+     * TCC_OUTPUT_MEMORY before compiling, as libtcc.h requires.
+     * relocate and run get separate states: tcc_run relocates its
+     * state itself, and a state must not be relocated twice - the
+     * second link pass would redefine the linker symbols (_etext
+     * and friends, __stop_<section>) the first pass already set. */
     {
         mark("tcc_api:begin");
         void *s = p_new();
         check(s != NULL, "tcc_new returns a state");
         if (s) {
-            p_outtype(s, 0);
+            p_outtype(s, TCC_OUTPUT_MEMORY);
             int rc = p_compile(s, "int main(void) { return 42; }");
             check(rc == 0, "tcc_compile_string succeeds");
             if (rc == 0) {
@@ -526,7 +536,7 @@ int main(int argc, char **argv)
         }
         s = p_new();
         if (s) {
-            p_outtype(s, 0);
+            p_outtype(s, TCC_OUTPUT_MEMORY);
             int rc = p_compile(s, "int main(void) { return 42; }");
             check(rc == 0, "tcc_compile_string succeeds");
             if (rc == 0) {
