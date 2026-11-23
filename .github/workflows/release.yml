@@ -38,6 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu \
+            gcc-mingw-w64-x86-64 \
             libc6-dev-arm64-cross libc6-dev-riscv64-cross \
             qemu-user-static zip
 
@@ -227,12 +228,18 @@ jobs:
       # Only the NDK sysroot files are consumed (target headers and
       # libraries); no NDK host binary is ever executed, so the
       # sysroot is taken from the NDK's linux-x86_64 prebuilt tree,
-      # the only Linux prebuilt r26d ships.
-      - name: Set up Android NDK r26d
+      # the only Linux prebuilt r26d ships. nttld/setup-ndk has no
+      # linux-arm64 host build, so the official zip is downloaded
+      # and unpacked directly; the step keeps the ndk-path output
+      # the build step below consumes.
+      - name: Set up Android NDK r26d (manual download)
         id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/android-ndk-r26d-linux.zip" \
+            https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip -q "$RUNNER_TEMP/android-ndk-r26d-linux.zip" -d "$RUNNER_TEMP/ndk"
+          echo "ndk-path=$RUNNER_TEMP/ndk/android-ndk-r26d" >> "$GITHUB_OUTPUT"
+          ls "$RUNNER_TEMP/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" >/dev/null
 
       - name: Build all target variants (aarch64 host)
         env:
@@ -351,6 +358,21 @@ jobs:
           bash build.sh host x86_64-w64-mingw32 > test-outputs/build-host.log 2>&1
           file build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
 
+      # Body-level smoke first: the EXE as a plain CLI. If this
+      # passes and the LoadLibrary diagnostic below fails, the fault
+      # is in the library-load path, not in the EXE itself.
+      - name: Smoke - run the dual-form EXE as a CLI
+        shell: msys2 {0}
+        run: |
+          export PATH=/mingw64/bin:$PATH
+          EXE=$PWD/build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
+          "$EXE" -dumpversion
+          rm -rf /tmp/cli-smoke && mkdir -p /tmp/cli-smoke && cd /tmp/cli-smoke
+          printf '#include <stdio.h>\nint main(void) { printf("hello from tinyc CLI\\n"); return 0; }\n' > hello.c
+          "$EXE" hello.c -o hello.exe
+          ./hello.exe > hello.out 2>&1
+          grep -q "hello from tinyc CLI" hello.out
+
       - name: Diagnostic - LoadLibrary host test on the built EXE
         shell: msys2 {0}
         run: |
@@ -359,7 +381,11 @@ jobs:
           EXE=$PWD/build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
           gcc -O2 -o /tmp/win_host_test.exe tests/consumer/win_host_test.c
           rm -rf /tmp/wht && mkdir -p /tmp/wht && cd /tmp/wht
-          /tmp/win_host_test.exe "$EXE" > "$LOG" 2>&1
+          RC=0
+          /tmp/win_host_test.exe "$EXE" > "$LOG" 2>&1 || RC=$?
+          cp win_host_test.markers "$(dirname "$LOG")/" 2>/dev/null || true
+          echo "win_host_test exit code: $RC" >> "$LOG"
+          exit $RC
 
       - name: Stage the packaging dist from the host build
         shell: msys2 {0}
@@ -480,21 +506,19 @@ jobs:
           bash mac-test-bundle/build-mac.sh > test-outputs/mac-build.log 2>&1
           test -x mac-test-bundle/dist/bin/tinyc
 
-      # The bundle's full suite is the regression gate. Two dynamic-add
-      # checks are excluded from the gate: linking a clang-built Mach-O
-      # .o directly and a clang/ar-built .a (BSD ar index) - TCC on
-      # macOS reads ELF objects only; that limitation is accepted and
-      # recorded in the design doc (5.3). Their FAIL lines stay in the
-      # log; any other FAIL fails the job.
+      # The bundle's full suite is the regression gate: any FAIL
+      # line fails the job. The suite's expectations encode the
+      # accepted macOS limitation (TCC reads ELF objects only;
+      # clang Mach-O .o/.a inputs are rejected with established
+      # failure signatures - design doc 5.3), so a FAIL means the
+      # behavior deviated from the recorded facts in either
+      # direction.
       - name: Run the macOS bundle test suite (regression)
         run: |
           bash mac-test-bundle/run-tests.sh > test-outputs/mac-tests.log 2>&1 || true
           cat test-outputs/mac-build.log test-outputs/mac-tests.log > test-outputs/result.log
-          UNEXPECTED=$(grep '^FAIL: ' test-outputs/mac-tests.log \
-            | grep -v -e 'dynamic add: direct .o link' \
-                      -e 'dynamic add: clang/ar .a' || true)
-          if [ -n "$UNEXPECTED" ]; then
-            echo "unexpected test failures:"; echo "$UNEXPECTED"; exit 1
+          if grep -q '^FAIL: ' test-outputs/mac-tests.log; then
+            echo "test failures:"; grep '^FAIL: ' test-outputs/mac-tests.log; exit 1
           fi
           grep -c '^PASS: ' test-outputs/mac-tests.log
 

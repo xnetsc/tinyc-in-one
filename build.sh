@@ -257,11 +257,16 @@ EOF
 # build_host_mingw [cc]
 # The Windows dual-form file: an EXE with an export table (main,
 # tinyc_main, tinyc_init and the tcc_* API, listed in a .def generated
-# from libtcc.h). LoadLibrary on an EXE runs no DllMain, so the host
-# calls the exported tinyc_init() after loading (design doc 3.2);
-# CONFIG_TCCDIR is left undefined so libtcc resolves the tcc directory
-# from the executable's own location at runtime. The same recipe runs
-# with a native Windows MinGW gcc (TINYC_MINGW_CC=gcc).
+# from libtcc.h). The PE entry point is tinyc_win_entry (core/
+# tinyc_win.c), not mainCRTStartup: the loader calls the entry point
+# with the DllMain convention when a host LoadLibrary's the EXE, and
+# the dispatch forwards to mainCRTStartup only when the image is the
+# process's main module; on the library path it returns at once and
+# the host calls the exported tinyc_init() after loading, which runs
+# the deferred CRT initialization (design doc 3.2). CONFIG_TCCDIR is
+# left undefined so libtcc resolves the tcc directory from the
+# executable's own location at runtime. The same recipe runs with a
+# native Windows MinGW gcc (TINYC_MINGW_CC=gcc).
 build_host_mingw() {
     local CC=${1:-${TINYC_MINGW_CC:-x86_64-w64-mingw32-gcc}}
     local TRIPLE=x86_64-w64-mingw32
@@ -317,7 +322,7 @@ PYEOF
     cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
 
     python3 "$ROOT/tools/gen_windows_def.py" "$SRC/libtcc.h" "$SRC/tinyc.def"
-    "$CC" -O2 -static \
+    "$CC" -O2 -static -Wl,-e,tinyc_win_entry \
         -o "$DIST/bin/tinyc.exe" "$SRC/tcc.c" "$SRC/tcc_io.c" \
         "$ROOT/core/tinyc_win.c" \
         -I"$SRC" -I"$ROOT/core" \
