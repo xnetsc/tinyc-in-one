@@ -24,8 +24,6 @@ def host_triple():
             return "x86_64-linux-gnu"
         if machine in ("aarch64", "arm64"):
             return "aarch64-linux-gnu"
-        if machine == "riscv64":
-            return "riscv64-linux-gnu"
     if sys.platform == "win32" and machine in ("amd64", "x86_64"):
         return "x86_64-w64-mingw32"
     if sys.platform == "darwin":

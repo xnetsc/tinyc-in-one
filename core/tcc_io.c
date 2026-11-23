@@ -406,6 +406,19 @@ FILE *tinyc_io_open_out_stream(void) { return NULL; }
 #endif
 
 /* ------------------------------------------------------------------ */
+/* Run-path diagnostic markers: only the Windows image has a        */
+/* markers file (the real implementations are in tinyc_win.c);      */
+/* everywhere else these are no-ops.                                */
+
+#ifndef _WIN32
+void tinyc_diag_mark(const char *line) { (void)line; }
+void tinyc_diag_mark_ptr(const char *label, const void *p)
+{
+    (void)label; (void)p;
+}
+#endif
+
+/* ------------------------------------------------------------------ */
 /* -run stdio redirection                                              */
 /*                                                                     */
 /* The host's global stdio is never replaced; for the duration of one  */

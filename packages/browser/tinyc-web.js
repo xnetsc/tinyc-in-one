@@ -1954,16 +1954,19 @@ var TinycWeb = (() => {
     }
     return "/" + parts.join("/");
   }
-  async function contentToBytes(content) {
+  function contentToBytesSync(content) {
     if (typeof content === "string") return textEncoder2.encode(content);
     if (content instanceof Uint8Array) return new Uint8Array(content);
     if (content instanceof ArrayBuffer) return new Uint8Array(content);
-    if (typeof Blob !== "undefined" && content instanceof Blob) {
-      return new Uint8Array(await content.arrayBuffer());
-    }
+    if (typeof Blob !== "undefined" && content instanceof Blob) return null;
     throw new TinycError(
       "tinyc: addFile content must be a string, Uint8Array, ArrayBuffer, File or Blob"
     );
+  }
+  async function contentToBytes(content) {
+    const syncBytes = contentToBytesSync(content);
+    if (syncBytes) return syncBytes;
+    return new Uint8Array(await content.arrayBuffer());
   }
   var VirtualFS = class {
     /** `store` is an opened FsStore (see vfs-store.mjs); its persisted
@@ -2062,10 +2065,16 @@ var TinycWeb = (() => {
       return { p, record: { bytes: buf, size: meta.size, mtime: meta.mtime } };
     }
     /** Add or replace a file. `content` may be a string, Uint8Array,
-     *  ArrayBuffer, File or Blob. The returned promise resolves once
-     *  the content is persisted in the store. */
+     *  ArrayBuffer, File or Blob. For the content kinds whose bytes
+     *  are at hand (string, Uint8Array, ArrayBuffer) the file is
+     *  staged — index, content cache and the Emscripten FS mirror —
+     *  synchronously, before this call returns its promise, so a
+     *  compile or read issued immediately afterwards, without
+     *  awaiting, already sees the file; Blob and File content stages
+     *  once its bytes have been read. The returned promise resolves
+     *  once the content is persisted in the store. */
     async addFile(path, content) {
-      const bytes = await contentToBytes(content);
+      const bytes = contentToBytesSync(content) ?? await contentToBytes(content);
       const { p, record } = this._stage(path, bytes);
       await this._store.put(p, record);
     }

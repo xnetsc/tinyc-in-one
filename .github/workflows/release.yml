@@ -84,10 +84,10 @@ jobs:
           mkdir -p test-outputs
           ./build.sh > test-outputs/build-targets.log 2>&1
 
-      - name: Build cross host variants (aarch64, riscv64, mingw)
+      - name: Build cross host variants (aarch64, mingw)
         run: ./build.sh host > test-outputs/build-hosts.log 2>&1
 
-      - name: Host smoke tests (qemu-user; emulator-level for aarch64/riscv64)
+      - name: Host smoke tests (qemu-user; emulator-level for aarch64)
         run: |
           bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
           cp tests/host-test-output.txt test-outputs/
@@ -165,8 +165,6 @@ jobs:
           tar -czf release-assets/tinyc-x86_64-linux-gnu.tar.gz -C build/dist .
           tar -czf release-assets/tinyc-aarch64-linux-gnu-cross.tar.gz \
             -C build/dist-host aarch64-linux-gnu
-          tar -czf release-assets/tinyc-riscv64-linux-gnu-cross.tar.gz \
-            -C build/dist-host riscv64-linux-gnu
           (cd build/dist-host/x86_64-w64-mingw32 && \
             zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-x86_64-w64-mingw32-cross.zip" .)
           cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-x86_64-linux-gnu.tgz
@@ -203,7 +201,7 @@ jobs:
       # The matrix is host-aware: on this aarch64 host the x86_64
       # and riscv64 targets are cross builds against the
       # /usr/<triplet> sysroots these packages provide, and the
-      # x86_64/riscv64 host variants are cross-compiled and smoked
+      # x86_64 host variant is cross-compiled and smoked
       # under qemu-user (the aarch64 host variant is native).
       - name: Install cross compilers and qemu-user
         run: |
@@ -249,8 +247,8 @@ jobs:
           mkdir -p test-outputs
           ./build.sh > test-outputs/build-targets.log 2>&1
 
-      - name: Build host variants (aarch64 native, x86_64 and riscv64 cross)
-        run: ./build.sh host aarch64-linux-gnu x86_64-linux-gnu riscv64-linux-gnu > test-outputs/build-hosts.log 2>&1
+      - name: Build host variants (aarch64 native, x86_64 cross)
+        run: ./build.sh host aarch64-linux-gnu x86_64-linux-gnu > test-outputs/build-hosts.log 2>&1
 
       - name: Host smoke tests (aarch64 native; qemu-user for the cross hosts)
         run: |
@@ -713,4 +711,4 @@ jobs:
           TAG="build-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" release-files/* \
             --title "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
-            --notes "Automated multi-platform build of ${GITHUB_SHA} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Every asset was consumer-tested in its platform job against the built packages (npm tarballs, wheels, jars, the Android AAR on an emulator, the browser package in headless Chromium); per-job logs are in test-outputs.zip. Host binaries: tinyc-<triple> tarballs/zips (the -cross ones are cross-built on x86_64 Linux and qemu-smoke-tested, emulator-level)."
+            --notes "Automated multi-platform build of ${GITHUB_SHA} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Every asset was consumer-tested in its platform job against the built packages (npm tarballs, wheels, jars, the Android AAR on an emulator, the browser package in headless Chromium); per-job logs are in test-outputs.zip. Host binaries: tinyc-<triple> tarballs/zips; the aarch64 Linux -cross tarball is cross-built on x86_64 Linux and qemu-smoke-tested (emulator-level), and the MinGW -cross zip is cross-built there and executed on the Windows runner."

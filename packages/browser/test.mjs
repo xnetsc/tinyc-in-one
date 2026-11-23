@@ -85,6 +85,31 @@ test('vfs: string and bytes sources round-trip', async () => {
   assert.deepEqual(fs.listFiles('/src'), ['/src/main.c', '/src/util.c']);
 });
 
+test('vfs: addFile stages string/bytes content synchronously', async () => {
+  const fs = new VirtualFS();
+  const native = new Map();
+  fs.mountTo({
+    mkdirTree() {},
+    writeFile(p, bytes) { native.set(p, bytes); },
+    unlink(p) { if (!native.delete(p)) throw new Error('missing'); },
+  });
+  // No await before these assertions: for content whose bytes are
+  // at hand, the file is staged — index, content cache and the
+  // native mirror — in the same turn, so a synchronous compile or
+  // read issued right after the call (the way the browser consumer
+  // test drives the package) already sees it. Only the store write
+  // is still in flight; the returned promise settles it.
+  const pending = fs.addFile('/src/sync.c', 'int sync_stage;');
+  assert.ok(fs.hasFile('/src/sync.c'));
+  assert.equal(fs.readTextFile('/src/sync.c'), 'int sync_stage;');
+  assert.ok(native.has('/src/sync.c'));
+  await pending;
+  const pendingBytes = fs.addFile('/src/sync2.c', new Uint8Array([65]));
+  assert.ok(fs.hasFile('/src/sync2.c'));
+  assert.ok(native.has('/src/sync2.c'));
+  await pendingBytes;
+});
+
 test('vfs: removeFile deletes the map entry and the mounted native mirror', async () => {
   const fs = new VirtualFS();
   const native = new Map();

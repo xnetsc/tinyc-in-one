@@ -30,6 +30,7 @@ function check(name, cond) {
 
 try {
   const t = await loadTinyc({ target: 'wasm32-wasi' });
+  log.push('INFO: wasm32-wasi fsBackend=' + t.fsBackend);
   const src = [
     'typedef struct { const void *buf; unsigned int len; } ciovec_t;',
     'extern int fd_write(int fd, const void *iovs, int iovs_len, void *nwritten);',
@@ -45,6 +46,7 @@ try {
     '',
   ].join('\n');
   t.addFile('/hello.c', src);
+  log.push('INFO: vfs files after addFile: ' + JSON.stringify(t.fs.listFiles('/')));
   const rc = t.callMain(['/hello.c', '-nostdlib', '-o', '/hello.wasm']);
   check('wasm32-wasi compile via callMain returns 0', rc === 0);
   const bytes = t.exportFile('/hello.wasm');
@@ -62,6 +64,7 @@ try {
     text === 'hello from wasm32\n');
 
   const t2 = await loadTinyc({ target: 'x86_64-linux-gnu' });
+  log.push('INFO: x86_64-linux-gnu fsBackend=' + t2.fsBackend);
   t2.addFile('/h.c', 'int add(int a, int b) { return a + b; }\n');
   const rc2 = t2.callMain(['-c', '/h.c', '-o', '/h.o']);
   check('x86_64-linux-gnu cross compile returns 0', rc2 === 0);

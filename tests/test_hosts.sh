@@ -150,9 +150,6 @@ else
     smoke_linux_host x86_64-linux-gnu qemu-x86_64-static /usr/x86_64-linux-gnu \
         x86_64-linux-gnu-gcc "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
 fi
-smoke_linux_host riscv64-linux-gnu qemu-riscv64-static /usr/riscv64-linux-gnu \
-    riscv64-linux-gnu-gcc "RISC-V" "/lib/ld-linux-riscv64-lp64d.so.1"
-
 # ---- MinGW host: format + exports only (cannot execute here) ----
 MT=x86_64-w64-mingw32
 MDIST=$ROOT/build/dist-host/$MT

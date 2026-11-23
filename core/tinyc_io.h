@@ -99,6 +99,16 @@ FILE *tinyc_io_open_out_stream(void);
 void tinyc_run_redirect_begin(int keep_stdin);
 void tinyc_run_redirect_end(void);
 
+/* ---- run-path diagnostic markers ------------------------------------ */
+
+/* Append one line to the platform diagnostic markers file
+ * (tinyc_init.markers on Windows). The run path calls these at its
+ * internal stage boundaries so that a crash inside tcc_run leaves
+ * the last completed stage on record. Only the Windows image has
+ * a markers file; everywhere else these are no-ops. */
+void tinyc_diag_mark(const char *line);
+void tinyc_diag_mark_ptr(const char *label, const void *p);
+
 /* ---- dual-form entry points ----------------------------------------- */
 
 /* The compiler's real main, exported from the dual-form file. */

@@ -30,7 +30,6 @@ DEFAULT_DIST = os.path.normpath(os.path.join(HERE, "..", "build", "dist"))
 PLANNED_HOSTS = [
     "x86_64-linux-gnu",
     "aarch64-linux-gnu",
-    "riscv64-linux-gnu",
     "x86_64-w64-mingw32",
     "arm64-apple-darwin",
     "x86_64-apple-darwin",

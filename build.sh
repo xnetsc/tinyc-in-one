@@ -32,7 +32,7 @@
 #
 #   ./build.sh host [host-triple ...]
 #
-# Supported here: the three linux-gnu triples and x86_64-w64-mingw32.
+# Supported here: the two linux-gnu triples and x86_64-w64-mingw32.
 # A Linux variant whose CPU matches the build host is compiled with
 # the host compiler and the system sysroot; any other Linux variant
 # with the <triplet>-gcc cross compiler and a /usr/<triplet> sysroot
@@ -402,7 +402,7 @@ build_host_for() {
 
 if [ "${1:-}" = "host" ]; then
     shift
-    HOSTS=${@:-"aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32"}
+    HOSTS=${@:-"aarch64-linux-gnu x86_64-w64-mingw32"}
     for H in $HOSTS; do
         case $H in
             x86_64-linux-gnu)
@@ -410,9 +410,6 @@ if [ "${1:-}" = "host" ]; then
                 ;;
             aarch64-linux-gnu)
                 build_host_for "$H" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64"
-                ;;
-            riscv64-linux-gnu)
-                build_host_for "$H" riscv64 "-DTCC_TARGET_RISCV64" "$ISA_RISCV64"
                 ;;
             x86_64-w64-mingw32)
                 build_host_mingw

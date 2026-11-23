@@ -184,7 +184,11 @@ EXPORTED_FUNCTIONS='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_t
 
 EXPORTED_FUNCTIONS="${EXPORTED_FUNCTIONS_OVERRIDE:-$EXPORTED_FUNCTIONS}"
 
-EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","UTF8ToString","stringToUTF8","lengthBytesUTF8","addFunction","removeFunction"]'
+# HEAPU8 is in the runtime methods because the glue layer assembles
+# argv through it (NativeBridge assembles the argument strings and
+# the argv array in the module heap): current Emscripten exposes the
+# heap views on the module object only when they are listed here.
+EXPORTED_RUNTIME_METHODS='["HEAPU8","ccall","cwrap","FS","UTF8ToString","stringToUTF8","lengthBytesUTF8","addFunction","removeFunction"]'
 
 # Notes on the less obvious flags:
 #   MODULARIZE + EXPORT_ES6   index.mjs imports the default factory

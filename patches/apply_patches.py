@@ -209,6 +209,65 @@ patch("tccrun.c",
 
     tinyc_run_redirect_end();""")
 
+# ---- tccrun.c / tccpe.c: stage markers on the run path --------------
+# A crash inside tcc_run in library mode otherwise leaves no
+# trace of how far the run got. Mark the stage boundaries in the
+# diagnostic markers file (tinyc_diag_mark; a no-op off Windows):
+# runmain.o loaded, the PE_RUN import resolution bracketed in
+# pe_build_imports, relocation done, the entry address resolved,
+# and the call itself bracketed.
+patch("tccrun.c",
+      """    if (tcc_add_support(s1, "runmain.o"))
+        return -1;""",
+      """    if (tcc_add_support(s1, "runmain.o"))
+        return -1;
+    tinyc_diag_mark("run:add-support:ok");""")
+patch("tccrun.c",
+      """    if (tcc_relocate(s1) < 0)
+        return -1;""",
+      """    if (tcc_relocate(s1) < 0)
+        return -1;
+    tinyc_diag_mark("run:relocated");""")
+patch("tccrun.c",
+      """    prog_main = (void*)get_sym_addr(s1, s1->run_main, 1, 1);
+    if ((addr_t)-1 == (addr_t)prog_main)
+        return -1;""",
+      """    prog_main = (void*)get_sym_addr(s1, s1->run_main, 1, 1);
+    if ((addr_t)-1 == (addr_t)prog_main)
+        return -1;
+    tinyc_diag_mark_ptr("run:entry", (const void *)prog_main);""")
+patch("tccrun.c",
+      "        ret = prog_main(argc, argv, envp);",
+      """        tinyc_diag_mark("run:calling");
+        ret = prog_main(argc, argv, envp);""")
+patch("tccrun.c",
+      "    tinyc_run_redirect_end();",
+      """    tinyc_diag_mark("run:returned");
+
+    tinyc_run_redirect_end();""")
+patch("tccpe.c",
+      """    if (0 == sym_cnt)
+        return;
+
+    pe_align_section(pe->thunk, 16);""",
+      """    if (0 == sym_cnt)
+        return;
+
+    if (pe->type == PE_RUN)
+        tinyc_diag_mark("imports:begin");
+
+    pe_align_section(pe->thunk, 16);""")
+patch("tccpe.c",
+      """        dll_ptr += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+    }
+}""",
+      """        dll_ptr += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+    }
+
+    if (pe->type == PE_RUN)
+        tinyc_diag_mark("imports:done");
+}""")
+
 # ---- tcc.c: real process entry forwards to tinyc_main ----------------
 p = SRC / "tcc.c"
 text = p.read_text()

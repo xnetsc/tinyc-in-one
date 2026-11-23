@@ -40,12 +40,20 @@
  * address, checked against this process's own GetProcAddress
  * result. Finally tinyc_ping, whose
  * whole body is one file append inside the loaded image, proves
- * the post-init path end to end. A vectored exception handler is
- * armed across the noop + init + ping window: on a fatal exception
- * it appends the exception code, the fault address, its RVA
- * relative to the loaded module, and (for an access violation) the
- * access kind and data address to win_host_test.markers, then
- * exits with code 0xE1.
+ * the post-init path end to end.
+ *
+ * A vectored exception handler is armed for the whole test. It
+ * appends every exception's code and fault address to
+ * win_host_test.markers: with the RVA relative to the loaded
+ * module when the address falls inside it, and with the
+ * VirtualQuery allocation base and offset from it otherwise -
+ * the offset form is what identifies a fault inside a tcc_run
+ * guest's run memory. For an access violation it also appends
+ * the access kind and the data address. Fatal codes then exit
+ * with 0xE1; any other code is only recorded and passed on to
+ * the normal handlers. An unhandled-exception filter is the
+ * backstop: if an exception still escapes, it repeats the
+ * record with an uef: prefix and exits with 0xE2.
  */
 #include <windows.h>
 #include <stdio.h>
@@ -268,23 +276,23 @@ static unsigned long long module_rva(const void *addr)
     return off < nt->OptionalHeader.SizeOfImage ? off : 0;
 }
 
-static LONG WINAPI veh_handler(EXCEPTION_POINTERS *ep)
+/* Record one exception in the markers file: code, fault address,
+ * its RVA when it falls inside the loaded module, and its
+ * VirtualQuery allocation base + offset otherwise (a tcc_run
+ * guest's run memory is one VirtualAlloc region, so the offset
+ * locates the fault inside the guest image). For an access
+ * violation, a second line carries the access kind and the data
+ * address. Plain Win32 calls only, via mark_line. */
+static void log_exception(const char *prefix, EXCEPTION_RECORD *rec)
 {
-    EXCEPTION_RECORD *rec;
     struct linebuf lb;
     unsigned long long addr, rva;
-    if (!g_veh_armed)
-        return EXCEPTION_CONTINUE_SEARCH;
-    rec = ep->ExceptionRecord;
-    if (rec->ExceptionCode != EXCEPTION_ACCESS_VIOLATION
-        && rec->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION
-        && rec->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION
-        && rec->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
-        return EXCEPTION_CONTINUE_SEARCH;
+    MEMORY_BASIC_INFORMATION mbi;
     addr = (unsigned long long)(uintptr_t)rec->ExceptionAddress;
     rva = module_rva(rec->ExceptionAddress);
     lb.len = 0; lb.buf[0] = 0;
-    lb_puts(&lb, "veh: exception code=");
+    lb_puts(&lb, prefix);
+    lb_puts(&lb, " exception code=");
     lb_code(&lb, (unsigned long)rec->ExceptionCode);
     lb_puts(&lb, " address=");
     lb_hex(&lb, addr);
@@ -294,13 +302,21 @@ static LONG WINAPI veh_handler(EXCEPTION_POINTERS *ep)
     } else {
         lb_puts(&lb, " rva=outside-module");
     }
+    if (VirtualQuery(rec->ExceptionAddress, &mbi, sizeof mbi)) {
+        lb_puts(&lb, " alloc=");
+        lb_hex(&lb, (unsigned long long)(uintptr_t)mbi.AllocationBase);
+        lb_puts(&lb, " off=");
+        lb_hex(&lb, addr
+                - (unsigned long long)(uintptr_t)mbi.AllocationBase);
+    }
     mark_line(lb.buf);
     if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION
         && rec->NumberParameters >= 2) {
         unsigned long long data = (unsigned long long)rec->ExceptionInformation[1];
         unsigned long long drva = module_rva((const void *)(uintptr_t)data);
         lb.len = 0; lb.buf[0] = 0;
-        lb_puts(&lb, "veh: access violation access=");
+        lb_puts(&lb, prefix);
+        lb_puts(&lb, " access violation access=");
         lb_puts(&lb, rec->ExceptionInformation[0] == 0 ? "read"
                 : rec->ExceptionInformation[0] == 1 ? "write" : "execute");
         lb_puts(&lb, " data=");
@@ -311,7 +327,36 @@ static LONG WINAPI veh_handler(EXCEPTION_POINTERS *ep)
         }
         mark_line(lb.buf);
     }
-    ExitProcess(0xE1);
+}
+
+static LONG WINAPI veh_handler(EXCEPTION_POINTERS *ep)
+{
+    EXCEPTION_RECORD *rec;
+    if (!g_veh_armed)
+        return EXCEPTION_CONTINUE_SEARCH;
+    rec = ep->ExceptionRecord;
+    log_exception("veh:", rec);
+    switch (rec->ExceptionCode) {
+    case EXCEPTION_ACCESS_VIOLATION:
+    case EXCEPTION_ILLEGAL_INSTRUCTION:
+    case EXCEPTION_PRIV_INSTRUCTION:
+    case EXCEPTION_STACK_OVERFLOW:
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:
+    case 0xC0000374: /* STATUS_HEAP_CORRUPTION */
+    case 0xC0000409: /* STATUS_STACK_BUFFER_OVERRUN (fastfail) */
+        ExitProcess(0xE1);
+    }
+    /* Anything else is only a record: leave the exception to the
+     * handlers that would normally see it. */
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+/* Backstop for an exception no handler claims: same record with
+ * an uef: prefix, then a distinctive exit code. */
+static LONG WINAPI uef_handler(EXCEPTION_POINTERS *ep)
+{
+    log_exception("uef:", ep->ExceptionRecord);
+    ExitProcess(0xE2);
     return EXCEPTION_EXECUTE_HANDLER; /* not reached */
 }
 
@@ -325,6 +370,12 @@ int main(int argc, char **argv)
     const char *exe = argv[1];
 
     AddVectoredExceptionHandler(1, veh_handler);
+    SetUnhandledExceptionFilter(uef_handler);
+    /* Armed for the whole test, not just the first calls into the
+     * image: every step below is under diagnosis, and a fatal
+     * exception in any of them - the tcc_run call included - must
+     * leave its record in the markers file. */
+    g_veh_armed = 1;
 
     mark("loadlibrary:begin");
     HMODULE h = LoadLibraryA(exe);
@@ -388,10 +439,6 @@ int main(int argc, char **argv)
         mark_line(lb.buf);
     }
 
-    /* The exception handler is armed only across the noop + init +
-     * ping window: those calls are the ones under diagnosis, and
-     * exceptions elsewhere keep their normal handling. */
-    g_veh_armed = 1;
     mark("tinyc_noop:begin");
     check(p_noop() == 0, "tinyc_noop() returns 0");
     mark("tinyc_noop:done");
@@ -422,7 +469,6 @@ int main(int argc, char **argv)
     mark("tinyc_ping:begin");
     check(p_ping() == 0, "tinyc_ping() returns 0");
     mark("tinyc_ping:done");
-    g_veh_armed = 0;
 
     {
         char a0[] = "tinyc", a1[] = "--version";
