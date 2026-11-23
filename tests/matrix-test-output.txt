@@ -1,0 +1,112 @@
+tinyc native matrix smoke tests
+===============================
+PASS: x86_64-linux-gnu (ELF64, Advanced Micro Devices X86-64, interp /lib64/ld-linux-x86-64.so.2)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x401c60
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          624 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         10
+  Size of section headers:           64 (bytes)
+  Number of section headers:         25
+  Section header string table index: 24
+PASS: x86_64-linux-gnu output executes and prints hello
+PASS: aarch64-linux-gnu (ELF64, AArch64, interp /lib/ld-linux-aarch64.so.1)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           AArch64
+  Version:                           0x1
+  Entry point address:               0x410c00
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          624 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         10
+  Size of section headers:           64 (bytes)
+  Number of section headers:         24
+  Section header string table index: 23
+PASS: riscv64-linux-gnu (ELF64, RISC-V, interp /lib/ld-linux-riscv64-lp64d.so.1)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           RISC-V
+  Version:                           0x1
+  Entry point address:               0x11a3a
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          568 (bytes into file)
+  Flags:                             0x4, double-float ABI
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         9
+  Size of section headers:           64 (bytes)
+  Number of section headers:         22
+  Section header string table index: 21
+PASS: x86_64-w64-mingw32 (PE32+ executable, x86-64)
+/tmp/tmp.UIgURflHD4/hello-x86_64-w64-mingw32.exe: PE32+ executable (console) x86-64 (stripped to external PDB), for MS Windows, 4 sections
+PASS: aarch64-linux-android (ELF64, AArch64, interp /system/bin/linker64)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           AArch64
+  Version:                           0x1
+  Entry point address:               0x410ec0
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          624 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         10
+  Size of section headers:           64 (bytes)
+  Number of section headers:         28
+  Section header string table index: 27
+PASS: x86_64-linux-android (ELF64, Advanced Micro Devices X86-64, interp /system/bin/linker64)
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00 
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            UNIX - System V
+  ABI Version:                       0
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Version:                           0x1
+  Entry point address:               0x401df0
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          624 (bytes into file)
+  Flags:                             0x0
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         10
+  Size of section headers:           64 (bytes)
+  Number of section headers:         26
+  Section header string table index: 25
+
+MATRIX SMOKE: ALL PASS

@@ -1,0 +1,206 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+const tcc = require('../index.js');
+
+function tmpdir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'tinyc-test-')); }
+
+test('cli: --version via exported main returns 0 and does not exit', () => {
+  const [code, out] = tcc.runCliCapture(['--version']);
+  assert.strictEqual(code, 0);
+  assert.match(out.toString(), /tcc version/);
+});
+
+test('cli: -dumpversion returns 0 (no host exit)', () => {
+  const [code, out] = tcc.runCliCapture(['-dumpversion']);
+  assert.strictEqual(code, 0);
+  assert.match(out.toString(), /0\.9\.28/);
+});
+
+test('cli: compile and run an executable', () => {
+  const d = tmpdir();
+  const src = path.join(d, 'hello.c');
+  const exe = path.join(d, 'hello');
+  fs.writeFileSync(src, '#include <stdio.h>\nint main(){ printf("hi-js\\n"); return 7; }\n');
+  const [code, out] = tcc.runCliCapture([src, '-o', exe]);
+  assert.strictEqual(code, 0, out.toString());
+  const r = require('child_process').spawnSync(exe, [], { encoding: 'buffer' });
+  assert.strictEqual(r.status, 7);
+  assert.strictEqual(r.stdout.toString(), 'hi-js\n');
+});
+
+test('cli: bad source returns nonzero and captures the error', () => {
+  const d = tmpdir();
+  const src = path.join(d, 'bad.c');
+  fs.writeFileSync(src, 'int main( { nope }\n');
+  const [code, out] = tcc.runCliCapture(['-c', src, '-o', path.join(d, 'bad.o')]);
+  assert.notStrictEqual(code, 0);
+  assert.match(out.toString(), /error/);
+});
+
+test('cli: -E output is routed through IO capture', () => {
+  const d = tmpdir();
+  const src = path.join(d, 'pp.c');
+  fs.writeFileSync(src, '#define VAL 4242\nint x = VAL;\n');
+  const [code, out] = tcc.runCliCapture(['-E', src]);
+  assert.strictEqual(code, 0, out.toString());
+  assert.match(out.toString(), /int x = 4242;/);
+});
+
+test('cli: dynamic add of a local include dir and a local static library', () => {
+  const d = tmpdir();
+  const inc = path.join(d, 'inc'); fs.mkdirSync(inc);
+  fs.writeFileSync(path.join(inc, 'dyn.h'), '#define DYNGREET 99\n');
+  const libsrc = path.join(d, 'dyn.c');
+  fs.writeFileSync(libsrc, 'int dynval(void){ return 1234; }\n');
+  let [code, out] = tcc.runCliCapture(['-c', libsrc, '-o', path.join(d, 'dyn.o')]);
+  assert.strictEqual(code, 0, out.toString());
+  execFileSync('ar', ['rcs', path.join(d, 'libdyn.a'), path.join(d, 'dyn.o')]);
+  const main = path.join(d, 'main.c');
+  fs.writeFileSync(main, '#include "dyn.h"\n#include <stdio.h>\nextern int dynval(void);\n' +
+    'int main(){ printf("dyn %d %d\\n", DYNGREET, dynval()); return 0; }\n');
+  const exe = path.join(d, 'prog');
+  [code, out] = tcc.runCliCapture(['-I' + inc, main, path.join(d, 'libdyn.a'), '-o', exe]);
+  assert.strictEqual(code, 0, out.toString());
+  assert.strictEqual(execFileSync(exe).toString(), 'dyn 99 1234\n');
+});
+
+test('api: compileString and call the compiled function', () => {
+  const s = new tcc.State();
+  s.compileString('int add(int a, int b){ return a + b; }');
+  const add = s.function('add', 'int', ['int', 'int']);
+  assert.strictEqual(add(19, 23), 42);
+  s.close();
+});
+
+test('api: compile errors are collected, not printed', () => {
+  const s = new tcc.State();
+  assert.throws(() => s.compileString('int broken( {'), tcc.TinyCError);
+  assert.ok(s.errors.some((e) => e.includes('error')));
+  s.close();
+});
+
+test('api: dynamic add include path via API', () => {
+  const d = tmpdir();
+  const inc = path.join(d, 'inc'); fs.mkdirSync(inc);
+  fs.writeFileSync(path.join(inc, 'cfg.h'), '#define CFGVAL 77\n');
+  const s = new tcc.State();
+  s.addIncludePath(inc);
+  s.compileString('#include "cfg.h"\nint getcfg(void){ return CFGVAL; }');
+  assert.strictEqual(s.function('getcfg', 'int', [])(), 77);
+  s.close();
+});
+
+test('api: defineSymbol', () => {
+  const s = new tcc.State();
+  s.defineSymbol('MAGIC', '123');
+  s.compileString('int magic(void){ return MAGIC; }');
+  assert.strictEqual(s.function('magic', 'int', [])(), 123);
+  s.close();
+});
+
+test('io: JS callback receives compiler output', () => {
+  const chunks = [];
+  const io = tcc.IO.callback({ out: (b) => chunks.push(b), err: (b) => chunks.push(b) });
+  const code = tcc.runCli(['--version'], { io });
+  assert.strictEqual(code, 0);
+  assert.match(Buffer.concat(chunks).toString(), /tcc version/);
+  io.close();
+});
+
+/* ------------------------------------------- host / target resolution
+ * Host simulation runs in child processes: TINYC_HOST_TRIPLE overrides
+ * detection, and each child gets a fresh module registry. */
+function runChild(env, script) {
+  return require('child_process').spawnSync(process.execPath, ['-e', script], {
+    env: { ...process.env, ...env },
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+}
+
+const RESOLVE_OR_ERR = `
+  const tcc = require('./index.js');
+  try { const r = tcc.resolveNative(); console.log('RESOLVED ' + r.host + ' x ' + r.target + ' ' + r.binaryPath); }
+  catch (e) { console.log('ERR ' + e.message); }
+`;
+
+test('host: TINYC_HOST_TRIPLE=x86_64-linux-gnu resolves and compiles', () => {
+  const script = `
+    const tcc = require('./index.js');
+    const r = tcc.resolveNative();
+    if (!r.binaryPath.includes('natives/x86_64-linux-gnu/toolchain/x86_64-linux-gnu')) {
+      throw new Error('unexpected binary path: ' + r.binaryPath);
+    }
+    const [code, out] = tcc.runCliCapture(['-dumpversion']);
+    if (code !== 0) throw new Error('dumpversion rc=' + code);
+    console.log('VERSION ' + out.toString().trim());
+  `;
+  const r = runChild({ TINYC_HOST_TRIPLE: 'x86_64-linux-gnu' }, script);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /VERSION 0\.9\.28/);
+});
+
+test('host: combination missing from the package names host and available combinations', () => {
+  const r = runChild({ TINYC_HOST_TRIPLE: 'x86_64-w64-mingw32' }, RESOLVE_OR_ERR);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /ERR tinyc: no native build for host x86_64-w64-mingw32 \/ target x86_64-w64-mingw32/);
+  assert.match(r.stdout, /available combinations: .*x86_64-linux-gnu x x86_64-linux-gnu/);
+});
+
+test('host: 32-bit host triple is rejected, no fallback', () => {
+  const r = runChild({ TINYC_HOST_TRIPLE: 'i386-linux-gnu' }, RESOLVE_OR_ERR);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /ERR tinyc: 32-bit hosts are not supported \(host triple: i386-linux-gnu\)/);
+});
+
+test('target: TINYC_TARGET_TRIPLE selects the cross variant and compiles for it', (t) => {
+  // Pick a cross target the package actually contains (the set of
+  // staged targets follows the kernel matrix build).
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'packaging-manifest.json'), 'utf8'));
+  const MACHINES = { 'aarch64-linux-gnu': /AArch64/, 'riscv64-linux-gnu': /RISC-V/ };
+  const combo = manifest.combinations.find(
+    (c) => c.host === 'x86_64-linux-gnu' && MACHINES[c.target]);
+  if (!combo) { t.skip('no cross target staged in this package'); return; }
+  const d = tmpdir();
+  const obj = path.join(d, 'x.o');
+  const src = path.join(d, 'x.c');
+  const script = `
+    const fs = require('fs');
+    const tcc = require('./index.js');
+    const r = tcc.resolveNative();
+    if (r.target !== ${JSON.stringify(combo.target)}) throw new Error('target ' + r.target);
+    fs.writeFileSync(${JSON.stringify(src)}, 'int add(int a, int b){ return a + b; }\\n');
+    const [code, out] = tcc.runCliCapture(['-c', ${JSON.stringify(src)}, '-o', ${JSON.stringify(obj)}]);
+    if (code !== 0) throw new Error('compile rc=' + code + ' ' + out);
+    console.log('COMPILED');
+  `;
+  const r = runChild({ TINYC_TARGET_TRIPLE: combo.target }, script);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /COMPILED/);
+  const hdr = execFileSync('readelf', ['-h', obj]).toString();
+  assert.match(hdr, new RegExp('Machine:\\s+' + MACHINES[combo.target].source));
+});
+
+test('manifest: outputs are read from packaging-manifest, not hardcoded', () => {
+  const r = tcc.resolveNative();
+  const mf = JSON.parse(fs.readFileSync(path.join(r.root, 'packaging-manifest.json'), 'utf8'));
+  const combo = mf.combinations.find((c) => c.host === r.host && c.target === r.target);
+  assert.ok(combo, 'resolved combination is listed in the manifest');
+  assert.deepStrictEqual(r.outputs, combo.outputs ?? null);
+});
+
+test('io: file implementation', () => {
+  const d = tmpdir();
+  const log = path.join(d, 'log.txt');
+  const io = tcc.IO.file(log);
+  const code = tcc.runCli(['--version'], { io });
+  io.close();
+  assert.strictEqual(code, 0);
+  assert.match(fs.readFileSync(log, 'utf8'), /tcc version/);
+});

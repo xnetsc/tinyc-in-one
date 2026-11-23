@@ -1,0 +1,80 @@
+{
+  "name": "tinyc-sysroot",
+  "version": 1,
+  "target": "arm64-apple-darwin",
+  "binPath": "/sysroot/bin/tinyc",
+  "includeDir": "/sysroot/include",
+  "includeFiles": [
+    {
+      "path": "/sysroot/include/float.h",
+      "source": "include/float.h"
+    },
+    {
+      "path": "/sysroot/include/stdalign.h",
+      "source": "include/stdalign.h"
+    },
+    {
+      "path": "/sysroot/include/stdarg.h",
+      "source": "include/stdarg.h"
+    },
+    {
+      "path": "/sysroot/include/stdatomic.h",
+      "source": "include/stdatomic.h"
+    },
+    {
+      "path": "/sysroot/include/stdbool.h",
+      "source": "include/stdbool.h"
+    },
+    {
+      "path": "/sysroot/include/stddef.h",
+      "source": "include/stddef.h"
+    },
+    {
+      "path": "/sysroot/include/stdnoreturn.h",
+      "source": "include/stdnoreturn.h"
+    },
+    {
+      "path": "/sysroot/include/tccdefs.h",
+      "source": "include/tccdefs.h"
+    },
+    {
+      "path": "/sysroot/include/tgmath.h",
+      "source": "include/tgmath.h"
+    },
+    {
+      "path": "/sysroot/include/varargs.h",
+      "source": "include/varargs.h"
+    },
+    {
+      "path": "/sysroot/include/tcclib.h",
+      "source": "tcclib.h"
+    }
+  ],
+  "libDir": "/sysroot/lib",
+  "libFiles": [
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libtcc1.a",
+      "source": "lib/arm64-apple-darwin/libtcc1.a"
+    }
+  ],
+  "outputs": {
+    "exe": {
+      "format": "Mach-O executable",
+      "ext": ""
+    },
+    "obj": {
+      "format": "Mach-O object",
+      "ext": ".o"
+    },
+    "shared": {
+      "format": "Mach-O dylib",
+      "ext": ".dylib"
+    },
+    "ar": {
+      "format": "ar archive",
+      "ext": ".a"
+    }
+  },
+  "systemHeaders": "user-sdk"
+}

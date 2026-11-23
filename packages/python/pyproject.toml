@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinyc"
+version = "0.1.0"
+description = "TinyC (TCC) embedded compiler: one dual-form native file (executable + library) with bundled headers and libraries, driven from Python via ctypes."
+requires-python = ">=3.9"
+license = { text = "LGPL-2.1-or-later" }
+
+[tool.setuptools]
+packages = ["tinyc"]
+
+[tool.setuptools.package-data]
+tinyc = ["packaging-manifest.json",
+         "natives/*/toolchain/*/tinyc", "natives/*/toolchain/*/tinyc.exe",
+         "sysroot/**/*"]

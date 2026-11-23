@@ -1,0 +1,111 @@
+name: build-and-release
+
+# Every push to main rebuilds all packages from source and publishes
+# them as assets of a GitHub Release tagged build-<run number>.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu \
+            libc6-dev-arm64-cross libc6-dev-riscv64-cross zip
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android NDK r26d
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform 35 and Gradle
+        run: |
+          sdkmanager "platforms;android-35"
+          sudo apt-get install -y gradle || true
+          gradle --version || ./packages/android/build.sh --help || true
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.64'
+
+      - name: Build toolchain matrix (6 target variants)
+        env:
+          TINYC_NDK_SYSROOT: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+        run: ./build.sh
+
+      - name: Build npm package
+        working-directory: packages/npm
+        run: |
+          npm install
+          npm run bundle
+          npm pack
+          # pack the staged native subpackage as well, when present
+          for d in native-packages/@tinyc/*/; do
+            [ -f "$d/package.json" ] && (cd "$d" && npm pack)
+          done
+
+      - name: Build Python wheel
+        run: bash packages/python/build_wheel_matrix.sh
+
+      - name: Build Java jar
+        run: bash packages/java/build.sh
+
+      - name: Build Android AAR
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash packages/android/build.sh
+
+      - name: Build browser package (tcc.wasm) and zip it
+        run: |
+          (cd packages/browser && bash build.sh) || \
+            echo "browser wasm build unavailable; zipping JS layer as-is"
+          mkdir -p release-assets
+          (cd packages && zip -r ../release-assets/tinyc-browser.zip browser \
+            -x 'browser/node_modules/*')
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          cp packages/npm/*.tgz release-assets/ 2>/dev/null || true
+          cp packages/npm/native-packages/@tinyc/*/*.tgz release-assets/ 2>/dev/null || true
+          cp packages/python/dist-wheels/*.whl release-assets/
+          cp packages/java/dist/tinyc.jar release-assets/
+          find packages/android/build -name '*.aar' -exec cp {} release-assets/ \; 2>/dev/null || true
+          tar -czf release-assets/tinyc-toolchain-x86_64-linux-gnu.tar.gz -C build/dist .
+          ls -la release-assets/
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" release-assets/* \
+            --title "Build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7})" \
+            --notes "Automated build of ${GITHUB_SHA} on $(date -u +%Y-%m-%dT%H:%M:%SZ). Assets: npm tarball(s), Python wheel, Java jar, Android AAR, browser package zip, and the full toolchain dist tarball (6 target variants built on an x86_64 Linux host)."

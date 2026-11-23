@@ -1,0 +1,95 @@
+#!/bin/bash
+# Smoke tests for the native target matrix.
+#
+# For every triple present in build/dist, compile a hello-world with
+# that variant's dual-form file and verify the output against the
+# triple: ELF class/machine and PT_INTERP for ELF targets (via
+# readelf), PE32+ for the Windows target (via file/objdump). The
+# native variant's output is also executed. Triples whose dist is
+# absent are reported SKIP, not failed; a present-but-broken variant
+# fails the run. Full output is kept in tests/matrix-test-output.txt.
+set -u
+cd "$(dirname "$0")/.."
+ROOT=$PWD
+LOG=$ROOT/tests/matrix-test-output.txt
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+FAIL=0
+
+{
+echo "tinyc native matrix smoke tests"
+echo "==============================="
+} > "$LOG"
+
+cat > "$TMP/hello.c" <<'EOF'
+#include <stdio.h>
+int main(void) { printf("hello from tinyc\n"); return 0; }
+EOF
+
+note() { echo "$1" | tee -a "$LOG"; }
+fail() { note "FAIL: $1"; FAIL=1; }
+
+# check_elf <triple> <outfile> <machine-regex> <expected-interp>
+check_elf() {
+    local triple=$1 out=$2 machine=$3 interp=$4
+    local hdr int
+    hdr=$(readelf -h "$out" 2>/dev/null)
+    echo "$hdr" | grep -q "Class:.*ELF64" \
+        || { fail "$triple: not ELF64"; return; }
+    echo "$hdr" | grep -q "Machine:.*$machine" \
+        || { fail "$triple: machine mismatch ($(echo "$hdr" | grep Machine))"; return; }
+    int=$(readelf -l "$out" 2>/dev/null | sed -n 's/.*\[Requesting program interpreter: \(.*\)\]/\1/p')
+    if [ "$int" = "$interp" ]; then
+        note "PASS: $triple (ELF64, $machine, interp $int)"
+    else
+        fail "$triple: interp '$int' != expected '$interp'"
+    fi
+    readelf -h "$out" >> "$LOG" 2>&1
+}
+
+# smoke <triple> <kind> [machine-regex] [interp]
+smoke() {
+    local triple=$1 kind=$2 machine=${3:-} interp=${4:-}
+    local dist=$ROOT/build/dist/$triple
+    if [ ! -x "$dist/bin/tinyc" ]; then
+        note "SKIP: $triple (not built)"
+        return
+    fi
+    local out=$TMP/hello-$triple
+    [ "$kind" = pe ] && out=$out.exe
+    if ! "$dist/bin/tinyc" "$TMP/hello.c" -o "$out" >> "$LOG" 2>&1; then
+        fail "$triple: hello-world compile/link failed"
+        return
+    fi
+    case $kind in
+        elf) check_elf "$triple" "$out" "$machine" "$interp" ;;
+        pe)
+            if file "$out" | grep -q "PE32+ executable.*x86-64" \
+               && objdump -f "$out" 2>/dev/null | grep -q "pei-x86-64"; then
+                note "PASS: $triple (PE32+ executable, x86-64)"
+            else
+                fail "$triple: not a PE32+ x86-64 executable ($(file "$out"))"
+            fi
+            file "$out" >> "$LOG"
+            ;;
+    esac
+    # the native variant runs on this host; check its output too
+    if [ "$triple" = x86_64-linux-gnu ]; then
+        if [ "$("$out")" = "hello from tinyc" ]; then
+            note "PASS: x86_64-linux-gnu output executes and prints hello"
+        else
+            fail "x86_64-linux-gnu: compiled program output mismatch"
+        fi
+    fi
+}
+
+smoke x86_64-linux-gnu    elf "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
+smoke aarch64-linux-gnu   elf "AArch64"                       "/lib/ld-linux-aarch64.so.1"
+smoke riscv64-linux-gnu   elf "RISC-V"                        "/lib/ld-linux-riscv64-lp64d.so.1"
+smoke x86_64-w64-mingw32  pe
+smoke aarch64-linux-android elf "AArch64"                     "/system/bin/linker64"
+smoke x86_64-linux-android  elf "Advanced Micro Devices X86-64" "/system/bin/linker64"
+
+echo >> "$LOG"
+if [ $FAIL -eq 0 ]; then note "MATRIX SMOKE: ALL PASS"; else note "MATRIX SMOKE: FAILURES PRESENT"; fi
+exit $FAIL

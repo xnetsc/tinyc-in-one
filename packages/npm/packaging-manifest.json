@@ -1,0 +1,190 @@
+{
+  "name": "tinyc",
+  "layout": 1,
+  "kernelVersion": "0.9.28rc",
+  "combinations": [
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "aarch64-linux-android",
+      "binary": "natives/x86_64-linux-gnu/toolchain/aarch64-linux-android/tinyc",
+      "sysroot": "sysroot/aarch64-linux-android",
+      "isa": "ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "ELF executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "ELF relocatable",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "ELF shared object",
+          "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "aarch64-linux-gnu",
+      "binary": "natives/x86_64-linux-gnu/toolchain/aarch64-linux-gnu/tinyc",
+      "sysroot": "sysroot/aarch64-linux-gnu",
+      "isa": "ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "ELF executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "ELF relocatable",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "ELF shared object",
+          "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "riscv64-linux-gnu",
+      "binary": "natives/x86_64-linux-gnu/toolchain/riscv64-linux-gnu/tinyc",
+      "sysroot": "sysroot/riscv64-linux-gnu",
+      "isa": "RV64GC baseline (I/M/A/F/D/C); no Vector extension (RVV) support",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "ELF executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "ELF relocatable",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "ELF shared object",
+          "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "x86_64-linux-android",
+      "binary": "natives/x86_64-linux-gnu/toolchain/x86_64-linux-android/tinyc",
+      "sysroot": "sysroot/x86_64-linux-android",
+      "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "ELF executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "ELF relocatable",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "ELF shared object",
+          "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "x86_64-linux-gnu",
+      "binary": "natives/x86_64-linux-gnu/toolchain/x86_64-linux-gnu/tinyc",
+      "sysroot": "sysroot/x86_64-linux-gnu",
+      "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "ELF executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "ELF relocatable",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "ELF shared object",
+          "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "x86_64-w64-mingw32",
+      "binary": "natives/x86_64-linux-gnu/toolchain/x86_64-w64-mingw32/tinyc",
+      "sysroot": "sysroot/x86_64-w64-mingw32",
+      "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
+      "status": "included",
+      "outputs": {
+        "exe": {
+          "format": "PE executable",
+          "ext": ".exe"
+        },
+        "obj": {
+          "format": "COFF object",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "PE DLL",
+          "ext": ".dll"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    }
+  ],
+  "pending": [
+    {
+      "host": "aarch64-linux-gnu",
+      "target": "aarch64-linux-gnu",
+      "status": "pending"
+    },
+    {
+      "host": "riscv64-linux-gnu",
+      "target": "riscv64-linux-gnu",
+      "status": "pending"
+    },
+    {
+      "host": "x86_64-w64-mingw32",
+      "target": "x86_64-w64-mingw32",
+      "status": "pending"
+    },
+    {
+      "host": "arm64-apple-darwin",
+      "target": "arm64-apple-darwin",
+      "status": "pending"
+    },
+    {
+      "host": "x86_64-apple-darwin",
+      "target": "x86_64-apple-darwin",
+      "status": "pending"
+    }
+  ]
+}

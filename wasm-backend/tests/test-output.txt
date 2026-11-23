@@ -1,0 +1,18 @@
+== compile test-input.c ==
+compile exit=0
+== node instantiate + assert ==
+wasm size: 834
+magic ok: true
+exports: add, memory, mix, poly, triple
+add(2,3) = 5
+triple(5) = 15
+poly(3) = 29
+mix(17,5) = 14
+ALL ASSERTIONS PASSED
+node exit=0
+== p8 regression (live value in REG_IRET across a call) ==
+p8 poly(3)= 11
+p8 exit=0
+== -run must be an explicit wasm error ==
+tcc: error: wasm: -run is not supported for the wasm target; instantiate the generated module with a host wasm engine
+run exit=1

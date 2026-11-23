@@ -1,0 +1,53 @@
+=== mode A: tinyc.native.path (dev) ===
+native file: /home/hatch/workspace/tinyc-embedded/packages/java/build/test-runtime/tinyc
+runtime dir: /home/hatch/workspace/tinyc-embedded/packages/java/build/test-runtime
+hasCli: true
+PASS: api: setOutputType(MEMORY)
+PASS: api: compileString rc==0 (got 0)
+PASS: api: relocate rc==0
+PASS: api: getSymbol(add) found
+PASS: api: add(40, 2) == 42 (got 42)
+PASS: cli: native file exports a main entry
+PASS: cli: runCli rc==0 (got 0)
+PASS: cli: output file is executable
+PASS: cli: compiled program exit code == 7 (got 7)
+PASS: cli: compiled program output contains hello-from-tcc
+PASS: dyn: addIncludePath rc==0
+PASS: dyn: setOutputType(MEMORY)
+PASS: dyn: compileString with local header rc==0 (got 0)
+PASS: dyn: relocate rc==0
+PASS: dyn: getSymbol(get_magic) found
+PASS: dyn: get_magic() == 42 (got 42)
+PASS: io: broken source rc==-1 (got -1)
+PASS: io: captured stderr contains 'error' (got: <string>:1: error: identifier expected)
+PASS: io: write upcall returned 3 (got 3)
+PASS: io: write upcall delivered bytes 'abc'
+PASS: io: no callback error stored
+ALL TESTS PASSED (21 checks)
+=== mode B: jar extraction (distribution) ===
+native file: /root/.cache/tinyc-java/0.9.28rc-java1/tinyc
+runtime dir: /root/.cache/tinyc-java/0.9.28rc-java1
+hasCli: true
+PASS: api: setOutputType(MEMORY)
+PASS: api: compileString rc==0 (got 0)
+PASS: api: relocate rc==0
+PASS: api: getSymbol(add) found
+PASS: api: add(40, 2) == 42 (got 42)
+PASS: cli: native file exports a main entry
+PASS: cli: runCli rc==0 (got 0)
+PASS: cli: output file is executable
+PASS: cli: compiled program exit code == 7 (got 7)
+PASS: cli: compiled program output contains hello-from-tcc
+PASS: dyn: addIncludePath rc==0
+PASS: dyn: setOutputType(MEMORY)
+PASS: dyn: compileString with local header rc==0 (got 0)
+PASS: dyn: relocate rc==0
+PASS: dyn: getSymbol(get_magic) found
+PASS: dyn: get_magic() == 42 (got 42)
+PASS: io: broken source rc==-1 (got -1)
+PASS: io: captured stderr contains 'error' (got: <string>:1: error: identifier expected)
+PASS: io: write upcall returned 3 (got 3)
+PASS: io: write upcall delivered bytes 'abc'
+PASS: io: no callback error stored
+ALL TESTS PASSED (21 checks)
+=== run-tests: OK ===
