@@ -49,6 +49,8 @@ JDK_BIN=$(resolve_jdk_bin) || {
 JAVAC="$JDK_BIN/javac"; JAR="$JDK_BIN/jar"
 
 # ---- 构建宿主 triple（决定 staging 哪些二进制进 jar；仅 64 位） ----
+# Windows 宿主上构建走 Git Bash/MSYS2/Cygwin 的 shell，其 uname -s 是
+# MINGW64_NT*/MSYS_NT*/CYGWIN_NT*，宿主本体是原生 Windows（MinGW PE）。
 OS=$(uname -s)
 ARCH=$(uname -m)
 case "$OS/$ARCH" in
@@ -57,6 +59,8 @@ case "$OS/$ARCH" in
   Linux/riscv64) HOST_TRIPLE=riscv64-linux-gnu ;;
   Darwin/arm64)  HOST_TRIPLE=arm64-apple-darwin ;;
   Darwin/x86_64) HOST_TRIPLE=x86_64-apple-darwin ;;
+  MINGW64_NT*/x86_64|MSYS_NT*/x86_64|CYGWIN_NT*/x86_64)
+    HOST_TRIPLE=x86_64-w64-mingw32 ;;
   */i386|*/i486|*/i586|*/i686)
     echo "unsupported build arch: $ARCH (32-bit hosts are not supported)" >&2; exit 1 ;;
   *) echo "unsupported build host: $OS/$ARCH" >&2; exit 1 ;;
@@ -71,16 +75,23 @@ mkdir -p "$JARROOT" "$DIST"
 # ---- 统一布局 staging：natives/ + sysroot/ + packaging-manifest.json ----
 python3 "$ROOT/packaging/stage_layout.py" --root "$JARROOT" --host "$HOST_TRIPLE"
 
+# staged 的二进制名与 stage_layout 一致（取 dist 清单 dual_file 的基名）：
+# PE 宿主是 tinyc.exe，其余宿主是 tinyc。
 NATIVE_NAME=tinyc
+case "$HOST_TRIPLE" in
+  *-w64-mingw32) NATIVE_NAME=tinyc.exe ;;
+esac
 STAGED_BIN="$JARROOT/natives/$HOST_TRIPLE/toolchain/$HOST_TRIPLE/$NATIVE_NAME"
 [ -f "$STAGED_BIN" ] || { echo "native (host == target) build not staged: $STAGED_BIN" >&2; exit 1; }
 echo "$NATIVE_NAME" > "$BUILD/native-name.txt"
 
 # 导出表核对：tcc_new 必须在；main/tinyc_main 缺失只警告（runCli 不可用）。
-# ELF/PE 宿主上导出就在 staged 文件的动态符号表里。Darwin 的双形态
-# 文件是 Mach-O 可执行文件，没有动态符号表，导出在它内嵌的
-# __TINYC,__dylib 段（构建时以 -sectcreate 嵌入的那份 dylib）里：
-# 先把该段按其 Mach-O 段头解出，再对解出的 dylib 做同一条核对。
+# ELF 宿主上导出就在 staged 文件的动态符号表里（nm -D）。PE 宿主的
+# 导出在导出表里，nm -D 读不到（报 no symbols），用 objdump -p 的
+# [Ordinal/Name Pointer] 表核对——那正是运行时按名解析所见的集合。
+# Darwin 的双形态文件是 Mach-O 可执行文件，没有动态符号表，导出在它
+# 内嵌的 __TINYC,__dylib 段（构建时以 -sectcreate 嵌入的那份 dylib）
+# 里：先把该段按其 Mach-O 段头解出，再对解出的 dylib 做同一条核对。
 if [ "$OS" = "Darwin" ]; then
   CHECK_BIN="$BUILD/staged-libtinyc.dylib"
   python3 - "$STAGED_BIN" "$CHECK_BIN" <<'PYEOF'
@@ -115,6 +126,15 @@ PYEOF
   nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?tcc_new$' \
     || { echo "ERROR: tcc_new not exported by the dylib embedded in $STAGED_BIN" >&2; exit 1; }
   if nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?(tinyc_main|main)$'; then
+    echo "native: main entry exported"
+  else
+    echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
+  fi
+elif [ "$HOST_TRIPLE" = "x86_64-w64-mingw32" ]; then
+  PE_EXPORTS=$(objdump -p "$STAGED_BIN" | sed -n '/\[Ordinal\/Name Pointer\] Table/,$p')
+  grep -qE '\[[ 0-9]+\] tcc_new$' <<<"$PE_EXPORTS" \
+    || { echo "ERROR: tcc_new not exported by $STAGED_BIN" >&2; exit 1; }
+  if grep -qE '\[[ 0-9]+\] (tinyc_main|main)$' <<<"$PE_EXPORTS"; then
     echo "native: main entry exported"
   else
     echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
