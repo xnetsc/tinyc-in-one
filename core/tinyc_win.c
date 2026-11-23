@@ -478,37 +478,6 @@ static void tinyc_init_mark(const char *step_name)
     p_close_handle(h);
 }
 
-/* Run-path diagnostic markers: the init-marker writer above,
- * exported for the library's run path - tcc_run and the PE import
- * builder mark their stage boundaries through these, so a crash
- * inside a run leaves the last completed stage in
- * tinyc_init.markers. The writer uses only the manually resolved
- * file pointers, so it is safe at any point where those resolve,
- * and silently does nothing when they cannot. */
-void tinyc_diag_mark(const char *line)
-{
-    tinyc_init_mark(line);
-}
-
-void tinyc_diag_mark_ptr(const char *label, const void *p)
-{
-    static const char digits[] = "0123456789abcdef";
-    char buf[96];
-    unsigned long long v = (unsigned long long)(uintptr_t)p;
-    int i = 0, s;
-    while (label[i] && i < (int)sizeof(buf) - 20) {
-        buf[i] = label[i];
-        i++;
-    }
-    buf[i++] = '=';
-    buf[i++] = '0';
-    buf[i++] = 'x';
-    for (s = 60; s >= 0; s -= 4)
-        buf[i++] = digits[(v >> s) & 0xf];
-    buf[i] = 0;
-    tinyc_init_mark(buf);
-}
-
 /* Diagnostic export for the library path: the simplest function in
  * this module. It appends one line to tinyc_init.markers through
  * the manually resolved file pointers above and returns, touching

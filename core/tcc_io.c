@@ -407,10 +407,51 @@ FILE *tinyc_io_open_out_stream(void) { return NULL; }
 
 /* ------------------------------------------------------------------ */
 /* Run-path diagnostic markers: only the Windows image has a        */
-/* markers file (the real implementations are in tinyc_win.c);      */
-/* everywhere else these are no-ops.                                */
+/* markers file; everywhere else these are no-ops. The Windows      */
+/* implementation lives here because tcc_io.o is the one project    */
+/* object present in every link that contains the run path - the    */
+/* upstream Makefile's object lists (LIBTCC_OBJ / TCC_FILES) and    */
+/* the dual-form link in build.sh alike - while tinyc_win.c is      */
+/* only in the dual-form link. The writer appends one line to       */
+/* tinyc_init.markers per call with plain Win32 file calls and      */
+/* stays silent on failure. Every call site (tcc_run, the PE_RUN    */
+/* import builder) is reached only after the image's imports are    */
+/* bound - by the loader in a process image, by tinyc_init in the   */
+/* library form - so imported calls are safe here; the init-stage   */
+/* writer in tinyc_win.c runs before the binding and resolves its   */
+/* file pointers by hand instead.                                   */
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <stdint.h>
+#include <windows.h>
+
+static void tinyc_diag_write_line(const char *line)
+{
+    HANDLE h;
+    DWORD written;
+    h = CreateFileA("tinyc_init.markers", FILE_APPEND_DATA,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    WriteFile(h, line, (DWORD)strlen(line), &written, NULL);
+    WriteFile(h, "\n", 1, &written, NULL);
+    CloseHandle(h);
+}
+
+void tinyc_diag_mark(const char *line)
+{
+    tinyc_diag_write_line(line);
+}
+
+void tinyc_diag_mark_ptr(const char *label, const void *p)
+{
+    char buf[96];
+    snprintf(buf, sizeof buf, "%s=0x%016llx", label,
+             (unsigned long long)(uintptr_t)p);
+    tinyc_diag_write_line(buf);
+}
+#else
 void tinyc_diag_mark(const char *line) { (void)line; }
 void tinyc_diag_mark_ptr(const char *label, const void *p)
 {

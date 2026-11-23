@@ -672,9 +672,7 @@ jobs:
           api-level: 30
           arch: x86_64
           profile: pixel
-          script: |
-            cd packages/android/consumer-test
-            gradle :app:connectedDebugAndroidTest
+          script: cd packages/android/consumer-test && gradle :app:connectedDebugAndroidTest
       - uses: actions/upload-artifact@v4
         if: always()
         with:
