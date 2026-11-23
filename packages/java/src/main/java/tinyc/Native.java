@@ -297,7 +297,9 @@ final class Native {
     }
 
     /** 读 classpath 上的 packaging-manifest.json，取出 combinations 数组。
-     * 清单由 packaging/stage_layout.py 生成，格式固定，这里只做字段级提取。 */
+     * 清单由 packaging/stage_layout.py 生成。组合对象的值可含嵌套数组与
+     * 对象（如 isa 字段的对象值、outputs 对象），截取数组与对象边界时按
+     * 嵌套深度扫描，字符串字面量内的括号不计数。 */
     private static List<Combo> readManifest() throws IOException {
         String text;
         try (InputStream in = Native.class.getResourceAsStream("/packaging-manifest.json")) {
@@ -310,31 +312,44 @@ final class Native {
         int start = text.indexOf("\"combinations\"");
         if (start < 0) throw new TccException("packaging-manifest.json has no combinations");
         int arrayStart = text.indexOf('[', start);
-        int arrayEnd = text.indexOf(']', arrayStart);
-        if (arrayStart < 0 || arrayEnd < 0) {
+        if (arrayStart < 0) {
             throw new TccException("packaging-manifest.json: malformed combinations");
         }
-        String body = text.substring(arrayStart + 1, arrayEnd);
+        String body = text.substring(arrayStart + 1, jsonValueEnd(text, arrayStart) - 1);
         List<Combo> combos = new ArrayList<>();
-        int depth = 0;
-        int objStart = -1;
-        for (int i = 0; i < body.length(); i++) {
-            char ch = body.charAt(i);
-            if (ch == '{') {
-                if (depth == 0) objStart = i;
-                depth++;
-            } else if (ch == '}') {
-                depth--;
-                if (depth == 0 && objStart >= 0) {
-                    String obj = body.substring(objStart, i + 1);
-                    combos.add(new Combo(jsonField(obj, "host"), jsonField(obj, "target"),
-                            jsonField(obj, "binary"), jsonField(obj, "sysroot"),
-                            jsonRawValue(obj, "outputs")));
-                    objStart = -1;
-                }
-            }
+        int i = 0;
+        while (true) {
+            int objStart = body.indexOf('{', i);
+            if (objStart < 0) break;
+            int objEnd = jsonValueEnd(body, objStart);
+            String obj = body.substring(objStart, objEnd);
+            combos.add(new Combo(jsonField(obj, "host"), jsonField(obj, "target"),
+                    jsonField(obj, "binary"), jsonField(obj, "sysroot"),
+                    jsonRawValue(obj, "outputs")));
+            i = objEnd;
         }
         return combos;
+    }
+
+    /** text[start] 处的 JSON 对象/数组值的结束下标（不含）：按嵌套深度
+     * 扫描，字符串字面量内的括号不计数，反斜杠转义跳过下一字符。 */
+    private static int jsonValueEnd(String text, int start) {
+        int depth = 0;
+        boolean inString = false;
+        for (int i = start; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (inString) {
+                if (ch == '\\') i++;
+                else if (ch == '"') inString = false;
+            } else if (ch == '"') {
+                inString = true;
+            } else if (ch == '{' || ch == '[') {
+                depth++;
+            } else if (ch == '}' || ch == ']') {
+                if (--depth == 0) return i + 1;
+            }
+        }
+        throw new TccException("packaging-manifest.json: unterminated JSON value");
     }
 
     /** 提取字段的原始 JSON 值片段（字符串/数组/对象/标量），找不到返回 null。 */
@@ -353,16 +368,7 @@ final class Native {
             return end < 0 ? null : obj.substring(i, end + 1);
         }
         if (first == '{' || first == '[') {
-            int depth = 0;
-            for (int j = i; j < obj.length(); j++) {
-                char ch = obj.charAt(j);
-                if (ch == '{' || ch == '[') depth++;
-                else if (ch == '}' || ch == ']') {
-                    depth--;
-                    if (depth == 0) return obj.substring(i, j + 1);
-                }
-            }
-            return null;
+            return obj.substring(i, jsonValueEnd(obj, i));
         }
         int end = i;
         while (end < obj.length() && ",}]".indexOf(obj.charAt(end)) < 0) end++;

@@ -1,0 +1,29 @@
+
+> tinyc@0.1.0 test
+> node --test test/tinyc.test.js
+
+✔ cli: --version via exported main returns 0 and does not exit (6.844532ms)
+✔ cli: -dumpversion returns 0 (no host exit) (0.303715ms)
+✔ cli: compile and run an executable (8.610462ms)
+✔ cli: bad source returns nonzero and captures the error (1.040471ms)
+✔ cli: -E output is routed through IO capture (0.562935ms)
+✔ cli: dynamic add of a local include dir and a local static library (16.446411ms)
+✔ api: compileString and call the compiled function (1.48599ms)
+✔ api: compile errors are collected, not printed (1.141352ms)
+✔ api: dynamic add include path via API (1.110146ms)
+✔ api: defineSymbol (1.012089ms)
+✔ io: JS callback receives compiler output (0.670806ms)
+✔ host: TINYC_HOST_TRIPLE=x86_64-linux-gnu resolves and compiles (90.939844ms)
+✔ host: combination missing from the package names host and available combinations (87.18509ms)
+✔ host: 32-bit host triple is rejected, no fallback (97.11428ms)
+✔ target: TINYC_TARGET_TRIPLE selects the cross variant and compiles for it (110.75465ms)
+✔ manifest: outputs are read from packaging-manifest, not hardcoded (1.615645ms)
+✔ io: file implementation (0.597347ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 593.925898

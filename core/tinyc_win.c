@@ -105,6 +105,21 @@ static void tinyc_init_mark(const char *step_name)
     CloseHandle(h);
 }
 
+/* Diagnostic export for the library path: the simplest function in
+ * this module. It appends one line to tinyc_init.markers through the
+ * plain Win32 file calls above and returns, touching no CRT state
+ * and no globals. A host that dies calling tinyc_ping has a fault at
+ * the level of calling into this image at all; a host that calls
+ * tinyc_ping and then dies in tinyc_init has the fault inside
+ * tinyc_init, past its first marker. The Windows consumer diagnostic
+ * (tests/consumer/win_host_test.c) calls it before tinyc_init for
+ * exactly this split. */
+int tinyc_ping(void)
+{
+    tinyc_init_mark("tinyc_ping");
+    return 0;
+}
+
 int tinyc_win_entry(void *hinst, unsigned long reason, void *reserved)
 {
     (void)hinst; (void)reason; (void)reserved;
@@ -122,8 +137,12 @@ int tinyc_win_entry(void *hinst, unsigned long reason, void *reserved)
 int tinyc_init(void)
 {
     static int crt_ready;
+    /* The first marker precedes every other statement, including the
+     * is_main_module check, so its absence from tinyc_init.markers
+     * places a crash before this function's own code - in the call
+     * into the image - rather than in any step below. */
+    tinyc_init_mark("tinyc_init:enter");
     if (!is_main_module() && !crt_ready) {
-        tinyc_init_mark("tinyc_init:enter");
         tinyc_init_mark("relocator:begin");
         _pei386_runtime_relocator();
         tinyc_init_mark("relocator:done");

@@ -31,9 +31,9 @@ ok $? "python package"
 tail -3 /tmp/tinyc_python_tests.log
 
 section "npm package"
-(cd packages/npm && npm test) > /tmp/tinyc_npm_tests.log 2>&1
-ok $? "npm package"
-grep -E "^ℹ (tests|pass|fail)" /tmp/tinyc_npm_tests.log
+(cd packages/npm && npm test) > tests/npm-test-output.txt 2>&1
+ok $? "npm package (details: tests/npm-test-output.txt)"
+grep -E "^(ℹ|#) (tests|pass|fail) " tests/npm-test-output.txt
 
 section "java package"
 rm -f /tmp/tinyc_java_tests.log

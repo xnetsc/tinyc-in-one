@@ -129,7 +129,27 @@ const RESOLVE_OR_ERR = `
   catch (e) { console.log('ERR ' + e.message); }
 `;
 
+function packageManifest() {
+  return JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'packaging-manifest.json'), 'utf8'));
+}
+
 test('host: TINYC_HOST_TRIPLE=x86_64-linux-gnu resolves and compiles', () => {
+  // The expectation follows the package manifest (the same pattern
+  // as the Python and Java host-simulation tests): when the
+  // simulated combination is staged in this package it resolves and
+  // compiles; when it is not (a package built for another host), the
+  // resolution error must name the simulated host and list the
+  // available combinations.
+  const present = (packageManifest().combinations || []).some(
+    (c) => c.host === 'x86_64-linux-gnu' && c.target === 'x86_64-linux-gnu');
+  if (!present) {
+    const r = runChild({ TINYC_HOST_TRIPLE: 'x86_64-linux-gnu' }, RESOLVE_OR_ERR);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.match(r.stdout, /ERR tinyc: no native build for host x86_64-linux-gnu \/ target x86_64-linux-gnu/);
+    assert.match(r.stdout, /available combinations: /);
+    return;
+  }
   const script = `
     const tcc = require('./index.js');
     const r = tcc.resolveNative();
@@ -146,10 +166,21 @@ test('host: TINYC_HOST_TRIPLE=x86_64-linux-gnu resolves and compiles', () => {
 });
 
 test('host: combination missing from the package names host and available combinations', () => {
-  const r = runChild({ TINYC_HOST_TRIPLE: 'x86_64-w64-mingw32' }, RESOLVE_OR_ERR);
+  // The simulated host is one this package does not stage; the
+  // available list in the error must name every combination the
+  // package manifest actually carries.
+  const manifest = packageManifest();
+  const stagedHosts = new Set((manifest.combinations || []).map((c) => c.host));
+  const absentHost = ['x86_64-w64-mingw32', 'aarch64-linux-gnu', 'x86_64-linux-gnu']
+    .find((h) => !stagedHosts.has(h));
+  const r = runChild({ TINYC_HOST_TRIPLE: absentHost }, RESOLVE_OR_ERR);
   assert.strictEqual(r.status, 0, r.stderr);
-  assert.match(r.stdout, /ERR tinyc: no native build for host x86_64-w64-mingw32 \/ target x86_64-w64-mingw32/);
-  assert.match(r.stdout, /available combinations: .*x86_64-linux-gnu x x86_64-linux-gnu/);
+  assert.match(r.stdout, new RegExp(
+    `ERR tinyc: no native build for host ${absentHost} \\/ target ${absentHost}`));
+  for (const c of manifest.combinations || []) {
+    assert.ok(r.stdout.includes(`${c.host} x ${c.target}`),
+      `available list missing ${c.host} x ${c.target}: ${r.stdout}`);
+  }
 });
 
 test('host: 32-bit host triple is rejected, no fallback', () => {
@@ -159,13 +190,13 @@ test('host: 32-bit host triple is rejected, no fallback', () => {
 });
 
 test('target: TINYC_TARGET_TRIPLE selects the cross variant and compiles for it', (t) => {
-  // Pick a cross target the package actually contains (the set of
-  // staged targets follows the kernel matrix build).
-  const manifest = JSON.parse(fs.readFileSync(
-    path.join(__dirname, '..', 'packaging-manifest.json'), 'utf8'));
+  // Pick a cross target the package actually contains for its own
+  // host (the set of staged targets follows the kernel matrix build).
+  const manifest = packageManifest();
+  const ownHost = tcc.resolveNative().host;
   const MACHINES = { 'aarch64-linux-gnu': /AArch64/, 'riscv64-linux-gnu': /RISC-V/ };
   const combo = manifest.combinations.find(
-    (c) => c.host === 'x86_64-linux-gnu' && MACHINES[c.target]);
+    (c) => c.host === ownHost && c.target !== ownHost && MACHINES[c.target]);
   if (!combo) { t.skip('no cross target staged in this package'); return; }
   const d = tmpdir();
   const obj = path.join(d, 'x.o');

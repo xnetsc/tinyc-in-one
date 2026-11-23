@@ -43,16 +43,20 @@ if [ ! -f "$UPSTREAM/libtcc.h" ]; then
 fi
 
 TARGET="${TARGET:-x86_64-linux-gnu}"
+# Target file lists follow upstream's Makefile (*_FILES): the
+# x86_64 assembler is part of i386-asm.c (the tree has no
+# x86_64-asm.c), the PE backend is tccpe.c, and the Mach-O
+# backend is tccmacho.c.
 case "$TARGET" in
-    x86_64-linux-gnu)  TARGET_DEFS="-DTCC_TARGET_X86_64";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/x86_64-asm.c" ;;
+    x86_64-linux-gnu)  TARGET_DEFS="-DTCC_TARGET_X86_64";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c" ;;
     aarch64-linux-gnu) TARGET_DEFS="-DTCC_TARGET_ARM64";   TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c" ;;
     riscv64-linux-gnu) TARGET_DEFS="-DTCC_TARGET_RISCV64"; TARGET_SRC="$UPSTREAM/riscv64-gen.c $UPSTREAM/riscv64-link.c $UPSTREAM/riscv64-asm.c" ;;
-    x86_64-windows)    TARGET_DEFS="-DTCC_TARGET_X86_64 -DTCC_TARGET_PE"; TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/x86_64-asm.c" ;;
+    x86_64-windows)    TARGET_DEFS="-DTCC_TARGET_X86_64 -DTCC_TARGET_PE"; TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/tccpe.c" ;;
     # Android targets use the same ELF backends and target macros as
     # the Linux targets; they differ only in the sysroot they are
     # paired with (bionic, see sysroot-manifests/<target>.json).
     aarch64-linux-android) TARGET_DEFS="-DTCC_TARGET_ARM64";   TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c" ;;
-    x86_64-linux-android)  TARGET_DEFS="-DTCC_TARGET_X86_64";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/x86_64-asm.c" ;;
+    x86_64-linux-android)  TARGET_DEFS="-DTCC_TARGET_X86_64";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c" ;;
     # Darwin targets follow upstream's Makefile: DEF-x86_64-osx is
     # "-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO", DEF-arm64-osx adds
     # -DTCC_TARGET_MACHO to the arm64 defines, and the *-osx file
@@ -61,7 +65,7 @@ case "$TARGET" in
     # write ELF object files, per ELF_OBJ_ONLY in tcc.h). These two
     # branches follow that upstream check but have not been built
     # or verified in this environment.
-    x86_64-apple-darwin) TARGET_DEFS="-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO"; TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/x86_64-asm.c $UPSTREAM/tccmacho.c" ;;
+    x86_64-apple-darwin) TARGET_DEFS="-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO"; TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c $UPSTREAM/tccmacho.c" ;;
     arm64-apple-darwin)  TARGET_DEFS="-DTCC_TARGET_ARM64 -DTCC_TARGET_MACHO";  TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c $UPSTREAM/tccmacho.c" ;;
     wasm32-wasi)
         WB=../../wasm-backend
@@ -92,7 +96,8 @@ case "$TARGET" in
         TARGET_DEFS="-DTCC_TARGET_WASM32"
         TARGET_SRC="$ASRC/wasm-gen.c $ASRC/wasm-link.c"
         # the backend tree has no tinyc_main; export main only
-        EXPORTED_FUNCTIONS_OVERRIDE='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
+        # (export-list policy: see the EXPORTED_FUNCTIONS comment below)
+        EXPORTED_FUNCTIONS_OVERRIDE='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_get_symbol","_tcc_list_symbols","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
         ;;
     *) echo "build.sh: unsupported TARGET=$TARGET (supported: x86_64-linux-gnu, aarch64-linux-gnu, riscv64-linux-gnu, x86_64-windows, aarch64-linux-android, x86_64-linux-android, arm64-apple-darwin, x86_64-apple-darwin, wasm32-wasi)" >&2; exit 1 ;;
 esac
@@ -108,20 +113,44 @@ esac
 CORE_SRC="$UPSTREAM/tcc.c $UPSTREAM/libtcc.c $UPSTREAM/tccpp.c $UPSTREAM/tccgen.c \
 $UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TARGET_SRC"
 
-# Export list: every LIBTCCAPI function in upstream libtcc.h
-# (tcc_set_realloc, tcc_new, tcc_delete, tcc_set_lib_path,
-# tcc_set_error_func, tcc_set_options, tcc_add_include_path,
-# tcc_add_sysinclude_path, tcc_define_symbol, tcc_undefine_symbol,
-# tcc_add_file, tcc_compile_string, tcc_set_output_type,
-# tcc_add_library_path, tcc_add_library, tcc_add_symbol,
-# tcc_output_file, tcc_run, tcc_relocate, tcc_get_symbol,
-# tcc_list_symbols, tcc_set_backtrace_func), plus main / tinyc_main
-# and malloc/free, which the glue layer needs to assemble argv and
-# pass strings, plus the two WasmFS functions the glue layer calls
-# to mount the OPFS backend (wasmfs_create_opfs_backend and
-# wasmfs_create_directory, from <emscripten/wasmfs.h>; they exist
-# only in the -sWASMFS build).
-EXPORTED_FUNCTIONS='["_main","_tinyc_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
+# Export list: the LIBTCCAPI functions in upstream libtcc.h that
+# this build defines (tcc_set_realloc, tcc_new, tcc_delete,
+# tcc_set_lib_path, tcc_set_error_func, tcc_set_options,
+# tcc_add_include_path, tcc_add_sysinclude_path, tcc_define_symbol,
+# tcc_undefine_symbol, tcc_add_file, tcc_compile_string,
+# tcc_set_output_type, tcc_add_library_path, tcc_add_library,
+# tcc_add_symbol, tcc_output_file, tcc_get_symbol,
+# tcc_list_symbols), plus main and malloc/free, which
+# the glue layer needs to assemble argv and pass strings, plus the
+# two WasmFS functions the glue layer calls to mount the OPFS
+# backend (wasmfs_create_opfs_backend and wasmfs_create_directory,
+# from <emscripten/wasmfs.h>; they exist only in the -sWASMFS
+# build).
+#
+# tcc_relocate and tcc_set_backtrace_func are not in either
+# list: tccrun.c defines them only for a native-host build
+# (TCC_IS_NATIVE), and this module's host is WASM for every
+# target, so neither symbol exists in the objects. The glue layer
+# never calls tcc_set_backtrace_func. TinycState.relocate() is
+# the only caller of tcc_relocate, and the bridge answers it with
+# TinycMissingExportError naming the export; running compiled
+# code goes through outputFile plus host-side instantiation
+# (TinycState.run), not through in-module relocation.
+#
+# tcc_run is in the wasm32 list only, for the same reason:
+# tccrun.c defines it under TCC_IS_NATIVE, so the eight
+# native-target objects do not contain it, while the wasm32
+# tree's wasm-link.c provides it. The glue layer never calls
+# tcc_run for any target (TinycState.run is the outputFile path
+# above, and the package tests assert tcc_run is never called).
+#
+# tinyc_main is not in the general list: the project patches
+# generate it in the kernel trees, while the eight general
+# targets are compiled from the unpatched upstream tree and
+# export main only. The glue layer prefers tinyc_main when a
+# module provides it and falls back to main, which is also how
+# the wasm32 module is driven.
+EXPORTED_FUNCTIONS='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_get_symbol","_tcc_list_symbols","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
 
 EXPORTED_FUNCTIONS="${EXPORTED_FUNCTIONS_OVERRIDE:-$EXPORTED_FUNCTIONS}"
 

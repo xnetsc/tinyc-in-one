@@ -3,9 +3,11 @@
 
 Usage: gen_windows_def.py <libtcc.h> <output.def>
 
-Exports (design doc 3.1/3.2): main, tinyc_main, tinyc_init, and every
-LIBTCCAPI function declared in libtcc.h. The list is derived from the
-header at build time so it cannot drift from the API surface.
+Exports (design doc 3.1/3.2): main, tinyc_main, tinyc_init,
+tinyc_ping (the library-path diagnostic entry in core/tinyc_win.c),
+and every LIBTCCAPI function declared in libtcc.h. The list is
+derived from the header at build time so it cannot drift from the
+API surface.
 """
 import re
 import sys
@@ -27,9 +29,9 @@ def main():
         sys.exit(1)
     with open(out, "w") as f:
         f.write("EXPORTS\n")
-        for name in ["main", "tinyc_main", "tinyc_init"] + names:
+        for name in ["main", "tinyc_main", "tinyc_init", "tinyc_ping"] + names:
             f.write(f"    {name}\n")
-    print(f"gen_windows_def: {out} ({len(names) + 3} exports)")
+    print(f"gen_windows_def: {out} ({len(names) + 4} exports)")
 
 if __name__ == "__main__":
     main()
