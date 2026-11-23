@@ -162,6 +162,22 @@ patch("tcc.c",
                 ppfp = tinyc_io_open_out_stream();
             }""")
 
+# ---- tccrun.c: a missing runmain.o ends tcc_run at the load --------
+# tcc_run loads runmain.o for the entry shim it calls after
+# relocation. When the file is not found, tcc_add_support has
+# already reported it; upstream presses on into relocation, which
+# on the PE path does not survive to the _runmain lookup that
+# would fail cleanly. Return the error here instead; with the
+# file present the call succeeds and nothing changes.
+patch("tccrun.c",
+      """    if (s1->elf_entryname)
+        s1->run_main = top_sym = s1->elf_entryname;
+    tcc_add_support(s1, "runmain.o");""",
+      """    if (s1->elf_entryname)
+        s1->run_main = top_sym = s1->elf_entryname;
+    if (tcc_add_support(s1, "runmain.o"))
+        return -1;""")
+
 # ---- tccrun.c: -run program stdio goes through the current IO -------
 # The wrapper calls bracket the program's entry point; tcc_run's own
 # semantics (arguments, return value, exit handling) are unchanged.

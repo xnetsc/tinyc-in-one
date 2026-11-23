@@ -314,7 +314,19 @@ PYEOF
     # make dies on a Windows host. No libtcc.dll is ever shipped:
     # the dual-form exe is the product.
     (cd "$SRC" && make cross-x86_64-win32 >/dev/null)
+    # runmain.o is the support object tcc_run loads for its entry
+    # shim. lib/Makefile builds it only in a native lib build (its
+    # COMMON_O gains runmain.o only when the lib build is not a
+    # cross build), so the cross target above does not produce it.
+    # Build it here with the cross compiler, with the flags of
+    # lib/Makefile's own rule for it (-B win32, the include dirs),
+    # and ship it next to libtcc1.a in both layouts below.
+    XTCC="$SRC/x86_64-win32-tcc"
+    [ -x "$XTCC" ] || XTCC="$SRC/x86_64-win32-tcc.exe"
+    "$XTCC" -B"$SRC/win32" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/lib/runmain.c" -o "$SRC/runmain.o"
     cp "$SRC/x86_64-win32-libtcc1.a" "$DIST/lib/tcc/win32/lib/libtcc1.a"
+    cp "$SRC/runmain.o" "$DIST/lib/tcc/win32/lib/"
     cp "$SRC"/win32/lib/*.def "$DIST/lib/tcc/win32/lib/"
     cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/win32/include/"
     cp -r "$SRC"/win32/include/. "$DIST/lib/tcc/win32/include/"
@@ -332,11 +344,13 @@ PYEOF
     # Companions next to the exe, in the places libtcc actually
     # searches with CONFIG_TCCDIR undefined: the runtime tccdir {B}
     # is the exe's own directory, and the PE defaults (tcc.h) put
-    # the library path at {B}/lib - libtcc1.a is looked up there by
-    # tcc_add_support, the .def files there by tcc_add_library - and
-    # the include paths at {B}/include and {B}/include/winapi.
+    # the library path at {B}/lib - libtcc1.a and runmain.o are
+    # looked up there by tcc_add_support, the .def files there by
+    # tcc_add_library - and the include paths at {B}/include and
+    # {B}/include/winapi.
     mkdir -p "$DIST/bin/lib"
     cp "$DIST/lib/tcc/win32/lib/libtcc1.a" "$DIST/bin/lib/"
+    cp "$DIST/lib/tcc/win32/lib/runmain.o" "$DIST/bin/lib/"
     cp "$SRC"/win32/lib/*.def "$DIST/bin/lib/"
     cp -r "$DIST/lib/tcc/win32/include" "$DIST/bin/include"
 
