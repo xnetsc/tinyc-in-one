@@ -2,7 +2,7 @@
 # 构建 TinyC 的 Java 服务器包：dist/tinyc.jar（一 jar 全量）
 # Jar 内是统一布局：natives/<host>/toolchain/<target>/tinyc +
 # sysroot/<target>/ + packaging-manifest.json，运行时按宿主 triple
-# 解析组合、解压到缓存。需要 JDK 21+（Panama FFM；21 为预览，22+ 正式）。
+# 解析组合、解压到缓存。需要 JDK 22+（Panama FFM）。
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,17 +11,42 @@ BUILD=build
 DIST=dist
 JARROOT=$BUILD/jarroot
 
-# ---- JDK 定位：JAVA_HOME > ~/workspace/envs/jdk-25 > 系统 JVM > PATH ----
-if [ -z "${JAVA_HOME:-}" ]; then
-  for cand in "$HOME/workspace/envs/jdk-25" /usr/lib/jvm/java-25-openjdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64; do
-    if [ -x "$cand/bin/javac" ]; then JAVA_HOME=$cand; break; fi
+# ---- JDK 定位：按版本逐个核验候选，取第一个主版本号 >= 22 的 ----
+# 候选顺序：JAVA_HOME、JAVA_HOME_25_X64、JAVA_HOME_25_ARM64、JAVA_HOME_25、
+# ~/workspace/envs/jdk-25、/usr/lib/jvm 系统 JVM、PATH 中的 javac。
+# 多 JDK 环境里 JAVA_HOME 可能指向低版本，只认它会误用旧版编译。
+javac_major() {
+  local out ver major
+  out=$("$1" -version 2>&1) || return 1
+  ver=$(printf '%s\n' "$out" | grep -oE '[0-9]+(\.[0-9]+)*' | head -n 1) || return 1
+  [ -n "$ver" ] || return 1
+  major=${ver%%.*}
+  if [ "$major" = "1" ]; then major=$(printf '%s' "$ver" | cut -d. -f2); fi
+  printf '%s' "$major"
+}
+
+resolve_jdk_bin() {
+  local cand major javac
+  for cand in "${JAVA_HOME:-}" "${JAVA_HOME_25_X64:-}" "${JAVA_HOME_25_ARM64:-}" \
+              "${JAVA_HOME_25:-}" "$HOME/workspace/envs/jdk-25" \
+              /usr/lib/jvm/java-25-openjdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64; do
+    [ -n "$cand" ] || continue
+    [ -x "$cand/bin/javac" ] || continue
+    major=$(javac_major "$cand/bin/javac") || continue
+    if [ "$major" -ge 22 ]; then printf '%s' "$cand/bin"; return 0; fi
   done
-fi
-if [ -n "${JAVA_HOME:-}" ]; then
-  JAVAC="$JAVA_HOME/bin/javac"; JAR="$JAVA_HOME/bin/jar"
-else
-  JAVAC=javac; JAR=jar
-fi
+  if javac=$(command -v javac 2>/dev/null); then
+    major=$(javac_major "$javac") || major=0
+    if [ "$major" -ge 22 ]; then dirname "$javac"; return 0; fi
+  fi
+  return 1
+}
+
+JDK_BIN=$(resolve_jdk_bin) || {
+  echo "error: JDK 22 or newer is required (Panama FFM); no candidate JDK qualifies" >&2
+  exit 1
+}
+JAVAC="$JDK_BIN/javac"; JAR="$JDK_BIN/jar"
 
 # ---- 构建宿主 triple（决定 staging 哪些二进制进 jar；仅 64 位） ----
 OS=$(uname -s)

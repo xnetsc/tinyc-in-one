@@ -9,14 +9,40 @@ cd "$(dirname "$0")"
 
 NAME=$(cat build/native-name.txt)
 CP="dist/tinyc.jar:build/test-classes"
-# JDK 定位与 build.sh 一致：JAVA_HOME > ~/workspace/envs/jdk-25 > PATH
-if [ -n "${JAVA_HOME:-}" ]; then
-  JAVA="$JAVA_HOME/bin/java --enable-native-access=ALL-UNNAMED"
-elif [ -x "$HOME/workspace/envs/jdk-25/bin/java" ]; then
-  JAVA="$HOME/workspace/envs/jdk-25/bin/java --enable-native-access=ALL-UNNAMED"
-else
-  JAVA="java --enable-native-access=ALL-UNNAMED"
-fi
+# JDK 定位与 build.sh 同一套规则：按版本逐个核验候选，取第一个主版本号
+# >= 22 的，保证运行时 java 与 build.sh 编译用的 javac 出自同一个 JDK。
+javac_major() {
+  local out ver major
+  out=$("$1" -version 2>&1) || return 1
+  ver=$(printf '%s\n' "$out" | grep -oE '[0-9]+(\.[0-9]+)*' | head -n 1) || return 1
+  [ -n "$ver" ] || return 1
+  major=${ver%%.*}
+  if [ "$major" = "1" ]; then major=$(printf '%s' "$ver" | cut -d. -f2); fi
+  printf '%s' "$major"
+}
+
+resolve_jdk_bin() {
+  local cand major javac
+  for cand in "${JAVA_HOME:-}" "${JAVA_HOME_25_X64:-}" "${JAVA_HOME_25_ARM64:-}" \
+              "${JAVA_HOME_25:-}" "$HOME/workspace/envs/jdk-25" \
+              /usr/lib/jvm/java-25-openjdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64; do
+    [ -n "$cand" ] || continue
+    [ -x "$cand/bin/javac" ] || continue
+    major=$(javac_major "$cand/bin/javac") || continue
+    if [ "$major" -ge 22 ]; then printf '%s' "$cand/bin"; return 0; fi
+  done
+  if javac=$(command -v javac 2>/dev/null); then
+    major=$(javac_major "$javac") || major=0
+    if [ "$major" -ge 22 ]; then dirname "$javac"; return 0; fi
+  fi
+  return 1
+}
+
+JDK_BIN=$(resolve_jdk_bin) || {
+  echo "error: JDK 22 or newer is required (Panama FFM); no candidate JDK qualifies" >&2
+  exit 1
+}
+JAVA="$JDK_BIN/java --enable-native-access=ALL-UNNAMED"
 
 echo "=== mode A: tinyc.native.path (dev) ==="
 $JAVA -Dtinyc.native.path="$PWD/build/test-runtime/$NAME" \
