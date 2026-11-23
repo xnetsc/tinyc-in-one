@@ -379,6 +379,9 @@ jobs:
           export PATH=/mingw64/bin:$PATH
           LOG=$PWD/test-outputs/win-host-test.log
           EXE=$PWD/build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
+          objdump -p "$EXE" > "$(dirname "$LOG")/win-exe-objdump-p.txt" 2>&1 || true
+          objdump -h "$EXE" > "$(dirname "$LOG")/win-exe-sections.txt" 2>&1 || true
+          objdump -d "$EXE" > "$(dirname "$LOG")/win-exe-disasm.txt" 2>&1 || true
           gcc -O2 -o /tmp/win_host_test.exe tests/consumer/win_host_test.c
           rm -rf /tmp/wht && mkdir -p /tmp/wht && cd /tmp/wht
           RC=0

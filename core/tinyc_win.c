@@ -120,6 +120,20 @@ int tinyc_ping(void)
     return 0;
 }
 
+/* Diagnostic export with an empty body: no calls, no globals, no
+ * CRT. A host calls it before tinyc_ping to split the call path
+ * itself from everything a called function might do: if calling
+ * tinyc_noop dies, the fault is in the transfer into this image
+ * (the resolved address or the state of its code pages); if
+ * tinyc_noop returns and tinyc_ping then dies, the transfer works
+ * and the fault is at tinyc_ping's first call out of the image -
+ * the import-address-table call to CreateFileA inside
+ * tinyc_init_mark. */
+int tinyc_noop(void)
+{
+    return 0;
+}
+
 int tinyc_win_entry(void *hinst, unsigned long reason, void *reserved)
 {
     (void)hinst; (void)reason; (void)reserved;

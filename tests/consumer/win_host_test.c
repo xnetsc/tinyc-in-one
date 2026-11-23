@@ -22,15 +22,23 @@
  * (open/write/close per marker, so the file survives a crash of this
  * process). The last marker names the step that was in flight.
  *
- * Before tinyc_init, the test calls tinyc_ping - an exported
- * function whose whole body is one Win32 file append inside the
- * loaded image. If the ping dies, calling into the image is itself
- * the fault; if the ping returns and tinyc_init dies, the fault is
- * inside tinyc_init. A vectored exception handler is armed across
- * the ping + init window: on a fatal exception it appends the
- * exception code, the fault address, its RVA relative to the loaded
- * module, and (for an access violation) the access kind and data
- * address to win_host_test.markers, then exits with code 0xE1.
+ * Before any call into the image, the test appends the resolved
+ * address of each export it is about to use (and its offset from
+ * the module base) to the markers file, together with the address
+ * it computes for tinyc_ping by walking the loaded image's export
+ * directory itself, and the VirtualQuery state of the tinyc_ping
+ * address. It then calls tinyc_noop - an exported function with an
+ * empty body - and tinyc_ping, whose whole body is one Win32 file
+ * append inside the loaded image. If the noop call dies, the fault
+ * is in the transfer into the image; if the noop returns and the
+ * ping dies, the transfer works and the fault is at the ping's
+ * first call out of the image; if both return and tinyc_init dies,
+ * the fault is inside tinyc_init. A vectored exception handler is
+ * armed across the noop + ping + init window: on a fatal exception
+ * it appends the exception code, the fault address, its RVA
+ * relative to the loaded module, and (for an access violation) the
+ * access kind and data address to win_host_test.markers, then
+ * exits with code 0xE1.
  */
 #include <windows.h>
 #include <stdio.h>
@@ -117,6 +125,56 @@ static void lb_code(struct linebuf *lb, unsigned long v)
 
 static HMODULE g_target;           /* base of the loaded dual-form EXE */
 static volatile LONG g_veh_armed;  /* log-and-exit only while nonzero */
+
+/* Append "ptr:<name>=<value> diff=<value-base>" for a resolved
+ * export address. The raw value is the point: a resolved address
+ * that lost the module base is visible here before any call. */
+static void log_ptr(const char *name, const void *p)
+{
+    struct linebuf lb;
+    lb.len = 0; lb.buf[0] = 0;
+    lb_puts(&lb, "ptr:");
+    lb_puts(&lb, name);
+    lb_puts(&lb, "=");
+    lb_hex(&lb, (unsigned long long)(uintptr_t)p);
+    lb_puts(&lb, " diff=");
+    lb_hex(&lb, (unsigned long long)((const unsigned char *)p
+                                     - (const unsigned char *)g_target));
+    mark_line(lb.buf);
+}
+
+/* The address GetProcAddress should return for `name`, computed by
+ * walking the loaded image's export directory directly (name table
+ * -> ordinal -> export address table). Logged next to the
+ * GetProcAddress result so the two can be compared. */
+static void *manual_export(HMODULE h, const char *name)
+{
+    const unsigned char *base = (const unsigned char *)h;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_DATA_DIRECTORY *dir;
+    IMAGE_EXPORT_DIRECTORY *exp;
+    DWORD *names, *addrs, i;
+    WORD *ords;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return NULL;
+    nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return NULL;
+    dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir->VirtualAddress)
+        return NULL;
+    exp = (IMAGE_EXPORT_DIRECTORY *)(base + dir->VirtualAddress);
+    names = (DWORD *)(base + exp->AddressOfNames);
+    ords = (WORD *)(base + exp->AddressOfNameOrdinals);
+    addrs = (DWORD *)(base + exp->AddressOfFunctions);
+    for (i = 0; i < exp->NumberOfNames; i++) {
+        const char *n = (const char *)(base + names[i]);
+        if (strcmp(n, name) == 0)
+            return (void *)(base + addrs[ords[i]]);
+    }
+    return NULL;
+}
 
 /* RVA of an address inside the loaded module, or 0 when outside it
  * (module size from its in-memory PE headers). */
@@ -211,6 +269,7 @@ int main(int argc, char **argv)
     }
 
     mark("getprocaddress:begin");
+    ping_fn p_noop = (ping_fn)(void *)GetProcAddress(h, "tinyc_noop");
     ping_fn p_ping = (ping_fn)(void *)GetProcAddress(h, "tinyc_ping");
     init_fn p_init = (init_fn)(void *)GetProcAddress(h, "tinyc_init");
     main_fn p_main = (main_fn)(void *)GetProcAddress(h, "tinyc_main");
@@ -221,14 +280,47 @@ int main(int argc, char **argv)
     reloc_fn p_reloc = (reloc_fn)(void *)GetProcAddress(h, "tcc_relocate");
     run_fn p_run = (run_fn)(void *)GetProcAddress(h, "tcc_run");
     mark("getprocaddress:done");
-    check(p_ping && p_init && p_main && p_new && p_del && p_compile && p_outtype && p_reloc && p_run,
-          "exports resolve: tinyc_ping, tinyc_init, tinyc_main, tcc_* API");
+    check(p_noop && p_ping && p_init && p_main && p_new && p_del && p_compile && p_outtype && p_reloc && p_run,
+          "exports resolve: tinyc_noop, tinyc_ping, tinyc_init, tinyc_main, tcc_* API");
     if (failures) return 1;
 
-    /* The exception handler is armed only across the ping + init
-     * window: those two calls are the ones under diagnosis, and
+    /* Resolved addresses, logged before any call into the image:
+     * the GetProcAddress results, the export-directory walk's own
+     * computation for tinyc_ping, and the memory state at the
+     * tinyc_ping address. */
+    log_ptr("tinyc_noop", (const void *)p_noop);
+    log_ptr("tinyc_ping", (const void *)p_ping);
+    log_ptr("eat:tinyc_ping", manual_export(h, "tinyc_ping"));
+    log_ptr("tinyc_init", (const void *)p_init);
+    log_ptr("tinyc_main", (const void *)p_main);
+    log_ptr("tcc_new", (const void *)p_new);
+    {
+        MEMORY_BASIC_INFORMATION mbi;
+        struct linebuf lb;
+        SIZE_T n = VirtualQuery((const void *)p_ping, &mbi, sizeof mbi);
+        lb.len = 0; lb.buf[0] = 0;
+        lb_puts(&lb, "vq:tinyc_ping");
+        if (n) {
+            lb_puts(&lb, " state=");
+            lb_hex(&lb, (unsigned long long)mbi.State);
+            lb_puts(&lb, " protect=");
+            lb_hex(&lb, (unsigned long long)mbi.Protect);
+            lb_puts(&lb, " allocbase=");
+            lb_hex(&lb, (unsigned long long)(uintptr_t)mbi.AllocationBase);
+        } else {
+            lb_puts(&lb, " query-failed");
+        }
+        mark_line(lb.buf);
+    }
+
+    /* The exception handler is armed only across the noop + ping +
+     * init window: those calls are the ones under diagnosis, and
      * exceptions elsewhere keep their normal handling. */
     g_veh_armed = 1;
+    mark("tinyc_noop:begin");
+    check(p_noop() == 0, "tinyc_noop() returns 0");
+    mark("tinyc_noop:done");
+
     mark("tinyc_ping:begin");
     check(p_ping() == 0, "tinyc_ping() returns 0");
     mark("tinyc_ping:done");

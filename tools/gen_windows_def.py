@@ -4,10 +4,10 @@
 Usage: gen_windows_def.py <libtcc.h> <output.def>
 
 Exports (design doc 3.1/3.2): main, tinyc_main, tinyc_init,
-tinyc_ping (the library-path diagnostic entry in core/tinyc_win.c),
-and every LIBTCCAPI function declared in libtcc.h. The list is
-derived from the header at build time so it cannot drift from the
-API surface.
+tinyc_ping and tinyc_noop (the library-path diagnostic entries in
+core/tinyc_win.c), and every LIBTCCAPI function declared in
+libtcc.h. The list is derived from the header at build time so it
+cannot drift from the API surface.
 """
 import re
 import sys
@@ -27,11 +27,12 @@ def main():
     if not names:
         print("gen_windows_def: no LIBTCCAPI functions found", file=sys.stderr)
         sys.exit(1)
+    fixed = ["main", "tinyc_main", "tinyc_init", "tinyc_ping", "tinyc_noop"]
     with open(out, "w") as f:
         f.write("EXPORTS\n")
-        for name in ["main", "tinyc_main", "tinyc_init", "tinyc_ping"] + names:
+        for name in fixed + names:
             f.write(f"    {name}\n")
-    print(f"gen_windows_def: {out} ({len(names) + 4} exports)")
+    print(f"gen_windows_def: {out} ({len(fixed) + len(names)} exports)")
 
 if __name__ == "__main__":
     main()

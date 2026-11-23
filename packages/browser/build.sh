@@ -43,6 +43,36 @@ if [ ! -f "$UPSTREAM/libtcc.h" ]; then
 fi
 
 TARGET="${TARGET:-x86_64-linux-gnu}"
+
+if [ "$TARGET" != "wasm32-wasi" ]; then
+    # The eight general targets compile the unpatched upstream
+    # tree, and tcc.h includes two files that only a configure +
+    # native make run generates: config.h and tccdefs_.h. Prepare
+    # a copy of the tree the same way the wasm32 branch below
+    # prepares its own: copy (dropping any build leftovers the
+    # source tree may carry), configure, and a native make, which
+    # regenerates both files. No project patches are applied to
+    # this tree. The preparation is target-independent - the
+    # emcc compile picks the target through the -DTCC_TARGET_*
+    # macros, and config.h's target guard names every general
+    # target's arch macro, so the command-line macro wins - so
+    # every general-target run prepares the same tree.
+    GSRC=build/general-src
+    rm -rf "$GSRC"
+    mkdir -p "$GSRC"
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./*-tcc' --exclude='./libtcc.a' \
+        --exclude='./libtcc1.a' --exclude='./*-libtcc1.a' \
+        --exclude='./c2str' --exclude='./c2str.exe' \
+        --exclude='./config.h' --exclude='./config.mak' \
+        --exclude='./tccdefs_.h' \
+        -C "$UPSTREAM" . | tar xf - --no-same-owner -C "$GSRC"
+    ABS_GSRC=$PWD/$GSRC
+    (cd "$GSRC" && ./configure --prefix="$ABS_GSRC/install" >/dev/null)
+    (cd "$GSRC" && make -j"$(nproc)" >/dev/null)
+    UPSTREAM=$GSRC
+fi
+
 # Target file lists follow upstream's Makefile (*_FILES): the
 # x86_64 assembler is part of i386-asm.c (the tree has no
 # x86_64-asm.c), the PE backend is tccpe.c, and the Mach-O
