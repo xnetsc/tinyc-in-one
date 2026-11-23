@@ -2,14 +2,47 @@
 against the distribution directly (no package layer involved)."""
 import ctypes
 import os
+import platform
 import subprocess
 import sys
 import tempfile
 import unittest
 
+
+def host_triple():
+    """The host this test runs on, resolved the same way the package
+    loaders resolve it ($TINYC_HOST_TRIPLE, alias $TINYC_TRIPLE,
+    wins over detection). The kernel tests exercise the native
+    (host == target) distribution, which is the only one whose
+    dual-form file can execute and dlopen on this machine."""
+    env = os.environ.get("TINYC_HOST_TRIPLE") or os.environ.get("TINYC_TRIPLE")
+    if env:
+        return env
+    machine = platform.machine().lower()
+    if sys.platform.startswith("linux"):
+        if machine in ("x86_64", "amd64"):
+            return "x86_64-linux-gnu"
+        if machine in ("aarch64", "arm64"):
+            return "aarch64-linux-gnu"
+        if machine == "riscv64":
+            return "riscv64-linux-gnu"
+    if sys.platform == "win32" and machine in ("amd64", "x86_64"):
+        return "x86_64-w64-mingw32"
+    if sys.platform == "darwin":
+        if machine == "arm64":
+            return "arm64-apple-darwin"
+        if machine in ("x86_64", "amd64"):
+            return "x86_64-apple-darwin"
+    raise RuntimeError(
+        f"cannot detect a 64-bit host triple for {sys.platform}/{machine}")
+
+
+HOST_TRIPLE = host_triple()
 DIST = os.path.normpath(os.path.join(
-    os.path.dirname(__file__), "..", "build", "dist", "x86_64-linux-gnu"))
-DUAL = os.path.join(DIST, "bin", "tinyc")
+    os.path.dirname(__file__), "..", "build", "dist", HOST_TRIPLE))
+DUAL = os.path.join(
+    DIST, "bin", "tinyc.exe" if HOST_TRIPLE == "x86_64-w64-mingw32"
+    else "tinyc")
 
 
 def load():

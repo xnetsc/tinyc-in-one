@@ -186,7 +186,9 @@ jobs:
         if: always()
         with:
           name: test-outputs-linux-x64
-          path: test-outputs/
+          path: |
+            test-outputs/
+            tests/*-output.txt
           if-no-files-found: warn
 
   # -----------------------------------------------------------------
@@ -195,6 +197,20 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+
+      # The matrix is host-aware: on this aarch64 host the x86_64
+      # and riscv64 targets are cross builds against the
+      # /usr/<triplet> sysroots these packages provide, and the
+      # x86_64/riscv64 host variants are cross-compiled and smoked
+      # under qemu-user (the aarch64 host variant is native).
+      - name: Install cross compilers and qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu \
+            libc6-dev-amd64-cross libc6-dev-riscv64-cross \
+            qemu-user-static file
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -208,13 +224,30 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      # Only the NDK sysroot files are consumed (target headers and
+      # libraries); no NDK host binary is ever executed, so the
+      # sysroot is taken from the NDK's linux-x86_64 prebuilt tree,
+      # the only Linux prebuilt r26d ships.
+      - name: Set up Android NDK r26d
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
       - name: Build all target variants (aarch64 host)
+        env:
+          TINYC_NDK_SYSROOT: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot
         run: |
           mkdir -p test-outputs
           ./build.sh > test-outputs/build-targets.log 2>&1
 
-      - name: Full repository test suite on the aarch64 host
-        run: bash tests/run_all.sh > test-outputs/run_all.log 2>&1
+      - name: Build host variants (aarch64 native, x86_64 and riscv64 cross)
+        run: ./build.sh host aarch64-linux-gnu x86_64-linux-gnu riscv64-linux-gnu > test-outputs/build-hosts.log 2>&1
+
+      - name: Host smoke tests (aarch64 native; qemu-user for the cross hosts)
+        run: |
+          bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
+          cp tests/host-test-output.txt test-outputs/
 
       - name: npm package - bundle, pack, consumer test on the tarballs
         run: |
@@ -248,6 +281,12 @@ jobs:
           bash packages/java/build.sh > test-outputs/java-build.log 2>&1
           bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
 
+      # Last, like in the linux-x64 job: the suite's package
+      # sections exercise the in-tree staging the bundle steps above
+      # leave behind for this host.
+      - name: Full repository test suite on the aarch64 host
+        run: bash tests/run_all.sh > test-outputs/run_all.log 2>&1
+
       - name: Collect release assets
         run: |
           mkdir -p release-assets
@@ -267,7 +306,9 @@ jobs:
         if: always()
         with:
           name: test-outputs-linux-arm64
-          path: test-outputs/
+          path: |
+            test-outputs/
+            tests/*-output.txt
           if-no-files-found: warn
 
   # -----------------------------------------------------------------
@@ -405,10 +446,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          # Runner labels: jobs on macos-14 were cancelled at
+          # creation with the annotation "The configuration
+          # 'macos-14-arm64-us-default' is not supported" (no runner
+          # was ever assigned), and jobs on the retired macos-13
+          # Intel image never received a runner at all. The current
+          # labels are macos-15 (arm64) and macos-15-intel (x86_64).
+          - runner: macos-15
             triple: arm64-apple-darwin
             isa: '{"arch":"aarch64","bits":64,"endian":"little","simd":["neon"]}'
-          - runner: macos-13
+          - runner: macos-15-intel
             triple: x86_64-apple-darwin
             isa: '{"arch":"x86_64","bits":64,"endian":"little","simd":["sse","sse2","avx","avx2"]}'
     runs-on: ${{ matrix.runner }}

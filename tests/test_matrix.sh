@@ -29,6 +29,10 @@ EOF
 note() { echo "$1" | tee -a "$LOG"; }
 fail() { note "FAIL: $1"; FAIL=1; }
 
+# The one matrix target whose output can execute on this machine:
+# the linux-gnu triple matching the build host's CPU.
+HOST_TRIPLE="$(uname -m)-linux-gnu"
+
 # check_elf <triple> <outfile> <machine-regex> <expected-interp>
 check_elf() {
     local triple=$1 out=$2 machine=$3 interp=$4
@@ -64,8 +68,13 @@ smoke() {
     case $kind in
         elf) check_elf "$triple" "$out" "$machine" "$interp" ;;
         pe)
+            # file(1) reads the PE header directly (machine + PE32+
+            # magic) on every host. objdump's BFD target support
+            # varies with the host binutils build, so it corroborates
+            # only when this objdump knows the pei-x86-64 target.
             if file "$out" | grep -q "PE32+ executable.*x86-64" \
-               && objdump -f "$out" 2>/dev/null | grep -q "pei-x86-64"; then
+               && { ! objdump --info 2>/dev/null | grep -q "pei-x86-64" \
+                    || objdump -f "$out" 2>/dev/null | grep -q "pei-x86-64"; }; then
                 note "PASS: $triple (PE32+ executable, x86-64)"
             else
                 fail "$triple: not a PE32+ x86-64 executable ($(file "$out"))"
@@ -73,12 +82,13 @@ smoke() {
             file "$out" >> "$LOG"
             ;;
     esac
-    # the native variant runs on this host; check its output too
-    if [ "$triple" = x86_64-linux-gnu ]; then
+    # the native variant (target == this host) runs here; check its
+    # output too
+    if [ "$triple" = "$HOST_TRIPLE" ]; then
         if [ "$("$out")" = "hello from tinyc" ]; then
-            note "PASS: x86_64-linux-gnu output executes and prints hello"
+            note "PASS: $triple output executes and prints hello"
         else
-            fail "x86_64-linux-gnu: compiled program output mismatch"
+            fail "$triple: compiled program output mismatch"
         fi
     fi
 }

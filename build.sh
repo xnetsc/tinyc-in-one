@@ -3,16 +3,23 @@
 #
 # Usage: ./build.sh [triple ...]
 # With no arguments the full matrix is built. Hosts and targets are
-# 64-bit only. The dual-form files produced here run on this x86_64
-# Linux host; each one is a TCC whose target is its triple (upstream
-# TCC is one binary per target):
+# 64-bit only. The dual-form files produced here run on the build
+# host (a Linux host); each one is a TCC whose target is its triple
+# (upstream TCC is one binary per target):
 #
-#   x86_64-linux-gnu        native, host == target
-#   aarch64-linux-gnu       cross, glibc sysroot in /usr/aarch64-linux-gnu
+#   x86_64-linux-gnu        native when the host is x86_64, else cross
+#   aarch64-linux-gnu       native when the host is aarch64, else cross
 #   riscv64-linux-gnu       cross, glibc sysroot in /usr/riscv64-linux-gnu
 #   x86_64-w64-mingw32      cross, PE output (upstream x86_64-win32 target)
 #   aarch64-linux-android   cross, NDK bionic sysroot (see manifest)
-#   x86_64-linux-android    cross, NDK bionic sysroot (see manifest)
+#   x86_64-linux-android    native when the host is x86_64, else cross
+#
+# A linux-gnu target whose CPU matches the build host is built in
+# native mode: upstream's configure finds the system sysroot itself.
+# Any other linux-gnu target is built in cross mode with an explicit
+# /usr/<triplet> sysroot, which the build host must provide (the
+# cross libc packages). The same rule picks the compiler and sysroot
+# for the host variants below.
 #
 # macOS hosts (arm64-apple-darwin, x86_64-apple-darwin) are recognized
 # build entries: their dual-form kernel (PIE executable with an
@@ -25,11 +32,14 @@
 #
 #   ./build.sh host [host-triple ...]
 #
-# Supported here: aarch64-linux-gnu and riscv64-linux-gnu (cross gcc;
-# the binary is a native-configured TCC for that machine, verified
-# under qemu-user) and x86_64-w64-mingw32 (MinGW cross gcc; the
+# Supported here: the three linux-gnu triples and x86_64-w64-mingw32.
+# A Linux variant whose CPU matches the build host is compiled with
+# the host compiler and the system sysroot; any other Linux variant
+# with the <triplet>-gcc cross compiler and a /usr/<triplet> sysroot
+# (the binary is a native-configured TCC for that machine, verified
+# under qemu-user). The MinGW variant uses a MinGW cross gcc; the
 # recipe's CC can be overridden with TINYC_MINGW_CC, e.g. plain gcc
-# on a Windows runner). Host variants land in build/dist-host/<triple>/
+# on a Windows runner. Host variants land in build/dist-host/<triple>/
 # with the same internal layout as build/dist plus a manifest that
 # records host, target (== host) and how the build was produced.
 #
@@ -44,6 +54,10 @@
 set -e
 cd "$(dirname "$0")"
 ROOT=$PWD
+
+# Build host CPU (x86_64 | aarch64 | riscv64 on the Linux hosts this
+# script supports); drives the native/cross choice described above.
+HOST_ARCH=$(uname -m)
 
 ALL="x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32 aarch64-linux-android x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin"
 if [ $# -gt 0 ]; then TRIPLES="$*"; else TRIPLES="$ALL"; fi
@@ -232,8 +246,8 @@ $(print_outputs elf)
   "dual_file": "bin/tinyc",
   "toolchain_include": "include",
   "libtcc1": "lib/tcc/libtcc1.a",
-  "built_on": "x86_64-linux-gnu host, cross C compiler $HGC",
-  "verification": "qemu-user smoke test (emulator-level): tests/test_hosts.sh"
+  "built_on": "$HOST_ARCH-linux-gnu host, C compiler $HGC",
+  "verification": "host smoke test (native execution when the variant matches the test host, qemu-user otherwise): tests/test_hosts.sh"
 }
 EOF
     echo "built: $DIST"
@@ -283,7 +297,17 @@ t2 = re.sub(r'#ifndef CONFIG_TCCDIR\n#define CONFIG_TCCDIR "[^"]*"\n#endif\n', '
 assert '#define CONFIG_TCCDIR' not in t2, "CONFIG_TCCDIR still defined in config.h"
 open(p, 'w').write(t2)
 PYEOF
-    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+    # Only the cross target is built. The recipe consumes
+    # x86_64-win32-libtcc1.a and the generated tccdefs_.h, both of
+    # which the cross build produces; everything else it copies is a
+    # pristine source file. A full make is not an option: on a
+    # Windows-configured tree it also links libtcc.dll from
+    # $(LIBTCC_OBJ), which includes tcc_io.o, whose tinyc_main_io
+    # references tinyc_main - a symbol that lives in tcc.c, outside
+    # libtcc. ELF shared libraries tolerate the undefined symbol (the
+    # final dual-form link resolves it); PE DLLs do not, so the full
+    # make dies on a Windows host. No libtcc.dll is ever shipped:
+    # the dual-form exe is the product.
     (cd "$SRC" && make cross-x86_64-win32 >/dev/null)
     cp "$SRC/x86_64-win32-libtcc1.a" "$DIST/lib/tcc/win32/lib/libtcc1.a"
     cp "$SRC"/win32/lib/*.def "$DIST/lib/tcc/win32/lib/"
@@ -327,26 +351,36 @@ EOF
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }
 
+# build_host_for <triple> <cross-name> <target-def> <isa>
+# A Linux host variant is built with the plain host compiler and no
+# baked sysroot when its CPU is the build host's CPU; otherwise with
+# the <triplet>-gcc cross compiler and a /usr/<triplet> sysroot.
+build_host_for() {
+    local H=$1 CT=$2 TDEF=$3 ISA=$4
+    if [ "${H%%-*}" = "$HOST_ARCH" ]; then
+        build_host_linux "$H" "$CT" gcc "$TDEF" "$ISA"
+    else
+        build_host_linux "$H" "$CT" "$H-gcc" "$TDEF" "$ISA" \
+            "-DCONFIG_SYSROOT=\"/usr/$H\"" \
+            '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
+            '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
+            '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+    fi
+}
+
 if [ "${1:-}" = "host" ]; then
     shift
     HOSTS=${@:-"aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32"}
     for H in $HOSTS; do
         case $H in
+            x86_64-linux-gnu)
+                build_host_for "$H" x86_64 "-DTCC_TARGET_X86_64" "$ISA_X86_64"
+                ;;
             aarch64-linux-gnu)
-                build_host_linux "$H" arm64 aarch64-linux-gnu-gcc \
-                    "-DTCC_TARGET_ARM64" "$ISA_ARM64" \
-                    '-DCONFIG_SYSROOT="/usr/aarch64-linux-gnu"' \
-                    '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-                    '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+                build_host_for "$H" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64"
                 ;;
             riscv64-linux-gnu)
-                build_host_linux "$H" riscv64 riscv64-linux-gnu-gcc \
-                    "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
-                    '-DCONFIG_SYSROOT="/usr/riscv64-linux-gnu"' \
-                    '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-                    '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+                build_host_for "$H" riscv64 "-DTCC_TARGET_RISCV64" "$ISA_RISCV64"
                 ;;
             x86_64-w64-mingw32)
                 build_host_mingw
@@ -361,17 +395,30 @@ if [ "${1:-}" = "host" ]; then
     exit 0
 fi
 
+# build_glibc <triple> <cross-name> <target-def> <isa>
+# linux-gnu targets: native mode when the target CPU is the build
+# host's CPU (configure finds the system sysroot), cross mode with a
+# /usr/<triplet> sysroot otherwise.
+build_glibc() {
+    local TRIPLE=$1 CT=$2 TDEF=$3 ISA=$4
+    if [ "${TRIPLE%%-*}" = "$HOST_ARCH" ]; then
+        build_one "$TRIPLE" "" native "" "$ISA"
+    else
+        build_one "$TRIPLE" "$CT" cross "$TDEF" "$ISA" \
+            "-DCONFIG_SYSROOT=\"/usr/$TRIPLE\"" \
+            '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
+            '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
+            '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+    fi
+}
+
 for TRIPLE in $TRIPLES; do
     case $TRIPLE in
         x86_64-linux-gnu)
-            build_one "$TRIPLE" "" native "" "$ISA_X86_64"
+            build_glibc "$TRIPLE" x86_64 "-DTCC_TARGET_X86_64" "$ISA_X86_64"
             ;;
         aarch64-linux-gnu)
-            build_one "$TRIPLE" arm64 cross "-DTCC_TARGET_ARM64" "$ISA_ARM64" \
-                '-DCONFIG_SYSROOT="/usr/aarch64-linux-gnu"' \
-                '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-                '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+            build_glibc "$TRIPLE" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64"
             ;;
         riscv64-linux-gnu)
             build_one "$TRIPLE" riscv64 cross "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
@@ -396,7 +443,16 @@ for TRIPLE in $TRIPLES; do
                 '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
             ;;
         x86_64-linux-android)
-            build_one "$TRIPLE" "" native \
+            # native mode only when the build host is x86_64: the
+            # native make produces the host CPU's libtcc1.a, so on
+            # any other host this target needs the cross build to
+            # get an x86_64 libtcc1.a.
+            if [ "$HOST_ARCH" = x86_64 ]; then
+                X64_ANDROID_MODE=native X64_ANDROID_CT=""
+            else
+                X64_ANDROID_MODE=cross X64_ANDROID_CT=x86_64
+            fi
+            build_one "$TRIPLE" "$X64_ANDROID_CT" "$X64_ANDROID_MODE" \
                 "-DTCC_TARGET_X86_64 -DTARGETOS_ANDROID=1" "$ISA_X86_64" \
                 "-DCONFIG_SYSROOT=\"$NDK_SYSROOT\"" \
                 "-DCONFIG_TCC_CRTPREFIX=\"{R}/usr/lib/x86_64-linux-android/$ANDROID_API\"" \

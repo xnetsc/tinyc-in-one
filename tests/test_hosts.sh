@@ -1,10 +1,11 @@
 #!/bin/bash
-# Smoke tests for the cross-built host variants in build/dist-host.
+# Smoke tests for the host variants in build/dist-host.
 #
-# The aarch64 and riscv64 dual-form files cannot execute natively on
-# this x86_64 machine, so they are run under qemu-user: this is
-# emulator-level verification (the binaries are real host binaries;
-# only their execution here is emulated). For each Linux host:
+# A variant whose CPU differs from this machine's cannot execute
+# natively, so it is run under qemu-user: this is emulator-level
+# verification (the binaries are real host binaries; only their
+# execution here is emulated). A variant matching this machine's CPU
+# runs natively, with no qemu involved. For each Linux host:
 #   1. the dual-form file runs under qemu and reports its version;
 #   2. it compiles hello.c under qemu; the product is checked with
 #      readelf (class/machine/interp) and executed under qemu;
@@ -27,7 +28,7 @@ trap 'rm -rf "$TMP"' EXIT
 FAIL=0
 
 {
-echo "tinyc host variant smoke tests (qemu-user, emulator-level)"
+echo "tinyc host variant smoke tests (native for this host's CPU, qemu-user for the others)"
 echo "==========================================================="
 } > "$LOG"
 
@@ -67,7 +68,13 @@ EOF
 note() { echo "$1" | tee -a "$LOG"; }
 fail() { note "FAIL: $1"; FAIL=1; }
 
-# smoke_linux_host <triple> <qemu> <sysroot> <cross-gcc> <machine-regex> <interp>
+HOST_ARCH=$(uname -m)
+
+# smoke_linux_host <triple> <qemu|"native"> <sysroot> <gcc> <machine-regex> <interp>
+# With qemu "native" the variant runs directly on this machine and
+# the dlopen host is compiled with the plain host gcc; otherwise the
+# variant runs under the given qemu-user with the given sysroot and
+# the dlopen host is compiled with the given cross gcc.
 smoke_linux_host() {
     local triple=$1 qemu=$2 sysroot=$3 xgcc=$4 machine=$5 interp=$6
     local dist=$ROOT/build/dist-host/$triple
@@ -75,23 +82,30 @@ smoke_linux_host() {
         note "SKIP: $triple (not built)"
         return
     fi
-    if ! command -v "$qemu" >/dev/null 2>&1; then
-        note "SKIP: $triple ($qemu not installed)"
-        return
+    local -a RUN
+    if [ "$qemu" = native ]; then
+        RUN=()
+        note "--- $triple native execution ---"
+    else
+        if ! command -v "$qemu" >/dev/null 2>&1; then
+            note "SKIP: $triple ($qemu not installed)"
+            return
+        fi
+        RUN=("$qemu" -L "$sysroot")
+        note "--- $triple via $qemu -L $sysroot (emulator-level) ---"
     fi
-    note "--- $triple via $qemu -L $sysroot (emulator-level) ---"
     file "$dist/bin/tinyc" >> "$LOG" 2>&1
 
     local out
-    out=$("$qemu" -L "$sysroot" "$dist/bin/tinyc" --version 2>&1)
+    out=$("${RUN[@]}" "$dist/bin/tinyc" --version 2>&1)
     echo "$out" >> "$LOG"
     case "$out" in
-        *"tcc version"*) note "PASS: $triple dual-form executes under qemu (--version)" ;;
-        *) fail "$triple: --version under qemu failed: $out" ;;
+        *"tcc version"*) note "PASS: $triple dual-form executes (--version)" ;;
+        *) fail "$triple: --version failed: $out" ;;
     esac
 
     local exe=$TMP/hello-$triple
-    if "$qemu" -L "$sysroot" "$dist/bin/tinyc" "$TMP/hello.c" -o "$exe" >> "$LOG" 2>&1; then
+    if "${RUN[@]}" "$dist/bin/tinyc" "$TMP/hello.c" -o "$exe" >> "$LOG" 2>&1; then
         local hdr int
         hdr=$(readelf -h "$exe" 2>/dev/null)
         int=$(readelf -l "$exe" 2>/dev/null | sed -n 's/.*\[Requesting program interpreter: \(.*\)\]/\1/p')
@@ -100,21 +114,21 @@ smoke_linux_host() {
         else
             fail "$triple: hello header mismatch (machine=$(echo "$hdr" | grep Machine), interp=$int)"
         fi
-        out=$("$qemu" -L "$sysroot" "$exe" 2>&1)
+        out=$("${RUN[@]}" "$exe" 2>&1)
         if [ "$out" = "hello from tinyc" ]; then
-            note "PASS: $triple hello executes under qemu with correct output"
+            note "PASS: $triple hello executes with correct output"
         else
             fail "$triple: hello output mismatch: [$out]"
         fi
     else
-        fail "$triple: hello compile under qemu failed"
+        fail "$triple: hello compile failed"
     fi
 
     if "$xgcc" -O2 -o "$TMP/dlopen_host-$triple" "$TMP/dlopen_host.c" -ldl 2>>"$LOG"; then
-        out=$("$qemu" -L "$sysroot" "$TMP/dlopen_host-$triple" "$dist/bin/tinyc" 2>&1)
+        out=$("${RUN[@]}" "$TMP/dlopen_host-$triple" "$dist/bin/tinyc" 2>&1)
         echo "$out" >> "$LOG"
         case "$out" in
-            *"HOST-DLOPEN-ALIVE"*) note "PASS: $triple dlopen host: tinyc_main + tcc_* API alive under qemu" ;;
+            *"HOST-DLOPEN-ALIVE"*) note "PASS: $triple dlopen host: tinyc_main + tcc_* API alive" ;;
             *) fail "$triple: dlopen host failed: $out" ;;
         esac
     else
@@ -122,8 +136,20 @@ smoke_linux_host() {
     fi
 }
 
-smoke_linux_host aarch64-linux-gnu qemu-aarch64-static /usr/aarch64-linux-gnu \
-    aarch64-linux-gnu-gcc "AArch64" "/lib/ld-linux-aarch64.so.1"
+if [ "$HOST_ARCH" = aarch64 ]; then
+    smoke_linux_host aarch64-linux-gnu native "" \
+        gcc "AArch64" "/lib/ld-linux-aarch64.so.1"
+else
+    smoke_linux_host aarch64-linux-gnu qemu-aarch64-static /usr/aarch64-linux-gnu \
+        aarch64-linux-gnu-gcc "AArch64" "/lib/ld-linux-aarch64.so.1"
+fi
+if [ "$HOST_ARCH" = x86_64 ]; then
+    smoke_linux_host x86_64-linux-gnu native "" \
+        gcc "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
+else
+    smoke_linux_host x86_64-linux-gnu qemu-x86_64-static /usr/x86_64-linux-gnu \
+        x86_64-linux-gnu-gcc "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
+fi
 smoke_linux_host riscv64-linux-gnu qemu-riscv64-static /usr/riscv64-linux-gnu \
     riscv64-linux-gnu-gcc "RISC-V" "/lib/ld-linux-riscv64-lp64d.so.1"
 
@@ -137,20 +163,27 @@ if [ -f "$MDIST/bin/tinyc.exe" ]; then
         fail "$MT: not a PE32+ x86-64 executable ($(file "$MDIST/bin/tinyc.exe"))"
     fi
     file "$MDIST/bin/tinyc.exe" >> "$LOG"
-    EXPORTS=$(x86_64-w64-mingw32-objdump -p "$MDIST/bin/tinyc.exe" 2>/dev/null \
-        | sed -n '/Export Address Table/,$p')
-    x86_64-w64-mingw32-objdump -p "$MDIST/bin/tinyc.exe" >> "$LOG" 2>&1
-    # the export name table follows the address table in objdump output
-    NAMES=$(x86_64-w64-mingw32-objdump -p "$MDIST/bin/tinyc.exe" 2>/dev/null \
-        | awk '/\[Ordinal\/Name Pointer\] Table/{f=1} f' | grep -oE '\b(main|tinyc_main|tinyc_init|tcc_new|tcc_compile_string|tcc_run)\b' | sort -u)
-    MISSING=""
-    for sym in main tinyc_main tinyc_init tcc_new tcc_compile_string tcc_run; do
-        echo "$NAMES" | grep -qx "$sym" || MISSING="$MISSING $sym"
-    done
-    if [ -z "$MISSING" ]; then
-        note "PASS: $MT export table lists main, tinyc_main, tinyc_init and the tcc_* API"
+    # the triplet objdump may not exist on a non-x86_64 build host;
+    # any objdump whose BFD knows the PE target reads the same table
+    OBJDUMP=$(command -v x86_64-w64-mingw32-objdump || command -v objdump || true)
+    if [ -z "$OBJDUMP" ]; then
+        note "SKIP: $MT export table (no objdump available)"
     else
-        fail "$MT: export table missing:$MISSING"
+        EXPORTS=$("$OBJDUMP" -p "$MDIST/bin/tinyc.exe" 2>/dev/null \
+            | sed -n '/Export Address Table/,$p')
+        "$OBJDUMP" -p "$MDIST/bin/tinyc.exe" >> "$LOG" 2>&1
+        # the export name table follows the address table in objdump output
+        NAMES=$("$OBJDUMP" -p "$MDIST/bin/tinyc.exe" 2>/dev/null \
+            | awk '/\[Ordinal\/Name Pointer\] Table/{f=1} f' | grep -oE '\b(main|tinyc_main|tinyc_init|tcc_new|tcc_compile_string|tcc_run)\b' | sort -u)
+        MISSING=""
+        for sym in main tinyc_main tinyc_init tcc_new tcc_compile_string tcc_run; do
+            echo "$NAMES" | grep -qx "$sym" || MISSING="$MISSING $sym"
+        done
+        if [ -z "$MISSING" ]; then
+            note "PASS: $MT export table lists main, tinyc_main, tinyc_init and the tcc_* API"
+        else
+            fail "$MT: export table missing:$MISSING"
+        fi
     fi
 else
     note "SKIP: $MT (not built)"

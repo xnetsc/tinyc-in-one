@@ -8,28 +8,39 @@ FAIL=0
 section() { echo; echo "===== $1 ====="; }
 ok() { if [ "$1" -eq 0 ]; then echo "PASS: $2"; else echo "FAIL: $2"; FAIL=1; fi }
 
+# Every section is judged by the test command's own exit code, never
+# by a display filter (tail/grep) downstream of it: each suite writes
+# its full output to a log, ok() reads the suite's status, and only
+# then is the log excerpted for display.
 section "kernel: C unit tests for TCCIO implementations"
-gcc -Wall -I core tests/test_io.c core/tcc_io.c -o /tmp/tinyc_test_io
-/tmp/tinyc_test_io
+rm -f /tmp/tinyc_test_io
+gcc -Wall -I core tests/test_io.c core/tcc_io.c -o /tmp/tinyc_test_io \
+  && /tmp/tinyc_test_io
 ok $? "test_io"
 
 section "kernel: dual-form file (exec mode, dlopen mode, API, IO)"
-python3 -m unittest discover -s tests -p "test_kernel.py" 2>&1 | tail -3
-ok ${PIPESTATUS[0]} "test_kernel"
+python3 -m unittest discover -s tests -p "test_kernel.py" \
+  > /tmp/tinyc_kernel_tests.log 2>&1
+ok $? "test_kernel"
+tail -3 /tmp/tinyc_kernel_tests.log
 
 section "python package"
-(cd packages/python && python3 -m unittest discover -s tests 2>&1 | tail -3)
-ok ${PIPESTATUS[0]} "python package"
+(cd packages/python && python3 -m unittest discover -s tests) \
+  > /tmp/tinyc_python_tests.log 2>&1
+ok $? "python package"
+tail -3 /tmp/tinyc_python_tests.log
 
 section "npm package"
-(cd packages/npm && npm test 2>&1 | grep -E "^ℹ (tests|pass|fail)")
-ok ${PIPESTATUS[0]} "npm package"
+(cd packages/npm && npm test) > /tmp/tinyc_npm_tests.log 2>&1
+ok $? "npm package"
+grep -E "^ℹ (tests|pass|fail)" /tmp/tinyc_npm_tests.log
 
 section "java package"
+rm -f /tmp/tinyc_java_tests.log
 (cd packages/java && ./build.sh > /tmp/tinyc_java_build.log 2>&1 && \
   ./run-tests.sh > /tmp/tinyc_java_tests.log 2>&1)
 ok $? "java package"
-tail -4 /tmp/tinyc_java_tests.log
+tail -4 /tmp/tinyc_java_tests.log 2>/dev/null
 
 section "outputs consistency (dist manifest is the authority)"
 python3 tests/check_outputs_consistency.py
