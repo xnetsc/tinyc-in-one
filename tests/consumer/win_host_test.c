@@ -32,14 +32,13 @@
  * The calls then run in the host contract's order. First
  * tinyc_noop - an exported function with an empty body: if that
  * call dies, the fault is in the transfer into the image. Then the
- * test reads the loaded image's IAT slot for CreateFileA (found by
- * walking its import directory) into the markers file, calls
- * tinyc_init - the first call a host is contracted to make, which
- * binds the image's import table itself - and reads the slot
- * again: before, it must hold the hint/name RVA the file shipped
- * (this load form does not reliably backfill an EXE's IAT); after,
- * it must hold the real CreateFileA address, checked against this
- * process's own GetProcAddress result. Finally tinyc_ping, whose
+ * test reads the loaded image's IAT slot for GetProcAddress
+ * (found by walking its import directory) into the markers file,
+ * calls tinyc_init - the first call a host is contracted to make,
+ * which binds the image's import table itself - and reads the
+ * slot again: after, it must hold the real GetProcAddress
+ * address, checked against this process's own GetProcAddress
+ * result. Finally tinyc_ping, whose
  * whole body is one file append inside the loaded image, proves
  * the post-init path end to end. A vectored exception handler is
  * armed across the noop + init + ping window: on a fatal exception
@@ -230,15 +229,19 @@ static uintptr_t *find_iat_slot(HMODULE h, const char *dll_name,
     return NULL;
 }
 
-/* Append "iat:CreateFileA:<label>=<slot content>" to the markers
- * file. Read before tinyc_init, the slot shows the unbound file
- * value; read after, the address tinyc_init's self-binding pass
- * wrote into it. */
+/* Append "iat:GetProcAddress:<label>=<slot content>" to the markers
+ * file. Read before tinyc_init, the slot shows whatever the load
+ * left in it; read after, the address tinyc_init's self-binding
+ * pass wrote into it. The slot measured is GetProcAddress: the
+ * image imports it (libtcc resolves loaded DLL symbols through
+ * it), while CreateFileA is not imported at all - nothing in the
+ * image calls it through the IAT since the markers in tinyc_win.c
+ * switched to resolved pointers. */
 static void log_iat_slot(const char *label, const uintptr_t *slot)
 {
     struct linebuf lb;
     lb.len = 0; lb.buf[0] = 0;
-    lb_puts(&lb, "iat:CreateFileA:");
+    lb_puts(&lb, "iat:GetProcAddress:");
     lb_puts(&lb, label);
     lb_puts(&lb, "=");
     if (slot)
@@ -393,27 +396,27 @@ int main(int argc, char **argv)
     check(p_noop() == 0, "tinyc_noop() returns 0");
     mark("tinyc_noop:done");
 
-    /* The image's CreateFileA IAT slot, read around tinyc_init:
-     * unbound file value before, the real address after - the
-     * direct evidence of the self-binding in the artifacts. */
+    /* The image's GetProcAddress IAT slot, read around tinyc_init:
+     * whatever the load left in it before, the real address after -
+     * the direct evidence of the self-binding in the artifacts. */
     {
-        uintptr_t *create_file_slot =
-            find_iat_slot(h, "kernel32.dll", "CreateFileA");
+        uintptr_t *gpa_slot =
+            find_iat_slot(h, "kernel32.dll", "GetProcAddress");
         HMODULE k32;
-        FARPROC real_create_file = NULL;
-        log_iat_slot("before", create_file_slot);
+        FARPROC real_gpa = NULL;
+        log_iat_slot("before", gpa_slot);
 
         mark("tinyc_init:begin");
         check(p_init() == 0, "tinyc_init() returns 0");
         mark("tinyc_init:done");
 
-        log_iat_slot("after", create_file_slot);
+        log_iat_slot("after", gpa_slot);
         k32 = GetModuleHandleA("kernel32.dll");
         if (k32)
-            real_create_file = GetProcAddress(k32, "CreateFileA");
-        check(create_file_slot && real_create_file
-              && *create_file_slot == (uintptr_t)real_create_file,
-              "CreateFileA IAT slot holds the real address after tinyc_init");
+            real_gpa = GetProcAddress(k32, "GetProcAddress");
+        check(gpa_slot && real_gpa
+              && *gpa_slot == (uintptr_t)real_gpa,
+              "GetProcAddress IAT slot holds the real address after tinyc_init");
     }
 
     mark("tinyc_ping:begin");
@@ -455,7 +458,11 @@ int main(int argc, char **argv)
     }
 
     /* tcc_* API: compile in memory and run; no external symbols, so
-     * no library path is needed. TCC_OUTPUT_MEMORY == 0. */
+     * no library path is needed. TCC_OUTPUT_MEMORY == 0. relocate
+     * and run get separate states: tcc_run relocates its state
+     * itself, and a state must not be relocated twice - the second
+     * link pass would redefine the linker symbols (_etext and
+     * friends, __stop_<section>) the first pass already set. */
     {
         mark("tcc_api:begin");
         void *s = p_new();
@@ -468,6 +475,15 @@ int main(int argc, char **argv)
                 mark("tcc_relocate:begin");
                 check(p_reloc(s, (void *)(intptr_t)-1) == 0, "tcc_relocate succeeds");
                 mark("tcc_relocate:done");
+            }
+            p_del(s);
+        }
+        s = p_new();
+        if (s) {
+            p_outtype(s, 0);
+            int rc = p_compile(s, "int main(void) { return 42; }");
+            check(rc == 0, "tcc_compile_string succeeds");
+            if (rc == 0) {
                 mark("tcc_run:begin");
                 check(p_run(s, 0, NULL) == 42, "tcc_run returns the program's 42");
                 mark("tcc_run:done");

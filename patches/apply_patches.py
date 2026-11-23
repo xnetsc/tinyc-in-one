@@ -54,6 +54,36 @@ patch("libtcc.c",
             s->opt_exit_requested = 1;
             return 0;""")
 
+# ---- libtcc.c: tccdir is this image's directory, not the host's ----
+# config_tccdir_w32 asks GetModuleFileNameA(tcc_module). Upstream
+# records tcc_module in a DllMain that exists only in the
+# LIBTCC_AS_DLL build; in this build it is the NULL macro, which
+# names the process image. Loaded as a library, the process is the
+# host, so {B} - and with it the include path and the libtcc1.a /
+# runmain.o lookup - lands in the host's directory. Resolve the
+# handle of the image containing this code instead; in process mode
+# that is the main module, so the resulting path is unchanged. The
+# macro stays a bare definition (non-Windows builds never expand
+# it); the function is emitted only in the CONFIG_TCCDIR-less
+# region, which is the win32 configuration.
+patch("libtcc.c",
+      "#define tcc_module NULL /* NULL means executable itself */",
+      "#define tcc_module tinyc_self_module()")
+patch("libtcc.c",
+      """#ifndef CONFIG_TCCDIR
+/* on win32, we suppose the lib and includes are at the location of 'tcc.exe' */""",
+      """#ifndef CONFIG_TCCDIR
+/* tinyc: the handle of the image containing this code */
+static HMODULE tinyc_self_module(void)
+{
+    HMODULE h = NULL;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       (LPCSTR)(void *)&tinyc_self_module, &h);
+    return h;
+}
+/* on win32, we suppose the lib and includes are at the location of 'tcc.exe' */""")
+
 # ---- Makefile: the IO unit is its own object in every build ---------
 patch("Makefile",
       "# native tcc always made from tcc.o and libtcc.[so|a]",
