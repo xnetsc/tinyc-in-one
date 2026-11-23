@@ -269,14 +269,18 @@ build_host_mingw() {
     python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
 
     (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
-    # Windows builds resolve the tcc dir from the exe location; drop
-    # the baked Linux CONFIG_TCCDIR so that fallback engages.
+    # Windows builds resolve the tcc dir from the exe location at
+    # runtime, so config.h must not define CONFIG_TCCDIR. A configure
+    # run on a Linux host bakes one in (the --prefix path); strip it.
+    # A configure run on a Windows host defines none (upstream marks
+    # the tcc dir auto-resolved there). Either way the end state is
+    # asserted, not the edit.
     python3 - "$SRC/config.h" <<'PYEOF'
 import re, sys
 p = sys.argv[1]
 t = open(p).read()
 t2 = re.sub(r'#ifndef CONFIG_TCCDIR\n#define CONFIG_TCCDIR "[^"]*"\n#endif\n', '', t)
-assert t2 != t, "CONFIG_TCCDIR block not found in config.h"
+assert '#define CONFIG_TCCDIR' not in t2, "CONFIG_TCCDIR still defined in config.h"
 open(p, 'w').write(t2)
 PYEOF
     (cd "$SRC" && make -j"$(nproc)" >/dev/null)

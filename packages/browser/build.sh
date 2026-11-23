@@ -92,7 +92,7 @@ case "$TARGET" in
         TARGET_DEFS="-DTCC_TARGET_WASM32"
         TARGET_SRC="$ASRC/wasm-gen.c $ASRC/wasm-link.c"
         # the backend tree has no tinyc_main; export main only
-        EXPORTED_FUNCTIONS_OVERRIDE='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func"]'
+        EXPORTED_FUNCTIONS_OVERRIDE='["_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
         ;;
     *) echo "build.sh: unsupported TARGET=$TARGET (supported: x86_64-linux-gnu, aarch64-linux-gnu, riscv64-linux-gnu, x86_64-windows, aarch64-linux-android, x86_64-linux-android, arm64-apple-darwin, x86_64-apple-darwin, wasm32-wasi)" >&2; exit 1 ;;
 esac
@@ -112,8 +112,11 @@ $UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TAR
 # tcc_output_file, tcc_run, tcc_relocate, tcc_get_symbol,
 # tcc_list_symbols, tcc_set_backtrace_func), plus main / tinyc_main
 # and malloc/free, which the glue layer needs to assemble argv and
-# pass strings.
-EXPORTED_FUNCTIONS='["_main","_tinyc_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func"]'
+# pass strings, plus the two WasmFS functions the glue layer calls
+# to mount the OPFS backend (wasmfs_create_opfs_backend and
+# wasmfs_create_directory, from <emscripten/wasmfs.h>; they exist
+# only in the -sWASMFS build).
+EXPORTED_FUNCTIONS='["_main","_tinyc_main","_malloc","_free","_tcc_set_realloc","_tcc_new","_tcc_delete","_tcc_set_lib_path","_tcc_set_error_func","_tcc_set_options","_tcc_add_include_path","_tcc_add_sysinclude_path","_tcc_define_symbol","_tcc_undefine_symbol","_tcc_add_file","_tcc_compile_string","_tcc_set_output_type","_tcc_add_library_path","_tcc_add_library","_tcc_add_symbol","_tcc_output_file","_tcc_run","_tcc_relocate","_tcc_get_symbol","_tcc_list_symbols","_tcc_set_backtrace_func","_wasmfs_create_opfs_backend","_wasmfs_create_directory"]'
 
 EXPORTED_FUNCTIONS="${EXPORTED_FUNCTIONS_OVERRIDE:-$EXPORTED_FUNCTIONS}"
 
@@ -124,7 +127,15 @@ EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","UTF8ToString","stringToUTF8","l
 #   INVOKE_RUN=0              main must not run at load; callMain
 #                             invokes it explicitly, like a caller of
 #                             the exported main in the native packages
-#   FORCE_FILESYSTEM          the virtual FS mirrors into module FS
+#   WASMFS                    the module filesystem is WasmFS; its
+#                             root backend is memory. Where it can,
+#                             the glue layer mounts the WasmFS OPFS
+#                             backend at /opfs (see index.mjs)
+#   FORCE_FILESYSTEM          with WasmFS the JS FS API is opt-in;
+#                             this setting is what includes it, and
+#                             the virtual FS mirrors into the module
+#                             FS through it (FS.mkdirTree, FS.writeFile
+#                             and FS.unlink)
 #   ALLOW_MEMORY_GROWTH       compiled inputs are unbounded
 #   ENVIRONMENT=web,worker    same build serves page and worker
 emcc $CORE_SRC \
@@ -136,6 +147,7 @@ emcc $CORE_SRC \
     -sEXPORT_ES6=1 \
     -sINVOKE_RUN=0 \
     -sENVIRONMENT=web,worker \
+    -sWASMFS=1 \
     -sFORCE_FILESYSTEM=1 \
     -sALLOW_MEMORY_GROWTH=1 \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS" \

@@ -38,10 +38,94 @@
 //                         by build.sh, with the wasm at options.wasmUrl
 //                         or tcc-<target>.wasm alongside the glue
 
-import sysrootManifest from './sysroot-manifests/wasm32-wasi.json' with { type: 'json' };
+import manifestWasm32Wasi from './sysroot-manifests/wasm32-wasi.json' with { type: 'json' };
+import manifestX86_64LinuxGnu from './sysroot-manifests/x86_64-linux-gnu.json' with { type: 'json' };
+import manifestAarch64LinuxGnu from './sysroot-manifests/aarch64-linux-gnu.json' with { type: 'json' };
+import manifestRiscv64LinuxGnu from './sysroot-manifests/riscv64-linux-gnu.json' with { type: 'json' };
+import manifestX86_64Windows from './sysroot-manifests/x86_64-windows.json' with { type: 'json' };
+import manifestAarch64LinuxAndroid from './sysroot-manifests/aarch64-linux-android.json' with { type: 'json' };
+import manifestX86_64LinuxAndroid from './sysroot-manifests/x86_64-linux-android.json' with { type: 'json' };
+import manifestArm64AppleDarwin from './sysroot-manifests/arm64-apple-darwin.json' with { type: 'json' };
+import manifestX86_64AppleDarwin from './sysroot-manifests/x86_64-apple-darwin.json' with { type: 'json' };
 import { createDefaultShims, ShimExit } from './runtime-shims.mjs';
+import { MemoryFsStore, openFsStore } from './vfs-store.mjs';
 
-export { sysrootManifest };
+export { MemoryFsStore, IndexedDbFsStore, createFsStore } from './vfs-store.mjs';
+
+/** The default target's sysroot manifest (sysroot-manifests/wasm32-wasi.json). */
+export const sysrootManifest = manifestWasm32Wasi;
+
+// Every target's sysroot manifest, statically imported so the data is
+// part of the module graph: the classic-script bundle (tinyc-web.js)
+// inlines all of them, and loadSysrootManifest never fetches JSON at
+// runtime.
+const SYSROOT_MANIFESTS = Object.freeze({
+  'wasm32-wasi': manifestWasm32Wasi,
+  'x86_64-linux-gnu': manifestX86_64LinuxGnu,
+  'aarch64-linux-gnu': manifestAarch64LinuxGnu,
+  'riscv64-linux-gnu': manifestRiscv64LinuxGnu,
+  'x86_64-windows': manifestX86_64Windows,
+  'aarch64-linux-android': manifestAarch64LinuxAndroid,
+  'x86_64-linux-android': manifestX86_64LinuxAndroid,
+  'arm64-apple-darwin': manifestArm64AppleDarwin,
+  'x86_64-apple-darwin': manifestX86_64AppleDarwin,
+});
+
+// ---------------------------------------------------------------------
+// Asset base URL
+//
+// The per-target glue/wasm files and the sysroot files resolve
+// against a base captured for the environment this code runs in:
+//   - ES module: this module's own URL (import.meta.url), so assets
+//     sitting next to index.mjs are found;
+//   - classic-script bundle (tinyc-web.js): the directory of the
+//     <script> element that loaded the bundle, captured below from
+//     document.currentScript while the bundle executes, so assets
+//     sitting next to tinyc-web.js are found; when no script URL is
+//     available, the page's own directory (location.href) is used.
+// loadTinyc's baseUrl option overrides the base per call; its
+// wasmUrl / glueUrl options override individual files.
+// ---------------------------------------------------------------------
+
+const SCRIPT_DIR_HREF = (() => {
+  try {
+    const script = typeof document !== 'undefined' ? document.currentScript : null;
+    if (script && script.src) return new URL('.', script.src).href;
+  } catch { /* no usable script URL */ }
+  return null;
+})();
+
+const MODULE_URL = (() => {
+  try {
+    return import.meta.url || null;
+  } catch {
+    return null;
+  }
+})();
+
+const PAGE_DIR_HREF = (() => {
+  try {
+    if (typeof location !== 'undefined' && location.href) {
+      return new URL('.', location.href).href;
+    }
+  } catch { /* no page URL */ }
+  return null;
+})();
+
+/** baseUrl values are directory URLs: a missing trailing slash is
+ *  added, so "https://host/libs" names the directory, not a file. */
+function dirHref(url) {
+  return url.endsWith('/') ? url : url + '/';
+}
+
+/** Absolute URL of an asset file: resolved against baseUrl when
+ *  given, else against the captured environment base. */
+function assetUrl(name, baseUrl) {
+  const base = baseUrl
+    ? dirHref(baseUrl)
+    : SCRIPT_DIR_HREF ?? MODULE_URL ?? PAGE_DIR_HREF;
+  return base ? new URL(name, base).href : name;
+}
 
 /** Virtual path placed in argv[0] when calling the exported main. TCC
  *  derives its library path from argv[0]; the sysroot is mounted at
@@ -202,20 +286,44 @@ export function flushIO(io) {
 // ---------------------------------------------------------------------
 // Virtual filesystem
 //
-// Files live in a Map<path, Uint8Array>. Paths are POSIX-style and
-// normalized to absolute form ("/src/main.c"). This is where the
-// "dynamically add local files" rule of the native packages lands in
-// a browser, where there is no real filesystem to point TCC at:
-// a local file enters as its content, as a File/Blob from an <input>
-// or drag-and-drop, or fetched from a URL.
+// File contents are persisted in a store (vfs-store.mjs): one
+// IndexedDB database per target where IndexedDB exists, an in-memory
+// backend where it does not. What stays in memory here is only the
+// path index (path -> { size, mtime }) plus a small LRU content
+// cache; the bytes themselves live in the store. Paths are
+// POSIX-style and normalized to absolute form ("/src/main.c"). This
+// is where the "dynamically add local files" rule of the native
+// packages lands in a browser, where there is no real filesystem to
+// point TCC at: a local file enters as its content, as a File/Blob
+// from an <input> or drag-and-drop, or fetched from a URL.
+//
+// Synchronous reads (readFile / readTextFile) are served from the
+// content cache — everything written or read during this session is
+// cached — and throw for a persisted file that is not cached,
+// naming readFileAsync / readTextFileAsync as the alternative.
+// addFile awaits its store write; addFileSync stays synchronous and
+// queues the write instead — await whenIdle() (on the FS or the
+// instance) to know queued writes and deletes have landed.
 //
 // === Emscripten FS adaptation point ===
 // When the native module is an Emscripten build, mountTo() copies
 // every virtual file into the module's FS (FS.mkdirTree + FS.writeFile)
-// and syncFile() keeps single files in sync after each write. All
-// Emscripten-FS knowledge in this package is confined to those two
-// methods; everything else works against the Map alone.
+// and syncFile() keeps single files in sync after each write. The
+// compile working set has to live in that FS while TCC runs, so it
+// is mirrored there in full — under the bridge's moduleFsPrefix
+// ("/opfs", the WasmFS OPFS backend loadTinyc mounts before
+// mirroring, when that mount succeeds; the module FS root
+// otherwise). Emscripten-FS knowledge in this package is confined
+// to those two methods, to removeFile's unlink, and to the OPFS
+// mount attempt itself (tryMountOpfsBackend).
 // ---------------------------------------------------------------------
+
+/** Content cache bounds for the virtual FS: at most this many
+ *  files, and at most this many bytes in total, are held in memory
+ *  for synchronous reads. A single file larger than the byte bound
+ *  is still cached (the bound is soft for one entry). */
+export const VFS_CACHE_MAX_ENTRIES = 32;
+export const VFS_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -247,26 +355,130 @@ async function contentToBytes(content) {
 }
 
 export class VirtualFS {
-  constructor() {
-    this.files = new Map();
+  /** `store` is an opened FsStore (see vfs-store.mjs); its persisted
+   *  index becomes this filesystem's initial file set. With no store
+   *  argument, a volatile in-memory store is used. loadTinyc opens
+   *  the per-target store (IndexedDB by default) before building
+   *  the instance's VirtualFS. */
+  constructor(store = null) {
+    this._store = store ?? new MemoryFsStore();
+    this.index = new Map(this._store.index ?? []);
     this.includeDirs = [];
     this._emscriptenFS = null;
+    this._moduleFsPrefix = '';
+    this._cache = new Map();
+    this._cacheBytes = 0;
+    this._pending = new Set();
+    this._idleError = null;
+  }
+
+  /** The kind of the backing store: 'indexeddb' or 'memory'. */
+  get storeKind() {
+    return this._store.kind;
+  }
+
+  _cacheGet(path) {
+    const bytes = this._cache.get(path);
+    if (bytes) {
+      // Refresh recency: re-insert at the newest end.
+      this._cache.delete(path);
+      this._cache.set(path, bytes);
+    }
+    return bytes;
+  }
+
+  _cachePut(path, bytes) {
+    const prev = this._cache.get(path);
+    if (prev) {
+      this._cache.delete(path);
+      this._cacheBytes -= prev.byteLength;
+    }
+    this._cache.set(path, bytes);
+    this._cacheBytes += bytes.byteLength;
+    while (
+      this._cache.size > 1 &&
+      (this._cache.size > VFS_CACHE_MAX_ENTRIES ||
+        this._cacheBytes > VFS_CACHE_MAX_BYTES)
+    ) {
+      const oldest = this._cache.keys().next().value;
+      this._cacheBytes -= this._cache.get(oldest).byteLength;
+      this._cache.delete(oldest);
+    }
+  }
+
+  _cacheDelete(path) {
+    const prev = this._cache.get(path);
+    if (prev) {
+      this._cache.delete(path);
+      this._cacheBytes -= prev.byteLength;
+    }
+  }
+
+  /** Queue a store operation kicked off by a synchronous method
+   *  (addFileSync / removeFile / clear). Tracked so whenIdle() can
+   *  await the queue; the first failure is remembered and rethrown
+   *  by whenIdle() instead of surfacing as an unhandled rejection. */
+  _queueStoreOp(op) {
+    let base;
+    try {
+      base = Promise.resolve(op());
+    } catch (err) {
+      base = Promise.reject(err);
+    }
+    const tracked = base.then(
+      () => { this._pending.delete(tracked); },
+      (err) => {
+        this._pending.delete(tracked);
+        if (this._idleError == null) this._idleError = err;
+      }
+    );
+    this._pending.add(tracked);
+  }
+
+  /** Resolve once every queued store write/delete has landed.
+   *  Rethrows the first queued operation's failure, if any. */
+  async whenIdle() {
+    while (this._pending.size > 0) {
+      await Promise.all([...this._pending]);
+    }
+    if (this._idleError != null) {
+      const err = this._idleError;
+      this._idleError = null;
+      throw err;
+    }
+  }
+
+  /** Synchronous half of a write: index, content cache and the
+   *  Emscripten FS mirror. Returns the normalized path and the
+   *  record to persist. */
+  _stage(path, bytes) {
+    const p = normalizeVfsPath(path);
+    const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const meta = { size: buf.byteLength, mtime: Date.now() };
+    this.index.set(p, meta);
+    this._cachePut(p, buf);
+    this.syncFile(p);
+    return { p, record: { bytes: buf, size: meta.size, mtime: meta.mtime } };
   }
 
   /** Add or replace a file. `content` may be a string, Uint8Array,
-   *  ArrayBuffer, File or Blob. Returns a Promise because File/Blob
-   *  reads are asynchronous. */
+   *  ArrayBuffer, File or Blob. The returned promise resolves once
+   *  the content is persisted in the store. */
   async addFile(path, content) {
     const bytes = await contentToBytes(content);
-    this.addFileSync(path, bytes);
+    const { p, record } = this._stage(path, bytes);
+    await this._store.put(p, record);
   }
 
+  /** Synchronous write: index, cache and the Emscripten mirror are
+   *  updated immediately (so the file can be compiled and read back
+   *  synchronously); the store write is queued behind any other
+   *  queued operations — await whenIdle() for it to land. */
   addFileSync(path, content) {
-    const p = normalizeVfsPath(path);
     const bytes =
       typeof content === 'string' ? textEncoder.encode(content) : content;
-    this.files.set(p, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
-    this.syncFile(p);
+    const { p, record } = this._stage(path, bytes);
+    this._queueStoreOp(() => this._store.put(p, record));
     return p;
   }
 
@@ -281,7 +493,10 @@ export class VirtualFS {
       throw new TinycError(`tinyc: fetching ${url} failed with status ${res.status}`);
     }
     const buf = await res.arrayBuffer();
-    return this.addFileSync(path, new Uint8Array(buf));
+    const bytes = new Uint8Array(buf);
+    const { p, record } = this._stage(path, bytes);
+    await this._store.put(p, record);
+    return p;
   }
 
   /** Register a directory as a header search directory. Every state
@@ -298,12 +513,25 @@ export class VirtualFS {
   }
 
   hasFile(path) {
-    return this.files.has(normalizeVfsPath(path));
+    return this.index.has(normalizeVfsPath(path));
   }
 
+  /** Synchronous read, served from the content cache: files written
+   *  or read during this session are cached, so this covers the
+   *  compile/read-back paths. A persisted file that is not cached
+   *  throws, naming the async alternative — use readFileAsync. */
   readFile(path) {
-    const bytes = this.files.get(normalizeVfsPath(path));
-    if (!bytes) throw new TinycError(`tinyc: no such file in virtual FS: ${path}`);
+    const p = normalizeVfsPath(path);
+    if (!this.index.has(p)) {
+      throw new TinycError(`tinyc: no such file in virtual FS: ${path}`);
+    }
+    const bytes = this._cacheGet(p);
+    if (!bytes) {
+      throw new TinycError(
+        `tinyc: ${p} is persisted in the virtual FS store but is not in ` +
+        `the in-memory cache; read it with readFileAsync() instead`
+      );
+    }
     return bytes;
   }
 
@@ -311,30 +539,120 @@ export class VirtualFS {
     return textDecoder.decode(this.readFile(path));
   }
 
+  /** Read a file's content from the store, warming the content
+   *  cache, so later synchronous reads of the same file succeed. */
+  async readFileAsync(path) {
+    const p = normalizeVfsPath(path);
+    if (!this.index.has(p)) {
+      throw new TinycError(`tinyc: no such file in virtual FS: ${path}`);
+    }
+    const hit = this._cacheGet(p);
+    if (hit) return hit;
+    const rec = await this._store.get(p);
+    if (!rec) {
+      throw new TinycError(`tinyc: no such file in virtual FS: ${path}`);
+    }
+    this._cachePut(p, rec.bytes);
+    return rec.bytes;
+  }
+
+  async readTextFileAsync(path) {
+    return textDecoder.decode(await this.readFileAsync(path));
+  }
+
+  /** Delete one file. Every copy goes: the index entry and cached
+   *  content, the persisted record (queued — see whenIdle), and,
+   *  when an Emscripten FS is mounted, the mirrored file inside the
+   *  native module (an unlink is attempted even for a path missing
+   *  from the index, e.g. a file the compiler created natively).
+   *  Returns true when the index or the native copy existed. */
   removeFile(path) {
-    return this.files.delete(normalizeVfsPath(path));
+    const p = normalizeVfsPath(path);
+    const had = this.index.delete(p);
+    this._cacheDelete(p);
+    this._queueStoreOp(() => this._store.delete(p));
+    let unlinked = false;
+    const FS = this._emscriptenFS;
+    if (FS && typeof FS.unlink === 'function') {
+      try { FS.unlink(this._nativePath(p)); unlinked = true; } catch { /* not present natively */ }
+    }
+    return had || unlinked;
+  }
+
+  /** Delete every file tracked by this virtual FS except the
+   *  mounted sysroot (paths under /sysroot/), which stays so the
+   *  instance can keep compiling. Store records are deleted (queued)
+   *  and mirrors in the native module FS are unlinked as well.
+   *  Returns the number of files removed. */
+  clear() {
+    let removed = 0;
+    for (const p of [...this.index.keys()]) {
+      if (p.startsWith('/sysroot/')) continue;
+      if (this.removeFile(p)) removed += 1;
+    }
+    return removed;
   }
 
   listFiles(prefix = '/') {
     const p = normalizeVfsPath(prefix);
-    return [...this.files.keys()].filter((f) => f.startsWith(p)).sort();
+    return [...this.index.keys()].filter((f) => f.startsWith(p)).sort();
   }
 
   // === Emscripten FS adaptation point (see header note) ===
-  mountTo(emscriptenFS) {
+  /** Mirror the whole virtual FS into the native module's FS. The
+   *  mounted FS is registered synchronously; copying the persisted
+   *  files is asynchronous (their bytes may have to come out of the
+   *  store), so this returns a promise loadTinyc awaits before the
+   *  instance is handed out. Callers that mount an empty or
+   *  cache-resident FS can ignore the promise.
+   *  `moduleFsPrefix` is the directory inside the module FS the
+   *  mirror lands under — the bridge's moduleFsPrefix ("/opfs" when
+   *  the WasmFS OPFS backend is mounted there, "" for the memory
+   *  root). It is remembered here so syncFile() and removeFile()
+   *  hit the same locations; the virtual FS's own paths, index and
+   *  store are unaffected by it. */
+  async mountTo(emscriptenFS, moduleFsPrefix = '') {
     this._emscriptenFS = emscriptenFS ?? null;
+    this._moduleFsPrefix = moduleFsPrefix ?? '';
     if (!this._emscriptenFS) return;
-    for (const path of this.files.keys()) this.syncFile(path);
+    for (const path of [...this.index.keys()]) {
+      let bytes = this._cacheGet(path);
+      if (!bytes) {
+        const rec = await this._store.get(path);
+        if (rec) {
+          bytes = rec.bytes;
+          this._cachePut(path, bytes);
+        }
+      }
+      if (bytes) this._writeNative(path, bytes);
+    }
   }
 
+  /** Mirror one file into the native FS from the content cache.
+   *  Files written through this FS are synced as they are written;
+   *  a file whose content is neither cached nor already mirrored
+   *  cannot be synced synchronously and is left to mountTo. */
   syncFile(path) {
     const FS = this._emscriptenFS;
     if (!FS) return;
-    const bytes = this.files.get(path);
+    const bytes = this._cacheGet(path);
     if (!bytes) return;
-    const dir = path.slice(0, path.lastIndexOf('/')) || '/';
+    this._writeNative(path, bytes);
+  }
+
+  /** The location of a (normalized) virtual path inside the
+   *  native module's filesystem: under the mount prefix when one
+   *  was given to mountTo, at the module FS root otherwise. */
+  _nativePath(path) {
+    return this._moduleFsPrefix ? this._moduleFsPrefix + path : path;
+  }
+
+  _writeNative(path, bytes) {
+    const FS = this._emscriptenFS;
+    const nativePath = this._nativePath(path);
+    const dir = nativePath.slice(0, nativePath.lastIndexOf('/')) || '/';
     if (typeof FS.mkdirTree === 'function') FS.mkdirTree(dir);
-    FS.writeFile(path, bytes);
+    FS.writeFile(nativePath, bytes);
   }
 }
 
@@ -356,6 +674,15 @@ class NativeBridge {
   constructor(native, io) {
     this.native = native;
     this.io = io;
+    /** Directory inside the native module's filesystem under which
+     *  the virtual FS is mirrored and native-side paths are rooted:
+     *  "/opfs" when loadTinyc mounted the WasmFS OPFS backend there,
+     *  "" (the module FS root, the memory backend) otherwise. Set by
+     *  loadTinyc once the mount attempt has decided; every path that
+     *  crosses into the native module — mirrored files, tcc_add_file
+     *  and path registrations, callMain argv, product read-back —
+     *  goes through modulePath() so the two stay consistent. */
+    this.moduleFsPrefix = '';
     if (native && typeof native.ccall === 'function') this.mode = 'emscripten';
     else if (native && native.memory instanceof WebAssembly.Memory) this.mode = 'raw';
     else if (native && typeof native === 'object') this.mode = 'mock';
@@ -365,6 +692,15 @@ class NativeBridge {
         'WebAssembly exports, or a mock object implementing the tcc_* functions'
       );
     }
+  }
+
+  /** Translate a virtual FS path to the path the native module
+   *  knows it by: the normalized path under moduleFsPrefix. With no
+   *  prefix (memory backend) the argument passes through exactly as
+   *  given, so native calls are unchanged in that mode. */
+  modulePath(path) {
+    if (!this.moduleFsPrefix) return path;
+    return this.moduleFsPrefix + normalizeVfsPath(path);
   }
 
   has(name) {
@@ -1095,7 +1431,7 @@ export class TinycState {
   }
 
   setLibPath(path) {
-    this._call('tcc_set_lib_path', null, ['string'], [path]);
+    this._call('tcc_set_lib_path', null, ['string'], [this._bridge.modulePath(path)]);
     return this;
   }
 
@@ -1106,17 +1442,17 @@ export class TinycState {
 
   addIncludePath(path) {
     return this._checkRc('tcc_add_include_path',
-      this._call('tcc_add_include_path', 'number', ['string'], [path]));
+      this._call('tcc_add_include_path', 'number', ['string'], [this._bridge.modulePath(path)]));
   }
 
   addSysincludePath(path) {
     return this._checkRc('tcc_add_sysinclude_path',
-      this._call('tcc_add_sysinclude_path', 'number', ['string'], [path]));
+      this._call('tcc_add_sysinclude_path', 'number', ['string'], [this._bridge.modulePath(path)]));
   }
 
   addLibraryPath(path) {
     return this._checkRc('tcc_add_library_path',
-      this._call('tcc_add_library_path', 'number', ['string'], [path]));
+      this._call('tcc_add_library_path', 'number', ['string'], [this._bridge.modulePath(path)]));
   }
 
   addLibrary(name) {
@@ -1141,7 +1477,10 @@ export class TinycState {
 
   /** Add a file (source, object or archive) by virtual path. The file
    *  must exist in the instance's virtual FS; it is synced to the
-   *  native filesystem first when an adapter is mounted. */
+   *  native filesystem first when an adapter is mounted. The path
+   *  handed to tcc_add_file is the file's location inside the
+   *  module FS (bridge.modulePath), which differs from the virtual
+   *  path when the OPFS backend is mounted. */
   addFile(path) {
     const p = normalizeVfsPath(path);
     if (this._bridge.mode !== 'mock' && !this._instance.fs.hasFile(p)) {
@@ -1149,7 +1488,7 @@ export class TinycState {
     }
     this._instance.fs.syncFile(p);
     return this._checkRc('tcc_add_file',
-      this._call('tcc_add_file', 'number', ['string'], [p]));
+      this._call('tcc_add_file', 'number', ['string'], [this._bridge.modulePath(p)]));
   }
 
   compileString(source) {
@@ -1159,7 +1498,10 @@ export class TinycState {
 
   /** Compile a file from the virtual FS: its content is fed through
    *  tcc_compile_string with a #line marker carrying the path, so no
-   *  native filesystem access is needed for plain sources. */
+   *  native filesystem access is needed for plain sources. The
+   *  marker carries the virtual path exactly as given — it is what
+   *  diagnostics show the user — never the file's location inside
+   *  the module FS. */
   compileFile(path) {
     const p = normalizeVfsPath(path);
     const src = this._instance.fs.readTextFile(p);
@@ -1168,9 +1510,13 @@ export class TinycState {
       this._call('tcc_compile_string', 'number', ['string'], [marked]));
   }
 
+  /** Write the compiled product to a virtual path. TCC writes it
+   *  inside the module FS (at bridge.modulePath(path)); exportFile
+   *  reads it back from there into the virtual FS. */
   outputFile(path) {
     return this._checkRc('tcc_output_file',
-      this._call('tcc_output_file', 'number', ['string'], [normalizeVfsPath(path)]));
+      this._call('tcc_output_file', 'number', ['string'],
+        [this._bridge.modulePath(normalizeVfsPath(path))]));
   }
 
   relocate() {
@@ -1247,6 +1593,22 @@ export class TinycState {
   }
 }
 
+// Compiler options whose value is a filesystem path, in the
+// separate form ("-o file") and in the joined form ("-I/dir").
+// Used only by Tinyc._moduleArgv to relocate path arguments into
+// the module FS when the OPFS backend is mounted; option values
+// that are not paths (-l names, -D macros, -x languages) are never
+// in these tables and pass through untouched.
+const PATH_VALUE_OPTIONS = new Set([
+  '-o', '-I', '-L', '-B', '-MF',
+  '-include', '-isystem', '-idirafter', '-iquote',
+  '-iprefix', '-iwithprefix', '-iwithprefixbefore',
+]);
+const PATH_JOINED_OPTIONS = [
+  '-iwithprefixbefore', '-iwithprefix', '-idirafter', '-isystem',
+  '-iprefix', '-iquote', '-include', '-I', '-L', '-B', '-MF', '-o',
+];
+
 // ---------------------------------------------------------------------
 // Instance
 // ---------------------------------------------------------------------
@@ -1260,6 +1622,7 @@ export class Tinyc {
     this._states = new Set();
     this._mainRunning = false;
     this._shims = new Map();
+    this._fsBackend = 'memory';
   }
 
   get io() {
@@ -1275,6 +1638,20 @@ export class Tinyc {
 
   get nativeMode() {
     return this._bridge.mode;
+  }
+
+  /** The backend mounted at "/opfs" in the native module's
+   *  filesystem: 'opfs' when loadTinyc mounted the WasmFS OPFS
+   *  backend there, 'memory' when it did not — the browser main
+   *  thread, a browser without OPFS, and every non-Emscripten
+   *  module land on 'memory'. Decided once per module by loadTinyc
+   *  (see tryMountOpfsBackend). The module filesystem's root is the
+   *  WasmFS memory backend in both cases; with 'opfs', the mirrored
+   *  compile working set and every path handed to the native module
+   *  are rooted at "/opfs" (bridge.moduleFsPrefix), so the working
+   *  set lives on disk. */
+  get fsBackend() {
+    return this._fsBackend;
   }
 
   /** Replace the instance IO. out/err are module-level on the native
@@ -1319,22 +1696,69 @@ export class Tinyc {
   addFileSync(path, content) { return this.fs.addFileSync(path, content); }
   addFileFromUrl(path, url, opts) { return this.fs.addFileFromUrl(path, url, opts); }
   registerIncludeDir(path) { return this.fs.registerIncludeDir(path); }
+  hasFile(path) { return this.fs.hasFile(path); }
+  readFile(path) { return this.fs.readFile(path); }
+  readTextFile(path) { return this.fs.readTextFile(path); }
+  readFileAsync(path) { return this.fs.readFileAsync(path); }
+  readTextFileAsync(path) { return this.fs.readTextFileAsync(path); }
+  removeFile(path) { return this.fs.removeFile(path); }
+  clearFiles() { return this.fs.clear(); }
+  listFiles(prefix) { return this.fs.listFiles(prefix); }
+
+  /** Resolve once the virtual FS's queued store writes and deletes
+   *  (from addFileSync / removeFile / clearFiles) have landed in the
+   *  persistent store. */
+  whenIdle() { return this.fs.whenIdle(); }
 
   /** Read a compiled product (object file, executable, library —
    *  including a Windows PE for the x86_64-windows target) out of
    *  the virtual FS as bytes. This is how compile-to-file results
    *  leave the browser package, for every target. With an Emscripten
    *  module, a file that only exists in the module FS is read from
-   *  there and mirrored into the virtual FS. */
+   *  there and mirrored into the virtual FS. A file restored from
+   *  the persistent store that is not in the content cache falls
+   *  back to the module FS copy; when there is none either, the
+   *  read fails naming exportFileAsync as the alternative. */
   exportFile(path) {
     const p = normalizeVfsPath(path);
-    if (this.fs.hasFile(p)) return this.fs.readFile(p);
+    let cacheMiss = null;
+    if (this.fs.hasFile(p)) {
+      try {
+        return this.fs.readFile(p);
+      } catch (err) {
+        cacheMiss = err;
+      }
+    }
     const FS = this._bridge.native?.FS;
     if (FS && typeof FS.readFile === 'function') {
       try {
-        const bytes = FS.readFile(p);
+        const bytes = FS.readFile(this._bridge.modulePath(p));
         this.fs.addFileSync(p, bytes);
         return this.fs.readFile(p);
+      } catch {
+        // fall through to the error below
+      }
+    }
+    if (cacheMiss) {
+      throw new TinycError(
+        `tinyc: ${p} is persisted in the virtual FS store but is not in ` +
+        `the in-memory cache; read it with exportFileAsync() instead`
+      );
+    }
+    throw new TinycError(`tinyc: no such file in virtual FS: ${p}`);
+  }
+
+  /** exportFile, reading the content from the persistent store
+   *  when it is not in the content cache. */
+  async exportFileAsync(path) {
+    const p = normalizeVfsPath(path);
+    if (this.fs.hasFile(p)) return this.fs.readFileAsync(p);
+    const FS = this._bridge.native?.FS;
+    if (FS && typeof FS.readFile === 'function') {
+      try {
+        const bytes = FS.readFile(this._bridge.modulePath(p));
+        this.fs.addFileSync(p, bytes);
+        return bytes;
       } catch {
         // fall through to the error below
       }
@@ -1348,9 +1772,43 @@ export class Tinyc {
     return new Blob([this.exportFile(path)], { type });
   }
 
+  /** Execute a wasm32 product already sitting in the virtual FS —
+   *  a file produced by an earlier compile-to-file callMain, or one
+   *  placed there with addFile — without recompiling. The bytes are
+   *  read with exportFile and instantiated with runWasmModuleSync,
+   *  so the shim stack is exactly the one "-run" uses: default libc
+   *  shims, package-global shims, this instance's registered shims,
+   *  then options.shims and options.imports. options: { args, entry,
+   *  callArgs, env, imports, shims, stdin, heapBase, io } — args
+   *  defaults to [path]; io is a text IO partial (default: this
+   *  instance's IO). Returns the exit code for a _start module, or
+   *  the named entry's return value. */
+  runWasmFile(path, options = {}) {
+    const p = normalizeVfsPath(path);
+    const bytes = this.exportFile(p);
+    const io = normalizeIO(options.io, this._io);
+    const result = runWasmModuleSync(bytes, {
+      args: options.args ?? [p],
+      entry: options.entry,
+      callArgs: options.callArgs,
+      env: options.env,
+      shims: options.shims,
+      imports: options.imports,
+      stdin: options.stdin,
+      heapBase: options.heapBase,
+      _instanceShims: this._shims,
+      io: textIOToByteIO(io),
+    });
+    flushIO(io);
+    if (typeof result === 'number') return result;
+    return result?.exitCode ?? 0;
+  }
+
   /** Command-line mode: assemble argv exactly like a shell would
    *  (argv[0] filled with the virtual binary path) and call the
-   *  exported main / tinyc_main. Returns the exit code. main is not
+   *  exported main / tinyc_main. When the OPFS backend is mounted,
+   *  path arguments are relocated under "/opfs" first (see
+   *  _moduleArgv). Returns the exit code. main is not
    *  reentrant; a nested call (e.g. from an IO callback) throws.
    *  A "-run" argument on a non-wasm32 target is rejected by the
    *  glue layer with TinycRunNotSupportedError before the native
@@ -1368,7 +1826,7 @@ export class Tinyc {
     if (this._mainRunning) {
       throw new TinycError('tinyc: exported main is not reentrant (callMain already running)');
     }
-    const argv = [VIRTUAL_BIN_PATH, ...args.map(String)];
+    const argv = this._moduleArgv(args.map(String));
     this._mainRunning = true;
     try {
       const rc = this._bridge.callMain(argv);
@@ -1377,6 +1835,52 @@ export class Tinyc {
     } finally {
       this._mainRunning = false;
     }
+  }
+
+  /** Assemble the argv handed to the exported main. argv[0] is the
+   *  virtual binary path. When the module FS has no prefix (memory
+   *  backend) the arguments pass through exactly as given. When the
+   *  OPFS backend is mounted (bridge.moduleFsPrefix set), every
+   *  argument that names a file inside the module FS — argv[0], the
+   *  values of path options in separate and joined form, --sysroot=
+   *  values, and bare input-file arguments — is relocated under the
+   *  prefix (bridge.modulePath), where the mirrored files actually
+   *  live; all other arguments pass through untouched. */
+  _moduleArgv(args) {
+    const bridge = this._bridge;
+    if (!bridge.moduleFsPrefix) return [VIRTUAL_BIN_PATH, ...args];
+    const out = [bridge.modulePath(VIRTUAL_BIN_PATH)];
+    let pathValueNext = false;
+    for (const arg of args) {
+      if (pathValueNext) {
+        pathValueNext = false;
+        out.push(arg.startsWith('-') ? arg : bridge.modulePath(arg));
+        continue;
+      }
+      if (PATH_VALUE_OPTIONS.has(arg)) {
+        pathValueNext = true;
+        out.push(arg);
+        continue;
+      }
+      if (arg.startsWith('--sysroot=')) {
+        out.push('--sysroot=' + bridge.modulePath(arg.slice('--sysroot='.length)));
+        continue;
+      }
+      const joined = PATH_JOINED_OPTIONS.find(
+        (opt) => arg.length > opt.length && arg.startsWith(opt)
+      );
+      if (joined) {
+        out.push(joined + bridge.modulePath(arg.slice(joined.length)));
+        continue;
+      }
+      // A bare argument in compiler mode is an input file.
+      if (!arg.startsWith('-') && arg.length > 0) {
+        out.push(bridge.modulePath(arg));
+        continue;
+      }
+      out.push(arg);
+    }
+    return out;
   }
 
   /** wasm32 "-run": the arguments before "-run" are compiler
@@ -1498,12 +2002,12 @@ async function loadTargetModule(target, options, io) {
     if (typeof options.loadModule === 'function') {
       return options.loadModule(target, {
         ...files,
-        wasmUrl: options.wasmUrl ?? new URL('./' + files.wasmFile, import.meta.url).href,
-        glueUrl: options.glueUrl ?? new URL('./' + files.glueFile, import.meta.url).href,
+        wasmUrl: options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl),
+        glueUrl: options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl),
       });
     }
-    const glueUrl = options.glueUrl ?? new URL('./' + files.glueFile, import.meta.url).href;
-    const wasmUrl = options.wasmUrl ?? new URL('./' + files.wasmFile, import.meta.url).href;
+    const glueUrl = options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl);
+    const wasmUrl = options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl);
     return createModuleFromGlue(glueUrl, wasmUrl, io);
   })();
   targetModuleCache.set(target, promise);
@@ -1531,16 +2035,12 @@ async function resolveNative(options, io, target) {
 }
 
 /** The sysroot manifest for one target (sysroot-manifests/<target>.json).
- *  Loaded lazily; the default target's manifest is the statically
- *  imported one exported as `sysrootManifest`. */
+ *  All manifests are statically imported with this module (see
+ *  SYSROOT_MANIFESTS above), so this never fetches at runtime; the
+ *  default target's manifest is also exported as `sysrootManifest`. */
 export async function loadSysrootManifest(target = DEFAULT_TARGET) {
   assertKnownTarget(target);
-  if (target === DEFAULT_TARGET) return sysrootManifest;
-  const mod = await import(
-    /* @vite-ignore */ new URL(`./sysroot-manifests/${target}.json`, import.meta.url).href,
-    { with: { type: 'json' } }
-  );
-  return mod.default;
+  return SYSROOT_MANIFESTS[target];
 }
 
 async function loadSysroot(instance, sysrootOpt) {
@@ -1561,14 +2061,86 @@ async function loadSysroot(instance, sysrootOpt) {
   }
   const baseHref = /^[a-z][a-z0-9+.-]*:/i.test(baseUrl)
     ? baseUrl
-    : new URL(baseUrl, import.meta.url).href;
+    : assetUrl(baseUrl);
   const entries = [...(manifest.includeFiles ?? []), ...(manifest.libFiles ?? [])];
   for (const entry of entries) {
     if (entry.binary && !includeBinaries) continue;
+    // Already in the virtual FS — persisted by an earlier load of
+    // this target and restored from the store — is not fetched again.
+    if (instance.fs.hasFile(entry.path)) continue;
     const url = entry.url ?? new URL(entry.source, baseHref).href;
     await instance.fs.addFileFromUrl(entry.path, url, { fetchImpl });
   }
   if (manifest.includeDir) instance.fs.registerIncludeDir(manifest.includeDir);
+}
+
+// ---------------------------------------------------------------------
+// WasmFS OPFS mount
+//
+// The native module is built with -sWASMFS=1 (see build.sh): its
+// filesystem root is the WasmFS memory backend. Before the virtual
+// FS is mirrored in, loadTinyc tries to mount the WasmFS OPFS
+// backend — the browser's on-disk origin private file system — at
+// OPFS_MOUNT_POINT, through the C API the build exports for this
+// (wasmfs_create_opfs_backend / wasmfs_create_directory from
+// <emscripten/wasmfs.h>, called with ccall's async form: in builds
+// without pthreads the backend's operations are asynchronous JS
+// that suspends the call, in pthread builds they complete through
+// the backend's proxy worker, and the async form covers both).
+//
+// The attempt runs only inside a Web Worker: creating the OPFS
+// backend on the browser main thread can deadlock waiting for its
+// dedicated worker thread to be spawned, and OPFS synchronous
+// access handles exist only in workers. Every failure — not a
+// worker, no OPFS in the browser, a module built without the
+// exports, a rejected mount — is silent and leaves the memory
+// backend in place; loadTinyc succeeds either way. The outcome is
+// memoized per native module (repeat loads of a cached module do
+// not mount twice) and reported as instance.fsBackend.
+// ---------------------------------------------------------------------
+
+const OPFS_MOUNT_POINT = '/opfs';
+const opfsBackendByModule = new WeakMap();
+
+async function tryMountOpfsBackend(native, bridge) {
+  const canMemo =
+    native !== null &&
+    (typeof native === 'object' || typeof native === 'function');
+  if (canMemo) {
+    const memo = opfsBackendByModule.get(native);
+    if (memo) return memo;
+  }
+  let result = 'memory';
+  try {
+    if (
+      bridge.mode === 'emscripten' &&
+      typeof native.ccall === 'function' &&
+      typeof native._wasmfs_create_opfs_backend === 'function' &&
+      typeof native._wasmfs_create_directory === 'function' &&
+      typeof WorkerGlobalScope !== 'undefined' &&
+      typeof self !== 'undefined' &&
+      self instanceof WorkerGlobalScope
+    ) {
+      const backend = await native.ccall(
+        'wasmfs_create_opfs_backend', 'number', [], [], { async: true }
+      );
+      if (backend) {
+        const rc = await native.ccall(
+          'wasmfs_create_directory', 'number',
+          ['string', 'number', 'number'],
+          [OPFS_MOUNT_POINT, 0o777, backend],
+          { async: true }
+        );
+        // wasmfs_create_directory returns 0 on success and a
+        // negative errno on failure, like mkdir.
+        if (rc === 0) result = 'opfs';
+      }
+    }
+  } catch {
+    result = 'memory';
+  }
+  if (canMemo) opfsBackendByModule.set(native, result);
+  return result;
 }
 
 /** Load the TinyC WASM module for one target and return a ready
@@ -1583,23 +2155,48 @@ async function loadSysroot(instance, sysrootOpt) {
  *                 tcc-<target>.mjs is loaded alongside), or inject a
  *                 module with module / createModule / wasmExports /
  *                 loadModule instead
+ *    baseUrl      directory URL the per-target glue/wasm files
+ *                 resolve against; default is the directory of
+ *                 index.mjs (module build) or of tinyc-web.js
+ *                 (script bundle). wasmUrl / glueUrl override
+ *                 individual files
  *    sysroot      true for this target's bundled manifest, or
  *                 { manifest, baseUrl, fetchImpl, includeBinaries }
+ *    fsStore      a custom FsStore instance for the virtual FS
+ *                 (see vfs-store.mjs); storeFactory is the function
+ *                 form, called with the target. Default: one
+ *                 IndexedDB database per target
+ *                 ("tinyc-web-fs-<target>"), or the in-memory
+ *                 backend where IndexedDB does not exist. The store
+ *                 is opened and its persisted index loaded before
+ *                 this resolves, so files from an earlier session
+ *                 of the same target are already in the index (and
+ *                 sysroot files among them are not fetched again).
  *    io           { out, err, in } JS functions; default console
  */
 export async function loadTinyc(options = {}) {
   const target = options.target ?? DEFAULT_TARGET;
   assertKnownTarget(target);
   const io = normalizeIO(options.io);
-  const fs = new VirtualFS();
+  const store = await openFsStore(target, options);
+  const fs = new VirtualFS(store);
   const native = await resolveNative(options, io, target);
   const bridge = new NativeBridge(native, io);
   const instance = new Tinyc(bridge, { fs, io, target });
 
   // === Emscripten FS adaptation point ===
-  // If the module carries an FS, mirror the virtual FS into it now
-  // and keep it in sync on later writes (see VirtualFS.mountTo).
-  if (native && native.FS) fs.mountTo(native.FS);
+  // First try to mount the WasmFS OPFS backend at /opfs (fail-soft;
+  // the outcome lands on instance.fsBackend). The bridge's
+  // moduleFsPrefix records where native-side paths are rooted —
+  // "/opfs" on success, "" (the memory-backed root) otherwise —
+  // and is handed to the mirror so files land where the paths
+  // handed to the native module point. Then, if the module carries
+  // an FS, mirror the virtual FS into it and keep it in sync on
+  // later writes (see VirtualFS.mountTo).
+  instance._fsBackend = await tryMountOpfsBackend(native, bridge);
+  bridge.moduleFsPrefix =
+    instance._fsBackend === 'opfs' ? OPFS_MOUNT_POINT : '';
+  if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
 
   await loadSysroot(instance, options.sysroot);
   return instance;

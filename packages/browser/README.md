@@ -77,6 +77,7 @@ A WebAssembly module cannot instantiate another WebAssembly module from inside i
 - `state.run(args, options)` writes the product to a file in the virtual filesystem (`options.outputPath`, default `/a.out`), reads the bytes back and runs them; the WASI argv is `[outputPath, ...args]`.
 - `tinyc.callMain(['-run', src, ...progArgs])` first compiles `src` to `/a.out` through the exported main (the native main never sees `-run`), then runs the product with WASI argv `[src, ...progArgs]`.
 - `runWasmModule(bytes, options)` / `runWasmModuleSync(bytes, options)` run product bytes directly (async `WebAssembly.compile` variant, and a synchronous `WebAssembly.Module`/`Instance` variant used inside workers and by the two paths above).
+- `tinyc.runWasmFile(path, options)` runs a product already stored in the virtual FS — compiled to a file earlier, or placed there with `addFile` — without recompiling; it reads the bytes with `exportFile` and runs them through the same runner and shim stack, with the instance's registered shims applied.
 
 Entry conventions: with no `options.entry`, an exported `_start` is called (command style) and the result is `{ exitCode }`; with `options.entry`, that export is called with `options.callArgs` (default `options.args`) and its return value is returned as-is (function style). `state.run` returns the exit code, or the entry's return value.
 
@@ -147,6 +148,28 @@ const blob = tinyc.exportBlob('/out/prog.exe');   // Blob, e.g. for a download l
 
 ## Usage
 
+### Script tag
+
+The package also builds as a single classic-script file, `tinyc-web.js`, which defines the global `TinycWeb` with the same API as the module build; `TinycWeb.loadTinyc` is the entry point. From the npm package via a CDN:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/tinyc-web@0.1.0/tinyc-web.js"></script>
+<script>
+  (async () => {
+    const tinyc = await TinycWeb.loadTinyc();
+    tinyc.compileString('int answer() { return 42; }');
+  })();
+</script>
+```
+
+The per-target native files are not inside the bundle: for the requested target, the glue `tcc-<target>.mjs` is loaded with a dynamic `import()` and `tcc-<target>.wasm` is fetched, both resolved relative to the bundle file's own URL — with the CDN address above they come from the same `tinyc-web@0.1.0` package prefix automatically. When self-hosting, place `tcc-<target>.mjs` and `tcc-<target>.wasm` in the same directory as `tinyc-web.js`. `loadTinyc({ baseUrl })` resolves them against a different directory; `wasmUrl` / `glueUrl` override one file each. The sysroot manifests are inlined in the bundle, so no JSON files are fetched for them.
+
+`tinyc-web.js` is regenerated from the module sources with:
+
+```
+npm run build:web     # node build-web-bundle.mjs (esbuild)
+```
+
 ### Command-line mode
 
 ```js
@@ -178,7 +201,13 @@ await tinyc.addFileFromUrl('/deps/sqlite3.h', 'https://example.com/sqlite3.h');
 tinyc.registerIncludeDir('/deps');                                // -> tcc_add_include_path on new states
 ```
 
-Files are held in a `Map` in `index.mjs` (`tinyc.fs`). When the native module is an Emscripten build, the map is mirrored into the module's `FS`; that mirroring is confined to `VirtualFS.mountTo`/`syncFile`, the Emscripten FS adaptation point.
+File contents are persisted in a store (`vfs-store.mjs`), not held in memory: one IndexedDB database per target — `tinyc-web-fs-<target>`, a single `files` table keyed by path — wherever IndexedDB exists (browsers and Web Workers), and an in-memory backend where it does not (Node, tests), or when an IndexedDB open fails. A custom store or store factory can be injected per load (`loadTinyc({ fsStore })` / `loadTinyc({ storeFactory })`). What the virtual FS itself keeps in memory is only the path index (path → size/mtime) plus an LRU content cache (at most 32 files and 16 MiB in total, `VFS_CACHE_MAX_ENTRIES` / `VFS_CACHE_MAX_BYTES`). `loadTinyc` opens the store and loads the index before resolving, so an instance starts with the files an earlier session of the same target left behind — sysroot files among them are recognized and not fetched again. When the native module is an Emscripten build, files are additionally mirrored into the module's `FS` (the compile working set has to live there while TCC runs); that mirroring is confined to `VirtualFS.mountTo`/`syncFile`, the Emscripten FS adaptation point.
+
+The native module's filesystem is WasmFS (build.sh passes `-sWASMFS=1`; `-sFORCE_FILESYSTEM=1` is what includes the JS `FS` API the mirroring goes through), and its root backend is memory. Before mirroring, `loadTinyc` tries to mount the WasmFS OPFS backend — the browser's on-disk origin private file system — at `/opfs` inside the module filesystem, through the `wasmfs_create_opfs_backend` / `wasmfs_create_directory` functions the build exports. The attempt runs only inside a Web Worker: creating the OPFS backend on the browser main thread can deadlock, and OPFS synchronous access handles exist only in workers. Any failure — main thread, a browser without OPFS, a module built without the exports, a rejected mount — silently leaves the memory backend in place, and `tinyc.fsBackend` reports which happened: `'opfs'` or `'memory'`. With `'opfs'`, the mirrored compile working set is rooted at the mount point: a virtual-FS path `P` lives inside the module at `/opfs` + `P`, on disk, and every path handed to the native module is relocated to match — the mirror writes and unlinks, `tcc_add_file`, the include/library/lib path registrations, `tcc_output_file`, and the path arguments in `callMain` argv (argv[0], `-o` values, input files) — with compiled products read back from there into the virtual FS. The virtual FS's own paths never change; only the module-side location moves. With `'memory'`, the working set sits at the virtual-FS paths in the memory-backed root, exactly as the paths read.
+
+The full file lifecycle is available on the instance (and on `tinyc.fs`): write with `addFile` / `addFileSync`, read with `readFile` (bytes) / `readTextFile` (string) — `exportFile` / `exportBlob` are the same read for compiled products — enumerate with `listFiles(prefix)`, and delete with `removeFile(path)` (index entry, persisted record and the mirrored copy inside the native module) or `clearFiles()` (everything except the mounted sysroot under `/sysroot/`).
+
+Two timing rules follow from the store being asynchronous. `addFile` resolves once its content is persisted; `addFileSync` updates the index, cache and native mirror immediately but only queues the store write (the deletes from `removeFile` / `clearFiles` are queued the same way) — `await tinyc.whenIdle()` is the point where everything queued has landed. And synchronous reads are served from the content cache: anything written or read during the session is cached, but a file restored from the store that has not been touched yet is not — reading it with `readFile` / `exportFile` throws and names the async form, `readFileAsync` / `readTextFileAsync` / `exportFileAsync`, which reads it from the store and warms the cache.
 
 `compileFile(path)` compiles a virtual-FS source through `tcc_compile_string` with a `#line` marker carrying the path; `state.addFile(path)` passes the path to `tcc_add_file` for sources, objects and archives.
 
@@ -220,7 +249,8 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 ## Tests
 
 ```
-npm test        # node --test test.mjs
+npm test          # node --test test.mjs
+npm run test:web  # node --test test-web-bundle.mjs
 ```
 
-The suite runs the glue logic in Node against an injected mock module implementing the `tcc_*` names: virtual FS intake from string, `Blob`/`File` and URL sources, include-dir registration reaching `tcc_add_include_path`, IO routing at the Emscripten wiring point and through the error callback, `callMain` argv assembly, the missing-export error, the target registry (two targets coexisting with isolated virtual filesystems, per-target lazy loading), the run guard on non-wasm32 targets and the wasm32 run path, product export, and the per-target sysroot manifests. The run paths are additionally tested with real hand-assembled wasm modules (byte arrays in `test.mjs`, each with its WAT described): a function-style `add` export, a `_start` module writing through the WASI `fd_write` shim and exiting via `proc_exit`, the WASI argv shim, the default libc shims (`printf` formatting into IO, `memcpy`, `malloc`/`free` heap reuse, `options.imports` overriding a default shim), and the custom-shim surface — the missing-import diagnostic with its exact list, instance-level registration with `ctx.readCString`, per-run override of an instance registration, `unregisterShim`, `callMain -run` shim forwarding, package-global registration, and the `TinycWorker.registerShim` boundary error.
+The suite runs the glue logic in Node against an injected mock module implementing the `tcc_*` names: virtual FS intake from string, `Blob`/`File` and URL sources, include-dir registration reaching `tcc_add_include_path`, IO routing at the Emscripten wiring point and through the error callback, `callMain` argv assembly, the missing-export error, the target registry (two targets coexisting with isolated virtual filesystems, per-target lazy loading), the run guard on non-wasm32 targets and the wasm32 run path, product export, and the per-target sysroot manifests. The run paths are additionally tested with real hand-assembled wasm modules (byte arrays in `test.mjs`, each with its WAT described): a function-style `add` export, a `_start` module writing through the WASI `fd_write` shim and exiting via `proc_exit`, the WASI argv shim, the default libc shims (`printf` formatting into IO, `memcpy`, `malloc`/`free` heap reuse, `options.imports` overriding a default shim), and the custom-shim surface — the missing-import diagnostic with its exact list, instance-level registration with `ctx.readCString`, per-run override of an instance registration, `unregisterShim`, `callMain -run` shim forwarding, package-global registration, and the `TinycWorker.registerShim` boundary error. The second suite (`test-web-bundle.mjs`) rebuilds `tinyc-web.js`, loads it as a classic script in a Node `vm` context dressed up as a browser page (fake `document.currentScript` and `location`), and checks the `TinycWeb` global against the module build's export list, the script-scenario base-URL rules (script directory, page-directory fallback, `baseUrl`/`wasmUrl` overrides), the inlined per-target sysroot manifests, and the mock-module and hand-written-wasm run paths inside the bundle.

@@ -290,7 +290,12 @@ jobs:
           java-version: '25'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MSYS
+          # MINGW64 is the MSYS2 environment built for the native
+          # MinGW toolchain installed below; the MSYS environment is
+          # for MSYS-targeted software and its POSIX path view does
+          # not match the native compiler's (TCC's configure probe
+          # failed to find its own conftest.c under it).
+          msystem: MINGW64
           install: make python file mingw-w64-x86_64-gcc
 
       # The MinGW recipe is the same one verified by cross-building on

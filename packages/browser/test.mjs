@@ -85,6 +85,48 @@ test('vfs: string and bytes sources round-trip', async () => {
   assert.deepEqual(fs.listFiles('/src'), ['/src/main.c', '/src/util.c']);
 });
 
+test('vfs: removeFile deletes the map entry and the mounted native mirror', async () => {
+  const fs = new VirtualFS();
+  const native = new Map();
+  fs.mountTo({
+    mkdirTree() {},
+    writeFile(p, bytes) { native.set(p, bytes); },
+    unlink(p) { if (!native.delete(p)) throw new Error('missing'); },
+  });
+  await fs.addFile('/out/prog.wasm', new Uint8Array([1, 2, 3]));
+  assert.ok(native.has('/out/prog.wasm')); // write was mirrored
+  assert.equal(fs.removeFile('/out/prog.wasm'), true);
+  assert.equal(fs.hasFile('/out/prog.wasm'), false);
+  assert.equal(native.has('/out/prog.wasm'), false); // mirror unlinked too
+  assert.equal(fs.removeFile('/out/prog.wasm'), false); // already gone
+  // A file that only exists natively is still unlinked by path.
+  native.set('/out/native-only.o', new Uint8Array([9]));
+  assert.equal(fs.removeFile('/out/native-only.o'), true);
+  assert.equal(native.has('/out/native-only.o'), false);
+});
+
+test('vfs: clear removes everything except the sysroot', async () => {
+  const fs = new VirtualFS();
+  fs.addFileSync('/sysroot/include/stdio.h', '#pragma once');
+  fs.addFileSync('/src/main.c', 'int main() {}');
+  fs.addFileSync('/out/main.wasm', new Uint8Array([0]));
+  assert.equal(fs.clear(), 2);
+  assert.deepEqual(fs.listFiles(), ['/sysroot/include/stdio.h']);
+});
+
+test('vfs: Tinyc instance shortcuts cover write/read/list/remove/clear', async () => {
+  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  await tinyc.addFile('/src/a.c', 'int a;');
+  tinyc.addFileSync('/out/a.wasm', new Uint8Array([7]));
+  assert.equal(tinyc.readTextFile('/src/a.c'), 'int a;');
+  assert.deepEqual(tinyc.readFile('/out/a.wasm'), new Uint8Array([7]));
+  assert.deepEqual(tinyc.listFiles('/out'), ['/out/a.wasm']);
+  assert.equal(tinyc.removeFile('/out/a.wasm'), true);
+  assert.equal(tinyc.hasFile('/out/a.wasm'), false);
+  assert.equal(tinyc.clearFiles(), 1);
+  assert.deepEqual(tinyc.listFiles(), []);
+});
+
 test('vfs: File and Blob sources', async () => {
   const fs = new VirtualFS();
   const file = new File(['#define FROM_FILE 1\n'], 'defs.h', { type: 'text/plain' });
@@ -117,6 +159,548 @@ test('vfs: URL source reports HTTP failure', async () => {
     fs.addFileFromUrl('/x.h', 'https://example.com/x.h', { fetchImpl }),
     /404/
   );
+});
+
+// ---------------------------------------------------------------------
+// Virtual FS: persistent store (vfs-store.mjs)
+//
+// Fake store with IndexedDB semantics, no third-party fake: records
+// live in a backing Map shared by every store instance over it (the
+// "database"), open() rebuilds the index from the records, and puts
+// and deletes land asynchronously through a timer queue — so a
+// synchronous write is only durable once the queue has been awaited
+// (fs/instance whenIdle()).
+// ---------------------------------------------------------------------
+function makeFakeFsStore(backing = new Map(), { delayMs = 1 } = {}) {
+  const store = {
+    kind: 'fake',
+    index: new Map(),
+    async open() {
+      store.index = new Map();
+      for (const [p, r] of backing) {
+        store.index.set(p, { size: r.size, mtime: r.mtime });
+      }
+      return store.index;
+    },
+    async get(path) {
+      const r = backing.get(path);
+      return r ? { bytes: r.bytes, size: r.size, mtime: r.mtime } : null;
+    },
+    put(path, record) {
+      return new Promise((resolve) => setTimeout(() => {
+        backing.set(path, { bytes: record.bytes, size: record.size, mtime: record.mtime });
+        resolve();
+      }, delayMs));
+    },
+    delete(path) {
+      return new Promise((resolve) => setTimeout(() => {
+        backing.delete(path);
+        resolve();
+      }, delayMs));
+    },
+    async close() {},
+  };
+  return store;
+}
+
+test('vfs store: files persist across instances of the same target', async () => {
+  const backing = new Map();
+  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  await first.addFile('/src/keep.c', 'int keep;');
+  first.addFileSync('/src/sync.c', 'int sync;');
+  // The synchronous write is staged in memory immediately but only
+  // queued for the store: the backing record is not there yet.
+  assert.equal(backing.has('/src/sync.c'), false);
+  await first.whenIdle();
+  assert.equal(backing.has('/src/sync.c'), true);
+
+  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  assert.deepEqual(second.listFiles('/src'), ['/src/keep.c', '/src/sync.c']);
+  assert.equal(await second.readTextFileAsync('/src/keep.c'), 'int keep;');
+  assert.equal(await second.readTextFileAsync('/src/sync.c'), 'int sync;');
+  assert.deepEqual(
+    await second.exportFileAsync('/src/keep.c'),
+    new TextEncoder().encode('int keep;')
+  );
+});
+
+test('vfs store: removeFile and clear stay deleted across instances', async () => {
+  const backing = new Map();
+  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  await first.addFile('/src/gone.c', 'x');
+  await first.addFile('/src/cleared.c', 'y');
+  await first.addFile('/sysroot/include/kept.h', 'z');
+  assert.equal(first.removeFile('/src/gone.c'), true);
+  assert.equal(first.clearFiles(), 1); // only /src/cleared.c; sysroot is kept
+  await first.whenIdle();
+
+  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  assert.deepEqual(second.listFiles(), ['/sysroot/include/kept.h']);
+  assert.equal(second.hasFile('/src/gone.c'), false);
+  assert.equal(second.hasFile('/src/cleared.c'), false);
+});
+
+test('vfs store: a second load of the same target sysroot fetches nothing', async () => {
+  const backing = new Map();
+  let fetches = 0;
+  const fetchImpl = async () => {
+    fetches += 1;
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new TextEncoder().encode('asset-bytes').buffer,
+    };
+  };
+  const opts = () => ({
+    target: 'x86_64-windows',
+    wasmExports: makeMock(),
+    fsStore: makeFakeFsStore(backing),
+    sysroot: { fetchImpl, includeBinaries: true },
+  });
+  const first = await loadTinyc(opts());
+  assert.ok(fetches > 0);
+  assert.ok(first.fs.hasFile('/sysroot/include/stddef.h'));
+  const afterFirst = fetches;
+
+  const second = await loadTinyc(opts());
+  assert.equal(fetches, afterFirst); // every entry was a store hit
+  assert.ok(second.fs.hasFile('/sysroot/include/stddef.h'));
+  assert.ok(second.fs.hasFile('/sysroot/lib/libtcc1.a'));
+});
+
+test('vfs store: sync read of a restored-but-uncached file names the async read', async () => {
+  const backing = new Map();
+  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  await first.addFile('/src/cold.c', 'int cold;');
+
+  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  assert.throws(() => second.readFile('/src/cold.c'), /readFileAsync/);
+  assert.throws(() => second.exportFile('/src/cold.c'), /exportFileAsync/);
+  assert.equal(await second.readTextFileAsync('/src/cold.c'), 'int cold;');
+  // The async read warmed the cache: the sync read now succeeds.
+  assert.equal(second.readTextFile('/src/cold.c'), 'int cold;');
+});
+
+test('vfs store: storeFactory injection receives the target', async () => {
+  const backing = new Map();
+  const seen = [];
+  const tinyc = await loadTinyc({
+    target: 'aarch64-linux-gnu',
+    wasmExports: makeMock(),
+    storeFactory: (target) => {
+      seen.push(target);
+      return makeFakeFsStore(backing);
+    },
+  });
+  assert.deepEqual(seen, ['aarch64-linux-gnu']);
+  await tinyc.addFile('/x.c', 'int x;');
+  assert.ok(backing.has('/x.c'));
+});
+
+// Minimal hand-rolled IndexedDB stub — just enough of the API for
+// IndexedDbFsStore (open with upgrade, transactions, get/put/delete,
+// a cursor), so the real IndexedDB code path runs in this suite too.
+// Records live in a Map per database name, shared across opens.
+function makeIndexedDbStub() {
+  const databases = new Map();
+  const later = (fn) => queueMicrotask(fn);
+  function request(exec, onSettled) {
+    const req = { result: undefined, error: null, onsuccess: null, onerror: null };
+    later(() => {
+      try {
+        req.result = exec();
+      } catch (err) {
+        req.error = err;
+      }
+      if (req.error) req.onerror?.();
+      else req.onsuccess?.();
+      onSettled?.();
+    });
+    return req;
+  }
+  function makeDb(records) {
+    return {
+      objectStoreNames: { contains: () => true },
+      createObjectStore() {},
+      transaction() {
+        const tx = { error: null, oncomplete: null, onerror: null, onabort: null };
+        const settle = () => later(() => tx.oncomplete?.());
+        tx.objectStore = () => ({
+          get: (key) => request(() => records.get(key)),
+          put: (value, key) => request(() => { records.set(key, value); }, settle),
+          delete: (key) => request(() => { records.delete(key); }, settle),
+          openCursor: () => {
+            const entries = [...records.entries()];
+            let i = 0;
+            const req = { result: null, error: null, onsuccess: null, onerror: null };
+            const step = () => later(() => {
+              if (i < entries.length) {
+                const [key, value] = entries[i++];
+                req.result = { key, value, continue: step };
+              } else {
+                req.result = null;
+              }
+              req.onsuccess?.();
+            });
+            step();
+            return req;
+          },
+        });
+        return tx;
+      },
+      close() {},
+    };
+  }
+  return {
+    open(name) {
+      if (!databases.has(name)) databases.set(name, new Map());
+      const req = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+      later(() => {
+        req.result = makeDb(databases.get(name));
+        req.onupgradeneeded?.();
+        req.onsuccess?.();
+      });
+      return req;
+    },
+    _databases: databases,
+  };
+}
+
+test('vfs store: IndexedDB backend persists per target when the environment has it', async () => {
+  const stub = makeIndexedDbStub();
+  globalThis.indexedDB = stub;
+  try {
+    const first = await loadTinyc({ wasmExports: makeMock() });
+    assert.equal(first.fs.storeKind, 'indexeddb');
+    assert.ok(stub._databases.has('tinyc-web-fs-wasm32-wasi'));
+    await first.addFile('/src/idb.c', 'int idb;');
+    await first.addFile('/src/drop.c', 'int drop;');
+    assert.equal(first.removeFile('/src/drop.c'), true);
+    await first.whenIdle();
+
+    const second = await loadTinyc({ wasmExports: makeMock() });
+    assert.deepEqual(second.listFiles('/src'), ['/src/idb.c']);
+    assert.equal(await second.readTextFileAsync('/src/idb.c'), 'int idb;');
+
+    // A different target gets its own database and sees nothing.
+    const other = await loadTinyc({ target: 'riscv64-linux-gnu', wasmExports: makeMock() });
+    assert.equal(other.hasFile('/src/idb.c'), false);
+    assert.ok(stub._databases.has('tinyc-web-fs-riscv64-linux-gnu'));
+  } finally {
+    delete globalThis.indexedDB;
+  }
+});
+
+test('vfs store: without IndexedDB the default backend is memory and works', async () => {
+  // This suite runs in Node, which has no IndexedDB, so loadTinyc
+  // falls back to the in-memory backend.
+  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  assert.equal(tinyc.fs.storeKind, 'memory');
+  await tinyc.addFile('/src/m.c', 'int m;');
+  tinyc.addFileSync('/src/n.c', 'int n;');
+  await tinyc.whenIdle();
+  assert.equal(tinyc.readTextFile('/src/m.c'), 'int m;');
+  assert.equal(tinyc.readTextFile('/src/n.c'), 'int n;');
+});
+
+// ---------------------------------------------------------------------
+// Module FS backend: the WasmFS OPFS mount attempt (fsBackend)
+// ---------------------------------------------------------------------
+
+// Run `fn` with globals that make the environment look like a Web
+// Worker (the OPFS mount attempt is gated on a worker context).
+async function withWorkerGlobals(fn) {
+  class FakeWorkerGlobalScope {}
+  const hadWGS = 'WorkerGlobalScope' in globalThis;
+  const hadSelf = 'self' in globalThis;
+  const savedWGS = globalThis.WorkerGlobalScope;
+  const savedSelf = globalThis.self;
+  globalThis.WorkerGlobalScope = FakeWorkerGlobalScope;
+  globalThis.self = Object.create(FakeWorkerGlobalScope.prototype);
+  try {
+    return await fn();
+  } finally {
+    if (hadWGS) globalThis.WorkerGlobalScope = savedWGS;
+    else delete globalThis.WorkerGlobalScope;
+    if (hadSelf) globalThis.self = savedSelf;
+    else delete globalThis.self;
+  }
+}
+
+// An Emscripten-shaped native module: ccall present (so the bridge
+// is in emscripten mode) plus a recording fake FS.
+function makeFakeEmscripten(overrides = {}) {
+  const nativeFiles = new Map();
+  const native = {
+    nativeFiles,
+    FS: {
+      mkdirTree() {},
+      writeFile(p, bytes) { nativeFiles.set(p, bytes); },
+      unlink(p) { nativeFiles.delete(p); },
+    },
+    ccall() { throw new Error('ccall must not be reached'); },
+  };
+  return Object.assign(native, overrides);
+}
+
+test('fsBackend: mock instances report memory', async () => {
+  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  assert.equal(tinyc.fsBackend, 'memory');
+});
+
+test('fsBackend: emscripten module without the wasmfs exports falls back, mirroring intact', async () => {
+  const fake = makeFakeEmscripten();
+  const tinyc = await loadTinyc({ module: fake });
+  assert.equal(tinyc.nativeMode, 'emscripten');
+  assert.equal(tinyc.fsBackend, 'memory');
+  // The failed attempt does not disturb the FS mirroring.
+  tinyc.addFileSync('/src/main.c', 'int main() {}');
+  assert.ok(fake.nativeFiles.has('/src/main.c'));
+});
+
+test('fsBackend: a worker-context module with working wasmfs exports mounts OPFS once', async () => {
+  await withWorkerGlobals(async () => {
+    const ccalls = [];
+    const fake = makeFakeEmscripten({
+      _wasmfs_create_opfs_backend() {},
+      _wasmfs_create_directory() {},
+      async ccall(name, _returnType, _argTypes, args) {
+        ccalls.push([name, args]);
+        return name === 'wasmfs_create_opfs_backend' ? 4242 : 0;
+      },
+    });
+    const tinyc = await loadTinyc({ module: fake });
+    assert.equal(tinyc.fsBackend, 'opfs');
+    assert.deepEqual(
+      ccalls.map((c) => c[0]),
+      ['wasmfs_create_opfs_backend', 'wasmfs_create_directory']
+    );
+    assert.deepEqual(ccalls[1][1], ['/opfs', 0o777, 4242]);
+    // A second load of the same module reuses the outcome and does
+    // not mount again.
+    const again = await loadTinyc({ module: fake });
+    assert.equal(again.fsBackend, 'opfs');
+    assert.equal(ccalls.length, 2);
+  });
+});
+
+test('fsBackend: a failing OPFS mount attempt falls back to memory without throwing', async () => {
+  await withWorkerGlobals(async () => {
+    const throwing = makeFakeEmscripten({
+      _wasmfs_create_opfs_backend() {},
+      _wasmfs_create_directory() {},
+      async ccall(name) {
+        if (name === 'wasmfs_create_opfs_backend') throw new Error('no OPFS');
+        return 0;
+      },
+    });
+    const tinyc = await loadTinyc({ module: throwing });
+    assert.equal(tinyc.fsBackend, 'memory');
+
+    const denied = makeFakeEmscripten({
+      _wasmfs_create_opfs_backend() {},
+      _wasmfs_create_directory() {},
+      async ccall(name) {
+        return name === 'wasmfs_create_opfs_backend' ? 7 : -13;
+      },
+    });
+    const tinyc2 = await loadTinyc({ module: denied });
+    assert.equal(tinyc2.fsBackend, 'memory');
+  });
+});
+
+// ---------------------------------------------------------------------
+// OPFS path translation: with the OPFS backend mounted, every path
+// that crosses into the native module is rooted at /opfs
+// ---------------------------------------------------------------------
+
+// An Emscripten-shaped module whose WasmFS OPFS mount succeeds:
+// the wasmfs exports are present, ccall serves the mount and the
+// tcc_* calls, the fake FS records files by their module-side path,
+// _tinyc_main decodes argv out of the fake heap, and tcc_output_file
+// "writes" the product (native.productBytes) at the path it is
+// given, like TCC would.
+function makeOpfsEmscripten(overrides = {}) {
+  const nativeFiles = new Map();
+  const ccalls = [];
+  const heap = new Uint8Array(1 << 16);
+  let heapTop = 8;
+  const native = {
+    nativeFiles,
+    ccalls,
+    mainArgv: null,
+    productBytes: new Uint8Array([0xde, 0xad]),
+    HEAPU8: heap,
+    FS: {
+      mkdirTree() {},
+      writeFile(p, bytes) { nativeFiles.set(p, bytes); },
+      readFile(p) {
+        if (!nativeFiles.has(p)) throw new Error(`no such file: ${p}`);
+        return nativeFiles.get(p);
+      },
+      unlink(p) { if (!nativeFiles.delete(p)) throw new Error(`no such file: ${p}`); },
+    },
+    _malloc(n) { const p = heapTop; heapTop += n; return p; },
+    _free() {},
+    _tinyc_main(argc, argvPtr) {
+      const view = new DataView(heap.buffer);
+      const dec = new TextDecoder();
+      const argv = [];
+      for (let i = 0; i < argc; i++) {
+        const ptr = view.getUint32(argvPtr + i * 4, true);
+        let end = ptr;
+        while (heap[end] !== 0) end++;
+        argv.push(dec.decode(heap.subarray(ptr, end)));
+      }
+      native.mainArgv = argv;
+      return 0;
+    },
+    _wasmfs_create_opfs_backend() {},
+    _wasmfs_create_directory() {},
+    _tcc_new() {},
+    _tcc_delete() {},
+    _tcc_set_lib_path() {},
+    _tcc_add_include_path() {},
+    _tcc_add_sysinclude_path() {},
+    _tcc_add_library_path() {},
+    _tcc_add_file() {},
+    _tcc_compile_string() {},
+    _tcc_set_output_type() {},
+    _tcc_output_file() {},
+    ccall(name, _returnType, _argTypes, args) {
+      ccalls.push([name, args]);
+      if (name === 'wasmfs_create_opfs_backend') return 4242;
+      if (name === 'wasmfs_create_directory') return 0;
+      if (name === 'tcc_new') return 111;
+      if (name === 'tcc_output_file') nativeFiles.set(args[1], native.productBytes);
+      return 0;
+    },
+  };
+  return Object.assign(native, overrides);
+}
+
+test('opfs paths: mirror, state paths, product read-back and unlink all land under /opfs', async () => {
+  await withWorkerGlobals(async () => {
+    const fake = makeOpfsEmscripten();
+    const tinyc = await loadTinyc({ module: fake });
+    assert.equal(tinyc.fsBackend, 'opfs');
+    const ccallsNamed = (name) => fake.ccalls.filter((c) => c[0] === name);
+
+    // Mirroring writes under the prefix, never at the root path.
+    tinyc.addFileSync('/src/main.c', 'int main() {}');
+    assert.ok(fake.nativeFiles.has('/opfs/src/main.c'));
+    assert.equal(fake.nativeFiles.has('/src/main.c'), false);
+
+    // Registered include dirs reach tcc_add_include_path relocated.
+    tinyc.registerIncludeDir('/deps');
+    const state = tinyc.createState();
+    assert.deepEqual(
+      ccallsNamed('tcc_add_include_path').map((c) => c[1]),
+      [[111, '/opfs/deps']]
+    );
+
+    // The path handed to tcc_add_file is the module-side location.
+    state.addFile('/src/main.c');
+    assert.deepEqual(
+      ccallsNamed('tcc_add_file').map((c) => c[1]),
+      [[111, '/opfs/src/main.c']]
+    );
+
+    // The other path registrations relocate the same way.
+    state.addSysincludePath('/sysinc');
+    state.addLibraryPath('/libs');
+    state.setLibPath('/sysroot');
+    assert.deepEqual(ccallsNamed('tcc_add_sysinclude_path')[0][1], [111, '/opfs/sysinc']);
+    assert.deepEqual(ccallsNamed('tcc_add_library_path')[0][1], [111, '/opfs/libs']);
+    assert.deepEqual(ccallsNamed('tcc_set_lib_path')[0][1], [111, '/opfs/sysroot']);
+
+    // TCC writes the product under the prefix; exportFile reads it
+    // back from there and files it under the canonical path.
+    state.outputFile('/out/prog.o');
+    assert.deepEqual(ccallsNamed('tcc_output_file')[0][1], [111, '/opfs/out/prog.o']);
+    assert.deepEqual(tinyc.exportFile('/out/prog.o'), new Uint8Array([0xde, 0xad]));
+    assert.ok(tinyc.hasFile('/out/prog.o'));
+
+    // exportFileAsync takes the same translated native read for a
+    // product that exists only inside the module.
+    fake.nativeFiles.set('/opfs/out/async.o', new Uint8Array([1, 2]));
+    assert.deepEqual(await tinyc.exportFileAsync('/out/async.o'), new Uint8Array([1, 2]));
+    assert.ok(tinyc.hasFile('/out/async.o'));
+
+    // removeFile unlinks the prefixed mirror.
+    assert.equal(tinyc.removeFile('/src/main.c'), true);
+    assert.equal(fake.nativeFiles.has('/opfs/src/main.c'), false);
+    state.delete();
+  });
+});
+
+test('opfs paths: state.run reads the product back from under the prefix', async () => {
+  await withWorkerGlobals(async () => {
+    const fake = makeOpfsEmscripten({ productBytes: WASM_HELLO });
+    const outChunks = [];
+    const tinyc = await loadTinyc({
+      module: fake,
+      io: { out: (t) => outChunks.push(t), err: () => {} },
+    });
+    assert.equal(tinyc.fsBackend, 'opfs');
+    const state = tinyc.createState();
+    const rc = state.run([]);
+    assert.equal(rc, 7); // the product's proc_exit(7)
+    assert.equal(outChunks.join(''), 'hello from wasm\n');
+    state.delete();
+  });
+});
+
+test('opfs paths: callMain argv is relocated under /opfs', async () => {
+  await withWorkerGlobals(async () => {
+    const fake = makeOpfsEmscripten();
+    const tinyc = await loadTinyc({ module: fake });
+    const rc = tinyc.callMain(
+      ['-c', '/src/main.c', '-o', '/out/main.o', '-I/inc', '-L', '/libs', '-lm']
+    );
+    assert.equal(rc, 0);
+    assert.deepEqual(fake.mainArgv, [
+      '/opfs' + VIRTUAL_BIN_PATH,
+      '-c', '/opfs/src/main.c',
+      '-o', '/opfs/out/main.o',
+      '-I/opfs/inc',
+      '-L', '/opfs/libs',
+      '-lm', // a library name, not a path: untouched
+    ]);
+    // Joined -o and relative paths relocate through normalization.
+    tinyc.callMain(['-oout/rel.o', 'src/rel.c']);
+    assert.deepEqual(fake.mainArgv, [
+      '/opfs' + VIRTUAL_BIN_PATH,
+      '-o/opfs/out/rel.o',
+      '/opfs/src/rel.c',
+    ]);
+  });
+});
+
+test('opfs paths: compileFile #line keeps the canonical virtual path', async () => {
+  await withWorkerGlobals(async () => {
+    const fake = makeOpfsEmscripten();
+    const tinyc = await loadTinyc({ module: fake });
+    tinyc.addFileSync('/src/a.c', 'int a;\n');
+    const state = tinyc.createState();
+    state.compileFile('/src/a.c');
+    const src = fake.ccalls.filter((c) => c[0] === 'tcc_compile_string')[0][1][1];
+    assert.ok(src.startsWith('#line 1 "/src/a.c"\n'));
+    state.delete();
+  });
+});
+
+test('opfs paths: memory backend keeps module-side paths byte-identical', async () => {
+  // Same module shape but no worker globals: the OPFS mount is not
+  // attempted, the backend stays memory, and nothing is relocated.
+  const fake = makeOpfsEmscripten();
+  const tinyc = await loadTinyc({ module: fake });
+  assert.equal(tinyc.fsBackend, 'memory');
+  tinyc.addFileSync('/src/main.c', 'int main() {}');
+  assert.ok(fake.nativeFiles.has('/src/main.c'));
+  const rc = tinyc.callMain(['-o', 'a.out', 'a.c']);
+  assert.equal(rc, 0);
+  assert.deepEqual(fake.mainArgv, [VIRTUAL_BIN_PATH, '-o', 'a.out', 'a.c']);
 });
 
 // ---------------------------------------------------------------------
@@ -649,6 +1233,51 @@ test('run: wasm32 target callMain -run compiles then instantiates; native main n
   assert.deepEqual(entries[0][2], [VIRTUAL_BIN_PATH, '-o', DEFAULT_RUN_OUTPUT, '/src/prog.c']);
   assert.ok(!entries[0][2].includes('-run'));
   assert.equal(outChunks.join(''), 'hello from wasm\n');
+});
+
+test('runWasmFile: executes a product stored in the virtual FS without recompiling', async () => {
+  const mock = makeMock({});
+  const outChunks = [];
+  const tinyc = await loadTinyc({
+    wasmExports: mock,
+    io: { out: (t) => outChunks.push(t), err: () => {} },
+  });
+  tinyc.addFileSync('/out/prog.wasm', WASM_HELLO);
+  const rc = tinyc.runWasmFile('/out/prog.wasm');
+  assert.equal(rc, 7); // the product's proc_exit(7)
+  assert.equal(outChunks.join(''), 'hello from wasm\n');
+  assert.equal(callsNamed(mock, 'tinyc_main').length, 0); // nothing recompiled
+});
+
+test('runWasmFile: function-style entry and instance shims apply, same stack as -run', async () => {
+  const mock = makeMock({});
+  const tinyc = await loadTinyc({ wasmExports: mock });
+  tinyc.addFileSync('/out/add.wasm', WASM_ADD);
+  assert.equal(tinyc.runWasmFile('/out/add.wasm', { entry: 'add', callArgs: [19, 23] }), 42);
+  // WASM_CUSTOM imports env.my_custom_add and env.host_log; the
+  // instance-level shims must satisfy them here exactly as they do
+  // on the state.run / "-run" paths.
+  tinyc.addFileSync('/out/custom.wasm', WASM_CUSTOM);
+  const seen = [];
+  tinyc.registerShim('my_custom_add', (ctx, a, b) => { seen.push([a, b]); return a + b; });
+  tinyc.registerShims({ host_log: (ctx, ptr) => { ctx.readCString(ptr); } });
+  const rc = tinyc.runWasmFile('/out/custom.wasm', { entry: 'run' });
+  assert.deepEqual(seen, [[19, 23]]);
+  assert.equal(rc, 42);
+});
+
+test('runWasmFile: unsatisfiable imports throw TinycMissingImportError naming every missing import', async () => {
+  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  tinyc.addFileSync('/out/custom.wasm', WASM_CUSTOM);
+  let caught;
+  try {
+    tinyc.runWasmFile('/out/custom.wasm', { entry: 'run' });
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof TinycMissingImportError);
+  assert.deepEqual(caught.missing, ['env.my_custom_add', 'env.host_log']);
+  assert.match(caught.message, /env\.my_custom_add, env\.host_log/);
 });
 
 // ---------------------------------------------------------------------
