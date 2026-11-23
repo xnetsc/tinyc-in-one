@@ -64,8 +64,13 @@ class CliModeTests(unittest.TestCase):
             code, out = tinyc.run_cli_capture(["-c", libsrc, "-o",
                                                os.path.join(d, "dyn.o")])
             self.assertEqual(code, 0, out)
-            subprocess.run(["ar", "rcs", liba, os.path.join(d, "dyn.o")],
-                           check=True)
+            # The archive is built by TCC's own -ar: it is consumed
+            # by TCC, and a system ar/ranlib cannot index TCC's ELF
+            # objects on every platform (on macOS its symbol table
+            # comes out empty and the link below loses _dynval).
+            code, out = tinyc.run_cli_capture(
+                ["-ar", "rcs", liba, os.path.join(d, "dyn.o")])
+            self.assertEqual(code, 0, out)
             main = os.path.join(d, "main.c")
             with open(main, "w") as f:
                 f.write('#include "dyn.h"\n#include <stdio.h>\n'
@@ -202,19 +207,45 @@ class HostSimulationTests(unittest.TestCase):
                               capture_output=True, env=env)
 
     def test_host_override_resolves_and_compiles(self):
+        # The simulated host's combination is resolved and compiled
+        # when this package contains it (the full staging does); a
+        # single-host package (e.g. a macOS wheel) does not contain
+        # it, and there the override must produce the missing-
+        # combination error naming the simulated host instead.
         r = self.run_child(
             {"TINYC_HOST_TRIPLE": "x86_64-linux-gnu"},
+            "import json, os\n"
             "import tinyc\n"
-            "r = tinyc.resolve_native()\n"
-            "assert 'natives/x86_64-linux-gnu/toolchain/x86_64-linux-gnu' "
+            "root = os.path.dirname(os.path.abspath(tinyc.__file__))\n"
+            "with open(os.path.join(root, 'packaging-manifest.json')) as f:\n"
+            "    combos = {(c['host'], c['target'])\n"
+            "              for c in json.load(f)['combinations']}\n"
+            "if ('x86_64-linux-gnu', 'x86_64-linux-gnu') in combos:\n"
+            "    r = tinyc.resolve_native()\n"
+            "    assert 'natives/x86_64-linux-gnu/toolchain/x86_64-linux-gnu' "
             "in r['binary_path'], r['binary_path']\n"
-            "code, out = tinyc.run_cli_capture(['-dumpversion'])\n"
-            "assert code == 0, out\n"
-            "print('VERSION', out.decode().strip())\n")
+            "    code, out = tinyc.run_cli_capture(['-dumpversion'])\n"
+            "    assert code == 0, out\n"
+            "    print('VERSION', out.decode().strip())\n"
+            "else:\n"
+            "    try:\n"
+            "        tinyc.resolve_native()\n"
+            "        print('NO-THROW')\n"
+            "    except Exception as e:\n"
+            "        print('ERR', e)\n")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"VERSION 0.9.28", r.stdout)
+        if b"VERSION" in r.stdout:
+            self.assertIn(b"VERSION 0.9.28", r.stdout)
+        else:
+            self.assertIn(b"no native build for host x86_64-linux-gnu",
+                          r.stdout)
+            self.assertIn(b"available combinations:", r.stdout)
 
     def test_missing_combination_names_host_and_available(self):
+        import json
+        root = os.path.dirname(os.path.abspath(tinyc.__file__))
+        with open(os.path.join(root, "packaging-manifest.json")) as f:
+            combos = json.load(f)["combinations"]
         r = self.run_child(
             {"TINYC_HOST_TRIPLE": "x86_64-w64-mingw32"},
             "import tinyc\n"
@@ -225,7 +256,10 @@ class HostSimulationTests(unittest.TestCase):
             "    print('ERR', e)\n")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(b"no native build for host x86_64-w64-mingw32", r.stdout)
-        self.assertIn(b"x86_64-linux-gnu x x86_64-linux-gnu", r.stdout)
+        # Every combination this package does contain must be named
+        # in the error's available list.
+        for c in combos:
+            self.assertIn(f"{c['host']} x {c['target']}".encode(), r.stdout)
 
     def test_outputs_come_from_manifest(self):
         import json

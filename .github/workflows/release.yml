@@ -500,6 +500,14 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      # The bundle carries snapshot copies of the kernel IO unit
+      # and the patch set; the macOS kernel is built from the
+      # current ones in the main tree.
+      - name: Sync the kernel sources into the macOS bundle
+        run: |
+          cp core/tcc_io.c core/tinyc_io.h mac-test-bundle/core/
+          cp patches/apply_patches.py mac-test-bundle/patches/
+
       - name: Build the macOS dual-form kernel (mac-test-bundle)
         run: |
           mkdir -p test-outputs
@@ -529,6 +537,10 @@ jobs:
           mkdir -p "$SD/bin" "$SD/lib/tcc" "$SD/include"
           cp mac-test-bundle/dist/bin/tinyc "$SD/bin/tinyc"
           cp mac-test-bundle/dist/lib/tcc/libtcc1.a "$SD/lib/tcc/"
+          # The libtcc support objects (runmain.o for -run, the
+          # bcheck/backtrace objects) sit next to libtcc1.a in the
+          # bundle dist, as in the Linux layout; stage them too.
+          cp mac-test-bundle/dist/lib/tcc/*.o "$SD/lib/tcc/"
           cp -r mac-test-bundle/dist/lib/tcc/include "$SD/lib/tcc/include"
           cp mac-test-bundle/dist/include/libtcc.h "$SD/include/"
           cp core/tinyc_io.h "$SD/include/"

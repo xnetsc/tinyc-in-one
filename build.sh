@@ -329,13 +329,16 @@ PYEOF
         -DTCC_TARGET_X86_64 -DTCC_TARGET_PE \
         "$SRC/tinyc.def" -lm
     ln -sf tinyc.exe "$DIST/bin/tcc.exe"
-    # Flat companions next to the exe: with the runtime tccdir being
-    # the exe's own directory, libtcc1.a / include / lib live there in
-    # upstream's Windows layout, so the exe also works standalone.
-    cp "$DIST/lib/tcc/win32/lib/libtcc1.a" "$DIST/bin/libtcc1.a"
-    cp -r "$DIST/lib/tcc/win32/include" "$DIST/bin/include"
+    # Companions next to the exe, in the places libtcc actually
+    # searches with CONFIG_TCCDIR undefined: the runtime tccdir {B}
+    # is the exe's own directory, and the PE defaults (tcc.h) put
+    # the library path at {B}/lib - libtcc1.a is looked up there by
+    # tcc_add_support, the .def files there by tcc_add_library - and
+    # the include paths at {B}/include and {B}/include/winapi.
     mkdir -p "$DIST/bin/lib"
+    cp "$DIST/lib/tcc/win32/lib/libtcc1.a" "$DIST/bin/lib/"
     cp "$SRC"/win32/lib/*.def "$DIST/bin/lib/"
+    cp -r "$DIST/lib/tcc/win32/include" "$DIST/bin/include"
 
     cat > "$DIST/manifest.json" <<EOF
 {
@@ -363,7 +366,17 @@ EOF
 build_host_for() {
     local H=$1 CT=$2 TDEF=$3 ISA=$4
     if [ "${H%%-*}" = "$HOST_ARCH" ]; then
-        build_host_linux "$H" "$CT" gcc "$TDEF" "$ISA"
+        # Native: no sysroot is baked, but the system paths still
+        # need the multiarch triplet directory. configure detects
+        # the triplet and config.h carries it - inside a block
+        # guarded on no TCC_TARGET_* being defined yet, which the
+        # -DTCC_TARGET_* on the dual-form compile line suppresses.
+        # Bake the paths the triplet would have produced (the same
+        # values the matrix native build ends up with).
+        build_host_linux "$H" "$CT" gcc "$TDEF" "$ISA" \
+            "-DCONFIG_TCC_CRTPREFIX=\"/usr/lib/$H\"" \
+            "-DCONFIG_TCC_LIBPATHS=\"{B}:/usr/lib/$H:/usr/lib\"" \
+            "-DCONFIG_TCC_SYSINCLUDEPATHS=\"{B}/include:/usr/include/$H:/usr/include\""
     else
         build_host_linux "$H" "$CT" "$H-gcc" "$TDEF" "$ISA" \
             "-DCONFIG_SYSROOT=\"/usr/$H\"" \

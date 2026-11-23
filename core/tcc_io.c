@@ -388,6 +388,19 @@ FILE *tinyc_io_open_out_stream(void)
                                   .seek = NULL, .close = NULL };
     return fopencookie(NULL, "w", fns);
 }
+#elif defined(__APPLE__)
+static int funopen_write(void *c, const char *b, int n)
+{
+    (void)c;
+    int r = tinyc_io_write_out(b, (size_t)n);
+    return r < 0 ? -1 : r;
+}
+
+FILE *tinyc_io_open_out_stream(void)
+{
+    if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
+    return funopen(NULL, NULL, funopen_write, NULL, NULL);
+}
 #else
 FILE *tinyc_io_open_out_stream(void) { return NULL; }
 #endif
