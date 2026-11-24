@@ -38,11 +38,24 @@ const NPM_OS_CPU = {
 const host = process.argv[2] || detectHost();
 const stage = path.join(__dirname, '..', '..', 'packaging', 'stage_layout.py');
 
+/* Paths handed to the python3 child must also work when that child is
+ * an MSYS2 build (the Windows CI step runs this script from an MSYS2
+ * shell): MSYS2 Python treats a Windows-form absolute path (D:\...)
+ * as a relative name. Pass paths relative to the CWD the child
+ * inherits, with forward slashes - Windows Python and MSYS2 Python
+ * resolve those identically, and stage_layout.py anchors --root with
+ * os.path.abspath() against that same CWD, so the staged tree and its
+ * manifest come out exactly as with the absolute forms. */
+function childPath(abs) {
+  const rel = path.relative(process.cwd(), abs);
+  return (rel === '' ? '.' : rel).split(path.sep).join('/');
+}
+
 function stageInto(root) {
   for (const name of ['natives', 'sysroot', 'packaging-manifest.json', 'native']) {
     fs.rmSync(path.join(root, name), { recursive: true, force: true });
   }
-  execFileSync('python3', [stage, '--root', root, '--host', host],
+  execFileSync('python3', [childPath(stage), '--root', childPath(root), '--host', host],
                { stdio: 'inherit' });
 }
 
