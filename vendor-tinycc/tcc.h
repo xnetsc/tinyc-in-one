@@ -677,6 +677,7 @@ typedef struct AttributeDef {
     int asm_label; /* associated asm label */
     char attr_mode; /* __attribute__((__mode__(...))) */
     char new_section; /* section is new */
+    int vector_size; /* __attribute__((vector_size(N))): total bytes, 0 = none */
 } AttributeDef;
 
 /* inline functions */
@@ -732,6 +733,36 @@ struct sym_attr {
     unsigned char plt_thumb_stub:1;
 #endif
 };
+
+/* Target feature word (TCCState.target_features): the SIMD level
+   of the compilation target.  The architectural defaults of the
+   target are set in tcc_new() and the -march= option refines them;
+   the predefined feature macros and the required-feature checks of
+   the vector builtins are both derived from this one word.  The bit
+   assignments are private to each target. */
+#if defined TCC_TARGET_X86_64
+# define TFEAT_SSE        (1u << 0)
+# define TFEAT_SSE2       (1u << 1)
+# define TFEAT_SSSE3      (1u << 2)
+# define TFEAT_SSE41      (1u << 3)
+# define TFEAT_SSE42      (1u << 4)
+# define TFEAT_AVX        (1u << 5)
+# define TFEAT_AVX2       (1u << 6)
+# define TFEAT_FMA        (1u << 7)
+# define TFEAT_F16C       (1u << 8)
+# define TFEAT_AVX512F    (1u << 9)
+# define TFEAT_AVX512BW   (1u << 10)
+# define TFEAT_AVX512DQ   (1u << 11)
+# define TFEAT_AVX512VL   (1u << 12)
+# define TFEAT_AVX512CD   (1u << 13)
+# define TFEAT_AVX512VBMI (1u << 14)
+# define TFEAT_AVX512VNNI (1u << 15)
+#elif defined TCC_TARGET_ARM64
+# define TFEAT_NEON       (1u << 0)
+# define TFEAT_DOTPROD    (1u << 1)
+#elif defined TCC_TARGET_RISCV64
+# define TFEAT_V          (1u << 0)
+#endif
 
 struct TCCState {
     unsigned char verbose; /* if true, display some information during compilation */
@@ -802,6 +833,9 @@ struct TCCState {
 #ifdef TCC_TARGET_ARM
     unsigned char float_abi; /* float ABI of the generated code*/
 #endif
+
+    unsigned target_features; /* target feature word (TFEAT_*) */
+    int target_vlen_min; /* riscv64: minimum VLEN in bits from -march= (zvlNb), 0 = unset */
 
     unsigned char has_text_addr;
     addr_t text_addr; /* address of text section */
@@ -1072,6 +1106,8 @@ struct filespec {
 #define VT_VLA         0x1000  /* VLA type (also has VT_PTR) */
 #define VT_ARRAY_MASK  (VT_ARRAY | VT_VLA)
 #define VT_LONG        0x2000  /* long type (also has VT_INT rsp. VT_LLONG) */
+#define VT_VECTOR      0x00080000  /* vector type: element type in ref->type,
+                                    element count in ref->c (array convention) */
 
 /* storage */
 #define VT_EXTERN  0x00004000  /* extern definition */
@@ -1079,7 +1115,6 @@ struct filespec {
 #define VT_TYPEDEF 0x00010000  /* typedef definition */
 #define VT_INLINE  0x00020000  /* inline definition */
 #define VT_TLS     0x00040000  /* thread-local storage */
-/* currently unused: 0x00080000  */
 
 #define VT_STRUCT_SHIFT 20     /* shift for bitfield shift values (32 - 2*6) */
 #define VT_STRUCT_MASK (((1U << (6+6)) - 1) << VT_STRUCT_SHIFT | VT_BITFIELD)
@@ -1511,6 +1546,26 @@ ST_FUNC void gaddrof(void);
 ST_FUNC int gv(int rc);
 ST_FUNC void gv2(int rc1, int rc2);
 ST_FUNC void gen_op(int op);
+ST_FUNC void gen_opv(int op);
+ST_FUNC void gen_vec_gv(void);
+ST_FUNC void gen_vec_home(void);
+ST_FUNC void gen_vec_ret(void);
+ST_FUNC void gen_vec_neg(void);
+ST_FUNC void gen_vec_not(void);
+ST_FUNC void gen_vec_op1(int opc, CType *restype);
+ST_FUNC void gen_vec_op2(int opc, CType *restype);
+ST_FUNC void gen_vec_splat(int opc, CType *restype);
+ST_FUNC void gen_vec_extract(int opc, int lane, CType *restype);
+ST_FUNC void gen_vec_replace(int opc, int lane);
+ST_FUNC void gen_vec_shuffle(const int *lanes);
+ST_FUNC void gen_vec_op3(int opc, CType *restype);
+ST_FUNC void gen_vec_op1r(int opc, CType *restype);
+ST_FUNC void gen_vec_op2i(int opc, int imm, CType *restype);
+ST_FUNC void gen_vec_vldn(int opc);
+ST_FUNC void gen_vec_vstn(int opc);
+ST_FUNC unsigned tcc_effective_features(TCCState *s);
+ST_FUNC const char *tcc_feature_name(unsigned bit);
+ST_FUNC void tcc_describe_features(TCCState *s, char *buf, int bufsize);
 ST_FUNC int type_size(CType *type, int *a);
 ST_FUNC void mk_pointer(CType *type);
 ST_FUNC void vstore(void);

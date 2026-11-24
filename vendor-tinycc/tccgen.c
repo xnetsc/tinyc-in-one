@@ -58,6 +58,11 @@ ST_DATA int nocode_wanted; /* no code generation wanted */
 #define CODE_OFF() if(!nocode_wanted)(nocode_wanted |= CODE_OFF_BIT)
 #define CODE_ON() (nocode_wanted &= ~CODE_OFF_BIT)
 
+/* A target whose backend implements the generic vector hooks
+   (gen_opv, gen_vec_*) defines TCC_VEC_HOOKS in its *-gen.c; on
+   all other targets a vector operation in the generic layer is a
+   compile error naming the missing support. */
+
 /* no code output when parsing sizeof()/typeof() etc. (using nocode_wanted++/--) */
 #define NOEVAL_MASK 0x0000FFFF
 #define NOEVAL_WANTED (nocode_wanted & NOEVAL_MASK)
@@ -416,6 +421,12 @@ static int btype_size(int bt)
 /* returns function return register from type */
 static int R_RET(int t)
 {
+#if defined TCC_TARGET_ARM64
+    /* a vector returns in the first FP/SIMD register whatever its
+       element type (the AAPCS64 FP/SIMD class) */
+    if (t & VT_VECTOR)
+        return REG_FRET;
+#endif
     if (!is_float(t))
         return REG_IRET;
 #ifdef TCC_TARGET_X86_64
@@ -459,12 +470,20 @@ static void PUT_R_RET(SValue *sv, int t)
 /* returns function return register class for type t */
 static int RC_RET(int t)
 {
-    return reg_classes[R_RET(t)] & ~(RC_FLOAT | RC_INT);
+    return reg_classes[R_RET(t)] & ~(RC_FLOAT | RC_INT
+#ifdef TCC_TARGET_ARM64
+        | RC_VEC /* a return value belongs to the one return register */
+#endif
+        );
 }
 
 /* returns generic register class for type t */
 static int RC_TYPE(int t)
 {
+#if defined TCC_TARGET_ARM64
+    if (t & VT_VECTOR)
+        return RC_VEC;
+#endif
     if (!is_float(t))
         return RC_INT;
 #ifdef TCC_TARGET_X86_64
@@ -3398,6 +3417,73 @@ static int combine_types(CType *dest, SValue *op1, SValue *op2, int op)
     return ret;
 }
 
+/* check that two vector types have the same layout (total size,
+   lane count, lane floatness) */
+static int vec_same_layout(CType *a, CType *b)
+{
+    int a1, a2;
+    if (type_size(a, &a1) != type_size(b, &a2))
+        return 0;
+    if (a->ref->c != b->ref->c)
+        return 0;
+    return is_float(a->ref->type.t) == is_float(b->ref->type.t);
+}
+
+/* binary operation on vector operands (vtop[-1], vtop[0]).
+   Shape rules follow GCC: both operands vectors of the same
+   layout, except shifts, whose right operand may be a scalar
+   count.  The backend hook gen_opv consumes both operands and
+   leaves the result in vtop[-1]'s slot. */
+static void gen_op_vector(int op, int op_class)
+{
+    CType *lt = &vtop[-1].type, *rt = &vtop[0].type;
+    int lvec = (lt->t & VT_VECTOR) != 0;
+    int rvec = (rt->t & VT_VECTOR) != 0;
+    CType res;
+    if (op_class == SHIFT_OP) {
+        if (!lvec)
+            tcc_error("vector shift needs a vector left operand");
+        if (rvec && !vec_same_layout(lt, rt))
+            tcc_error("vector operands have different shapes");
+        if (!rvec && !is_integer_btype(rt->t & VT_BTYPE))
+            tcc_error("vector shift count must be an integer");
+    } else {
+        if (!lvec || !rvec)
+            tcc_error("binary operation between vector and scalar is not supported");
+        if (!vec_same_layout(lt, rt))
+            tcc_error("vector operands have different shapes");
+    }
+    /* unsigned variants, mirroring gen_op's rewriting */
+    if ((lt->t | (rvec ? rt->t : 0)) & VT_UNSIGNED) {
+        if (op == '/') op = TOK_UDIV;
+        else if (op == '%') op = TOK_UMOD;
+        else if (op == TOK_SAR) op = TOK_SHR;
+        else if (op == TOK_LT) op = TOK_ULT;
+        else if (op == TOK_GT) op = TOK_UGT;
+        else if (op == TOK_LE) op = TOK_ULE;
+        else if (op == TOK_GE) op = TOK_UGE;
+    }
+    res = *lt;
+    if (op_class == CMP_OP) {
+        /* the result is a vector of signed integers with the same
+           lane size and count as the operands */
+        CType elem = lt->ref->type;
+        int esize, align;
+        esize = type_size(&elem, &align);
+        elem.t = esize == 8 ? VT_LLONG : esize == 2 ? VT_SHORT :
+                 esize == 1 ? VT_BYTE : VT_INT;
+        elem.ref = NULL;
+        res.ref = sym_push(SYM_FIELD, &elem, 0, lt->ref->c);
+        res.t = (lt->t & ~(VT_BTYPE | VT_UNSIGNED)) | (elem.t & VT_BTYPE);
+    }
+#ifdef TCC_VEC_HOOKS
+    gen_opv(op);
+#else
+    tcc_error("vector operations are not supported for this target");
+#endif
+    vtop->type = res;
+}
+
 /* generic gen_op: handles types problems */
 ST_FUNC void gen_op(int op)
 {
@@ -3432,6 +3518,8 @@ redo:
 	    vswap();
 	}
 	goto redo;
+    } else if ((t1 & VT_VECTOR) || (t2 & VT_VECTOR)) {
+        gen_op_vector(op, op_class);
     } else if (!combine_types(&combtype, vtop - 1, vtop, op_class)) {
 op_err:
         tcc_error("invalid operand types for binary operation");
@@ -3622,6 +3710,10 @@ static void gen_cast(CType *type)
     int sbt, dbt, sf, df, c;
     int dbt_bt, sbt_bt, ds, ss, bits, trunc;
 
+    /* vector values are not subject to the scalar char/short
+       delayed cast: the element type only rides in VT_BTYPE */
+    if ((type->t & VT_VECTOR) || (vtop->type.t & VT_VECTOR))
+        vtop->r &= ~VT_MUSTCAST;
     /* special delayed cast for char/short */
     if (vtop->r & VT_MUSTCAST)
         force_charshort_cast();
@@ -3629,6 +3721,20 @@ static void gen_cast(CType *type)
     /* bitfields first get cast to ints */
     if (vtop->type.t & VT_BITFIELD)
         gv(RC_INT);
+
+    if ((type->t & VT_VECTOR) || (vtop->type.t & VT_VECTOR)) {
+        int a1, a2;
+        if ((type->t & VT_BTYPE) == VT_VOID) {
+            vpop(), vpushi(0);
+            goto done;
+        }
+        if (!(type->t & VT_VECTOR) || !(vtop->type.t & VT_VECTOR) ||
+            type_size(type, &a1) != type_size(&vtop->type, &a2))
+            cast_error(&vtop->type, type);
+        /* a cast between vector types of the same total size is a
+           bitcast (GCC semantics) */
+        goto done;
+    }
 
     if (IS_ENUM(type->t) && type->ref->c < 0)
         tcc_error("cast to incomplete type");
@@ -3863,6 +3969,14 @@ ST_FUNC int type_size(CType *type, int *a)
     Sym *s;
     int bt;
 
+    if (type->t & VT_VECTOR) {
+        /* vector type: ref->type is the element type, ref->c the
+           number of elements (the array convention) */
+        int ts = type_size(&type->ref->type, a);
+        int n = ts * type->ref->c;
+        *a = n < 16 ? n : 16;
+        return n;
+    }
     bt = type->t & VT_BTYPE;
     if (bt == VT_STRUCT) {
         /* struct/union */
@@ -3909,6 +4023,28 @@ ST_FUNC int type_size(CType *type, int *a)
         *a = 1;
         return 1;
     }
+}
+
+/* make 'type' into a vector type of 'nbytes' total size (GCC
+   __attribute__((vector_size(N)))).  The element type is kept in
+   type->ref->type and the element count in type->ref->c, the same
+   convention arrays use. */
+static void make_vector_type(CType *type, int nbytes)
+{
+    CType elem;
+    int esize, align, bt;
+    bt = type->t & VT_BTYPE;
+    if (bt == VT_PTR || bt == VT_FUNC || bt == VT_STRUCT ||
+        bt == VT_VOID || (type->t & VT_ARRAY) || (type->t & VT_VECTOR))
+        tcc_error("vector_size applied to a non-scalar type");
+    elem = *type;
+    elem.t &= ~(VT_STORAGE | VT_ARRAY | VT_VLA);
+    esize = type_size(&elem, &align);
+    if (esize <= 0 || nbytes % esize != 0 ||
+        (nbytes & (nbytes - 1)) != 0)
+        tcc_error("vector_size(%d) is not a power-of-two multiple of the element size", nbytes);
+    type->ref = sym_push(SYM_FIELD, &elem, 0, nbytes / esize);
+    type->t = (type->t & ~VT_STRUCT_MASK) | VT_VECTOR;
 }
 
 /* push type size as known at runtime time on top of value stack. Put
@@ -4123,6 +4259,32 @@ static void gen_assign_cast(CType *dt)
 ST_FUNC void vstore(void)
 {
     int sbt, dbt, ft, r, size, align, bit_size, bit_pos, delayed_cast;
+
+    if (vtop[-1].type.t & VT_VECTOR) {
+        /* vector assignment: bitcast-convert the value, load it
+           into a vector register and store it */
+        gen_cast(&vtop[-1].type);
+#ifdef TCC_VEC_HOOKS
+        gen_vec_gv();
+#else
+        tcc_error("vector assignment is not supported for this target");
+#endif
+        if ((vtop[-1].r & VT_VALMASK) == VT_LLOCAL) {
+            SValue sv;
+            r = get_reg(RC_INT);
+            sv.type.t = VT_PTRDIFF_T;
+            sv.r = VT_LOCAL | VT_LVAL;
+            sv.c.i = vtop[-1].c.i;
+            sv.sym = NULL;
+            load(r, &sv);
+            vtop[-1].r = r | VT_LVAL;
+        }
+        r = vtop->r & VT_VALMASK;
+        store(r, vtop - 1);
+        vswap();
+        vtop--; /* NOT vpop() because on x86 it would flush the fp stack */
+        return;
+    }
 
     ft = vtop[-1].type.t;
     sbt = vtop->type.t & VT_BTYPE;
@@ -4449,6 +4611,15 @@ redo:
             ad->a.aligned = exact_log2p1(n);
 	    if (n != 1 << (ad->a.aligned - 1))
 	      tcc_error("alignment of %d is larger than implemented", n);
+            break;
+        case TOK_VECTOR_SIZE1:
+        case TOK_VECTOR_SIZE2:
+            skip('(');
+            n = expr_const();
+            if (n <= 0)
+                tcc_error("vector_size must be a positive number of bytes");
+            ad->vector_size = n;
+            skip(')');
             break;
         case TOK_PACKED1:
         case TOK_PACKED2:
@@ -5040,6 +5211,8 @@ do_decl:
                     if (tok != ':') {
 			if (tok != ';')
                             type_decl(&type1, &ad1, &v, TYPE_DIRECT);
+                        if (ad1.vector_size)
+                            make_vector_type(&type1, ad1.vector_size);
                         if (v == 0) {
                     	    if ((type1.t & VT_BTYPE) != VT_STRUCT)
                         	expect("identifier");
@@ -6069,7 +6242,8 @@ static void parse_atomic(int atok)
     vpush(&ct);
     PUT_R_RET(vtop, ct.t);
     t = ct.t & VT_BTYPE;
-    if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {
+    if (!(ct.t & VT_VECTOR)
+        && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {
 #ifdef PROMOTE_RET
         vtop->r |= BFVAL(VT_MUSTCAST, 1);
 #else
@@ -6264,13 +6438,23 @@ ST_FUNC void unary(void)
     case '!':
         next();
         unary();
+        if (vtop->type.t & VT_VECTOR)
+            tcc_error("unary '!' on a vector is not supported");
         gen_test_zero(TOK_EQ);
         break;
     case '~':
         next();
         unary();
-        vpushi(-1);
-        gen_op('^');
+        if (vtop->type.t & VT_VECTOR) {
+#ifdef TCC_VEC_HOOKS
+            gen_vec_not();
+#else
+            tcc_error("unary '~' on a vector is not supported for this target");
+#endif
+        } else {
+            vpushi(-1);
+            gen_op('^');
+        }
         break;
     case '+':
         next();
@@ -6319,6 +6503,111 @@ ST_FUNC void unary(void)
 	vtop -= 2;
 	vpushi(n);
         break;
+#ifdef TCC_TARGET_ARM64
+    case TOK_aarch64_vop1:
+    case TOK_aarch64_vop1r:
+    case TOK_aarch64_vop2:
+    case TOK_aarch64_vop3:
+    case TOK_aarch64_splat:
+    case TOK_aarch64_extract:
+    case TOK_aarch64_replace:
+    case TOK_aarch64_shuffle: {
+        /* the generic NEON builtins: the opcode and the lane index
+           are integer constants, the value operands are expressions
+           and the result type is named explicitly, so the backend
+           needs no type inference (the __builtin_wasm_* shape) */
+        int which = tok, opc, lane = 0;
+        CType restype;
+        next();
+        skip('(');
+        opc = expr_const();
+        skip(',');
+        if (which == TOK_aarch64_vop1 || which == TOK_aarch64_vop1r) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            if (which == TOK_aarch64_vop1)
+                gen_vec_op1(opc, &restype);
+            else
+                gen_vec_op1r(opc, &restype);
+        } else if (which == TOK_aarch64_vop2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2(opc, &restype);
+        } else if (which == TOK_aarch64_vop3) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3(opc, &restype);
+        } else if (which == TOK_aarch64_splat) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_splat(opc, &restype);
+        } else if (which == TOK_aarch64_extract) {
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_extract(opc, lane, &restype);
+        } else if (which == TOK_aarch64_replace) {
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            expr_eq();
+            skip(')');
+            gen_vec_replace(opc, lane);
+        } else { /* TOK_aarch64_shuffle: two vectors and an immediate */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2i(opc, lane, &restype);
+        }
+        break;
+    }
+    case TOK_aarch64_vldn:
+    case TOK_aarch64_vstn: {
+        /* (opc, ptr, addr): the vectors move between memory at ptr
+           and the struct-of-vectors object at addr; the call itself
+           evaluates to void, the header macro presents the value
+           form for vldn */
+        int which = tok, opc;
+        next();
+        skip('(');
+        opc = expr_const();
+        skip(',');
+        expr_eq();
+        skip(',');
+        expr_eq();
+        skip(')');
+        if (which == TOK_aarch64_vldn)
+            gen_vec_vldn(opc);
+        else
+            gen_vec_vstn(opc);
+        vpushi(0);
+        vtop->type.t = VT_VOID;
+        break;
+    }
+#endif
     case TOK_builtin_choose_expr:
 	{
 	    int64_t c;
@@ -6508,6 +6797,14 @@ ST_FUNC void unary(void)
     case '-':
         next();
         unary();
+        if (vtop->type.t & VT_VECTOR) {
+#ifdef TCC_VEC_HOOKS
+            gen_vec_neg();
+#else
+            tcc_error("unary '-' on a vector is not supported for this target");
+#endif
+            break;
+        }
 	if (is_float(vtop->type.t)) {
             gen_opif(TOK_NEG);
 	} else {
@@ -6700,6 +6997,24 @@ special_math_val:
             next();
         } else if (tok == '[') {
             next();
+            if (vtop->type.t & VT_VECTOR) {
+                CType etype;
+                if (!(vtop->r & VT_LVAL)) {
+#ifdef TCC_VEC_HOOKS
+                    /* an rvalue vector (call result, operation
+                       result) has no memory home yet: the
+                       backend spills it to a frame slot, after
+                       which the array path below applies */
+                    gen_vec_home();
+#else
+                    tcc_error("subscript of a vector rvalue is not supported");
+#endif
+                }
+                etype = vtop->type.ref->type;
+                vtop->type = etype;
+                mk_pointer(&vtop->type);
+                gaddrof();
+            }
             gexpr();
             gen_op('+');
             indir();
@@ -6881,7 +7196,8 @@ special_math_val:
                    matter we expect things to be already promoted to int,
                    but not larger.  */
                 t = s->type.t & VT_BTYPE;
-                if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {
+                if (!(s->type.t & VT_VECTOR)
+                    && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {
 #ifdef PROMOTE_RET
                     vtop->r |= BFVAL(VT_MUSTCAST, 1);
 #else
@@ -7354,6 +7670,17 @@ ST_FUNC int expr_const(void)
 #ifndef TCC_TARGET_ARM64
 static void gfunc_return(CType *func_type)
 {
+    if (func_type->t & VT_VECTOR) {
+        /* vector return value: move it into the vector return
+           register (see the backend's gfunc_epilog) */
+#ifdef TCC_VEC_HOOKS
+        gen_vec_ret();
+        vtop--; /* NOT vpop() because on x86 it would flush the fp stack */
+        return;
+#else
+        tcc_error("vector return values are not supported for this target");
+#endif
+    }
     if ((func_type->t & VT_BTYPE) == VT_STRUCT) {
         CType type, ret_type;
         int ret_align, ret_nregs, regsize;
@@ -8301,7 +8628,7 @@ static int decl_designator(init_params *p, CType *type, unsigned long c,
         }
     } else {
     no_designator:
-        if (type->t & VT_ARRAY) {
+        if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {
 	    index = (*cur_field)->c;
             s = type->ref;
             decl_design_flex(p, s, index);
@@ -8617,7 +8944,19 @@ static void decl_initializer(init_params *p, CType *type, unsigned long c, int f
         flags |= DIF_HAVE_ELEM;
     }
 
-    if (type->t & VT_ARRAY) {
+    if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {
+        if ((type->t & VT_VECTOR) && (flags & DIF_HAVE_ELEM)
+            && (is_compatible_unqualified_types(type, &vtop->type)
+                /* a vector value of the same total size also
+                   initializes the whole vector (bitcast, the
+                   gen_cast rule): element signedness alone -
+                   e.g. a comparison result assigned to an
+                   unsigned-element vector - must not force the
+                   brace path */
+                || ((vtop->type.t & VT_VECTOR)
+                    && type_size(type, &align1)
+                       == type_size(&vtop->type, &align1))))
+            goto one_elem;
         no_oblock = 1;
         if (((flags & DIF_FIRST) && tok != TOK_LSTR && tok != TOK_STR) ||
             tok == '{') {
@@ -8721,7 +9060,7 @@ static void decl_initializer(init_params *p, CType *type, unsigned long c, int f
 	    while (tok != '}' || (flags & DIF_HAVE_ELEM)) {
 		len = decl_designator(p, type, c, &f, flags, len);
 		flags &= ~DIF_HAVE_ELEM;
-		if (type->t & VT_ARRAY) {
+		if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {
 		    ++indexsym.c;
 		    /* special test for multi dimensional arrays (may not
 		       be strictly correct if designators are used at the
@@ -9431,6 +9770,8 @@ static int decl(int l)
 #ifdef TCC_TARGET_PE
             pe_check_linkage(&type, &ad);
 #endif
+            if (ad.vector_size)
+                make_vector_type(&type, ad.vector_size);
             if (tok == '{') {
                 if (l != VT_CONST)
                     tcc_error("cannot use local functions");

@@ -1084,8 +1084,16 @@ void gfunc_epilog(void)
         pe_add_unwind_data_saves(start, ind, v,
                                  FUNC_PROLOG_SIZE + REGCACHE_SAVE_SIZE,
                                  saves, n);
-    } else
+    } else {
+        /* No register was cached, but the prolog still reserved the
+           save area: fill it with nops, or execution falls through
+           into unwritten bytes.  (The SysV epilog backpatches the
+           area unconditionally; the PE one must do the same.) */
+        ind = regcache_save_offset;
+        gen_fill_nops(REGCACHE_SAVE_SIZE);
+        ind = cur_text_section->data_offset;
         pe_add_unwind_data(start, ind, v);
+    }
 
     ind = start;
     if (v >= 4096) {

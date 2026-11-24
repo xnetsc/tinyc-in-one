@@ -3588,6 +3588,42 @@ static void tcc_predefs(TCCState *s1, CString *cs, int is_asm)
     putdefs(cs, target_machine_defs);
     putdefs(cs, target_os_defs);
 
+    /* feature macros derived from the target feature word, so
+       headers select builtin calls that the target level selected
+       by -march= (or the architectural default) actually has */
+    {
+        unsigned f = tcc_effective_features(s1);
+#ifdef TCC_TARGET_X86_64
+        if (f & TFEAT_SSE) putdef(cs, "__SSE__");
+        if (f & TFEAT_SSE2) putdef(cs, "__SSE2__");
+        if (f & TFEAT_SSSE3) putdef(cs, "__SSSE3__");
+        if (f & TFEAT_SSE41) putdef(cs, "__SSE4_1__");
+        if (f & TFEAT_SSE42) putdef(cs, "__SSE4_2__");
+        if (f & TFEAT_AVX) putdef(cs, "__AVX__");
+        if (f & TFEAT_AVX2) putdef(cs, "__AVX2__");
+        if (f & TFEAT_FMA) putdef(cs, "__FMA__");
+        if (f & TFEAT_F16C) putdef(cs, "__F16C__");
+        if (f & TFEAT_AVX512F) putdef(cs, "__AVX512F__");
+        if (f & TFEAT_AVX512BW) putdef(cs, "__AVX512BW__");
+        if (f & TFEAT_AVX512DQ) putdef(cs, "__AVX512DQ__");
+        if (f & TFEAT_AVX512VL) putdef(cs, "__AVX512VL__");
+        if (f & TFEAT_AVX512CD) putdef(cs, "__AVX512CD__");
+        if (f & TFEAT_AVX512VBMI) putdef(cs, "__AVX512VBMI__");
+        if (f & TFEAT_AVX512VNNI) putdef(cs, "__AVX512VNNI__");
+#elif defined TCC_TARGET_ARM64
+        /* __ARM_NEON itself comes from target_machine_defs: NEON
+           is not optional on this target, so it cannot disagree
+           with the feature word */
+        if (f & TFEAT_DOTPROD) putdef(cs, "__ARM_FEATURE_DOTPROD 1");
+#elif defined TCC_TARGET_RISCV64
+        if (f & TFEAT_V) {
+            putdef(cs, "__riscv_vector");
+            cstr_printf(cs, "#define __riscv_v_min_vlen %d\n",
+                        s1->target_vlen_min ? s1->target_vlen_min : 128);
+        }
+#endif
+    }
+
 #ifdef TCC_TARGET_ARM
     if (s1->float_abi == ARM_HARD_FLOAT)
       putdef(cs, "__ARM_PCS_VFP");

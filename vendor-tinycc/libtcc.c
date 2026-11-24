@@ -899,6 +899,13 @@ LIBTCCAPI TCCState *tcc_new(void)
 #ifdef TCC_ARM_HARDFLOAT
     s->float_abi = ARM_HARD_FLOAT;
 #endif
+    /* architectural defaults of the target feature word (-march=
+       refines it, see tcc_parse_march) */
+#if defined TCC_TARGET_X86_64
+    s->target_features = TFEAT_SSE | TFEAT_SSE2;
+#elif defined TCC_TARGET_ARM64
+    s->target_features = TFEAT_NEON;
+#endif
 #if defined TCC_TARGET_ARM64 && defined TCC_TARGET_PE
     s->pe_dll_characteristics = 0x8160;
 #endif
@@ -914,6 +921,248 @@ LIBTCCAPI TCCState *tcc_new(void)
     tcc_set_options(s, CONFIG_TCC_SWITCHES);
 #endif
     return s;
+}
+
+/* the target feature word with the command-line feature switches
+   applied: -mno-sse removes the x86 SIMD features (scalar float
+   code then uses the x87, and the feature macros must not claim
+   them either).  The predefined macros and the vector builtins'
+   required-feature checks both read the word through here. */
+ST_FUNC unsigned tcc_effective_features(TCCState *s)
+{
+    unsigned f = s->target_features;
+#ifdef TCC_TARGET_X86_64
+    if (s->nosse)
+        f = 0;
+#endif
+    return f;
+}
+
+static const struct { unsigned bit; const char *name; } tcc_feature_names[] = {
+#if defined TCC_TARGET_X86_64
+    { TFEAT_SSE, "SSE" }, { TFEAT_SSE2, "SSE2" },
+    { TFEAT_SSSE3, "SSSE3" }, { TFEAT_SSE41, "SSE4.1" },
+    { TFEAT_SSE42, "SSE4.2" }, { TFEAT_AVX, "AVX" },
+    { TFEAT_AVX2, "AVX2" }, { TFEAT_FMA, "FMA" },
+    { TFEAT_F16C, "F16C" }, { TFEAT_AVX512F, "AVX512F" },
+    { TFEAT_AVX512BW, "AVX512BW" }, { TFEAT_AVX512DQ, "AVX512DQ" },
+    { TFEAT_AVX512VL, "AVX512VL" }, { TFEAT_AVX512CD, "AVX512CD" },
+    { TFEAT_AVX512VBMI, "AVX512VBMI" }, { TFEAT_AVX512VNNI, "AVX512VNNI" },
+#elif defined TCC_TARGET_ARM64
+    { TFEAT_NEON, "NEON" }, { TFEAT_DOTPROD, "DOTPROD" },
+#elif defined TCC_TARGET_RISCV64
+    { TFEAT_V, "V" },
+#endif
+    { 0, NULL }
+};
+
+ST_FUNC const char *tcc_feature_name(unsigned bit)
+{
+    int i;
+    for (i = 0; tcc_feature_names[i].name; i++)
+        if (tcc_feature_names[i].bit == bit)
+            return tcc_feature_names[i].name;
+    return "?";
+}
+
+/* write the names of the features in f as "SSE, SSE2" into buf */
+ST_FUNC void tcc_describe_features(TCCState *s, char *buf, int bufsize)
+{
+    unsigned f = tcc_effective_features(s);
+    int i, n = 0;
+    if (bufsize > 0)
+        buf[0] = 0;
+    for (i = 0; tcc_feature_names[i].name; i++) {
+        if (f & tcc_feature_names[i].bit) {
+            n += snprintf(buf + n, bufsize > n ? bufsize - n : 0,
+                          "%s%s", n ? ", " : "", tcc_feature_names[i].name);
+            if (n >= bufsize)
+                break;
+        }
+    }
+    if (!n && bufsize > 4)
+        strcpy(buf, "none");
+}
+
+/* Parse the -march= argument into the target feature word.  The
+   spelling is the target architecture's own: x86-64 micro-
+   architecture levels and extension names on x86_64, armv8-a style
+   versions with +-separated extensions on arm64, the ISA string on
+   riscv64.  An unknown component is an error naming the component:
+   a misspelled level must never silently compile at another one. */
+static int tcc_parse_march(TCCState *s, const char *arg)
+{
+    TCCState *s1 = s; /* for the tcc_error_noabort macro */
+    char buf[160];
+    char *p, *tok;
+    unsigned f = 0;
+
+    if (*arg == '=')
+        arg++;
+    if (strlen(arg) >= sizeof(buf))
+        return tcc_error_noabort("-march argument too long: '%s'", arg);
+    strcpy(buf, arg);
+
+#if defined TCC_TARGET_X86_64
+    {
+        static const struct { const char *name; unsigned bits; }
+        levels[] = {
+            { "x86-64",    TFEAT_SSE | TFEAT_SSE2 },
+            { "x86-64-v2", TFEAT_SSE | TFEAT_SSE2 | TFEAT_SSSE3 |
+                           TFEAT_SSE41 | TFEAT_SSE42 },
+            { "x86-64-v3", TFEAT_SSE | TFEAT_SSE2 | TFEAT_SSSE3 |
+                           TFEAT_SSE41 | TFEAT_SSE42 | TFEAT_AVX |
+                           TFEAT_AVX2 | TFEAT_FMA | TFEAT_F16C },
+            { "x86-64-v4", TFEAT_SSE | TFEAT_SSE2 | TFEAT_SSSE3 |
+                           TFEAT_SSE41 | TFEAT_SSE42 | TFEAT_AVX |
+                           TFEAT_AVX2 | TFEAT_FMA | TFEAT_F16C |
+                           TFEAT_AVX512F | TFEAT_AVX512BW |
+                           TFEAT_AVX512DQ | TFEAT_AVX512VL |
+                           TFEAT_AVX512CD },
+            { NULL, 0 }
+        };
+        static const struct { const char *name; unsigned bit; }
+        exts[] = {
+            { "sse", TFEAT_SSE }, { "sse2", TFEAT_SSE2 },
+            { "ssse3", TFEAT_SSSE3 }, { "sse4.1", TFEAT_SSE41 },
+            { "sse4.2", TFEAT_SSE42 }, { "avx", TFEAT_AVX },
+            { "avx2", TFEAT_AVX2 }, { "fma", TFEAT_FMA },
+            { "f16c", TFEAT_F16C }, { "avx512f", TFEAT_AVX512F },
+            { "avx512bw", TFEAT_AVX512BW }, { "avx512dq", TFEAT_AVX512DQ },
+            { "avx512vl", TFEAT_AVX512VL }, { "avx512cd", TFEAT_AVX512CD },
+            { "avx512vbmi", TFEAT_AVX512VBMI },
+            { "avx512vnni", TFEAT_AVX512VNNI },
+            { NULL, 0 }
+        };
+        int i, found;
+        for (p = buf; ; p = NULL) {
+            tok = strtok(p, "+,");
+            if (!tok)
+                break;
+            found = 0;
+            for (i = 0; levels[i].name; i++)
+                if (!strcmp(tok, levels[i].name)) {
+                    f = levels[i].bits;
+                    found = 1;
+                    break;
+                }
+            if (!found)
+                for (i = 0; exts[i].name; i++)
+                    if (!strcmp(tok, exts[i].name)) {
+                        f |= exts[i].bit;
+                        found = 1;
+                        break;
+                    }
+            if (!found)
+                return tcc_error_noabort(
+                    "unknown -march component '%s' for target x86-64", tok);
+        }
+        /* extension implications, so the word always describes a
+           level a real processor could have */
+        if (f & (TFEAT_AVX512VBMI | TFEAT_AVX512VNNI))
+            f |= TFEAT_AVX512F;
+        if (f & (TFEAT_AVX512F | TFEAT_AVX512BW | TFEAT_AVX512DQ |
+                 TFEAT_AVX512VL | TFEAT_AVX512CD))
+            f |= TFEAT_AVX2;
+        if (f & (TFEAT_AVX2 | TFEAT_FMA | TFEAT_F16C))
+            f |= TFEAT_AVX;
+        if (f & TFEAT_AVX)
+            f |= TFEAT_SSE42;
+        if (f & TFEAT_SSE42)
+            f |= TFEAT_SSE41;
+        if (f & TFEAT_SSE41)
+            f |= TFEAT_SSSE3;
+        if (f & TFEAT_SSSE3)
+            f |= TFEAT_SSE2;
+        if (f & TFEAT_SSE2)
+            f |= TFEAT_SSE;
+    }
+    s->target_features = f;
+    return 0;
+#elif defined TCC_TARGET_ARM64
+    {
+        int i, found;
+        static const char *const versions[] = {
+            "armv8-a", "armv8.1-a", "armv8.2-a", "armv8.3-a",
+            "armv8.4-a", "armv8.5-a", NULL
+        };
+        for (p = buf; ; p = NULL) {
+            tok = strtok(p, "+");
+            if (!tok)
+                break;
+            found = 0;
+            for (i = 0; versions[i]; i++)
+                if (!strcmp(tok, versions[i])) {
+                    f = TFEAT_NEON;
+                    /* the dot product instructions are mandatory
+                       from armv8.4-a on */
+                    if (i >= 4)
+                        f |= TFEAT_DOTPROD;
+                    found = 1;
+                    break;
+                }
+            if (!found && !strcmp(tok, "dotprod")) {
+                f |= TFEAT_DOTPROD;
+                found = 1;
+            }
+            if (!found && (!strcmp(tok, "neon") || !strcmp(tok, "simd"))) {
+                f |= TFEAT_NEON;
+                found = 1;
+            }
+            if (!found)
+                return tcc_error_noabort(
+                    "unknown -march component '%s' for target arm64", tok);
+        }
+        if (f & TFEAT_DOTPROD)
+            f |= TFEAT_NEON; /* NEON is not optional on arm64 */
+    }
+    s->target_features = f;
+    return 0;
+#elif defined TCC_TARGET_RISCV64
+    {
+        char *q;
+        int vlen = 0;
+        (void)p; (void)tok;
+        if (strncmp(buf, "rv64", 4) != 0)
+            return tcc_error_noabort(
+                "unknown -march string '%s' for target riscv64", arg);
+        q = buf + 4;
+        /* single-letter extensions up to the first '_' */
+        while (*q && *q != '_') {
+            char c = *q++;
+            if (c == 'v')
+                f |= TFEAT_V;
+            else if (c == 'g')
+                ; /* imafd_zicsr_zifencei: no feature bit */
+            else if (!strchr("imafdcbhljnpqstx", c))
+                return tcc_error_noabort(
+                    "unknown -march component '%c' for target riscv64", c);
+        }
+        /* multi-letter extensions, '_' separated */
+        while (*q == '_') {
+            char *start = ++q;
+            while (*q && *q != '_')
+                q++;
+            if (q - start >= 4 && !strncmp(start, "zvl", 3) &&
+                start[q - start - 1] == 'b') {
+                vlen = atoi(start + 3);
+                if (vlen < 32 || (vlen & (vlen - 1)) != 0)
+                    return tcc_error_noabort(
+                        "bad zvl value in -march string '%s'", arg);
+            } else if (*start != 'z' && *start != 'x' && *start != 's')
+                return tcc_error_noabort(
+                    "unknown -march component '%.*s' for target riscv64",
+                    (int)(q - start), start);
+        }
+        if (f & TFEAT_V)
+            s->target_vlen_min = vlen ? vlen : 128;
+    }
+    s->target_features = f;
+    return 0;
+#else
+    (void)s; (void)buf; (void)p; (void)tok; (void)f;
+    return tcc_error_noabort("-march is not supported for this target");
+#endif
 }
 
 LIBTCCAPI void tcc_delete(TCCState *s1)
@@ -1574,6 +1823,7 @@ enum {
     TCC_OPTION_W,
     TCC_OPTION_O,
     TCC_OPTION_mfloat_abi,
+    TCC_OPTION_march,
     TCC_OPTION_m,
     TCC_OPTION_f,
     TCC_OPTION_isystem,
@@ -1662,6 +1912,7 @@ static const TCCOption tcc_options[] = {
 #ifdef TCC_TARGET_ARM
     { "mfloat-abi", TCC_OPTION_mfloat_abi, TCC_OPTION_HAS_ARG },
 #endif
+    { "march", TCC_OPTION_march, TCC_OPTION_HAS_ARG },
     { "m", TCC_OPTION_m, TCC_OPTION_HAS_ARG | TCC_OPTION_NOSEP },
     { "f", TCC_OPTION_f, TCC_OPTION_HAS_ARG | TCC_OPTION_NOSEP },
     { "isystem", TCC_OPTION_isystem, TCC_OPTION_HAS_ARG },
@@ -2059,6 +2310,10 @@ PUB_FUNC int tcc_parse_args(TCCState *s, int *pargc, char ***pargv)
                 return tcc_error_noabort("unsupported float abi '%s'", optarg);
             continue;
 #endif
+        case TCC_OPTION_march:
+            if (tcc_parse_march(s, optarg) < 0)
+                return -1;
+            break;
         case TCC_OPTION_m:
             if (set_flag(s, options_m, optarg) < 0) {
                 if (x = atoi(optarg), x != 32 && x != 64)
