@@ -132,9 +132,14 @@ PYEOF
   fi
 elif [ "$HOST_TRIPLE" = "x86_64-w64-mingw32" ]; then
   PE_EXPORTS=$(objdump -p "$STAGED_BIN" | sed -n '/\[Ordinal\/Name Pointer\] Table/,$p')
-  grep -qE '\[[ 0-9]+\] tcc_new$' <<<"$PE_EXPORTS" \
+  # objdump prints this table in two shapes depending on the binutils
+  # build: "[  13] tcc_new" or "[  13] +base[  14]  000d tcc_new"; the
+  # Windows build also terminates lines with CRLF. Anchor on the
+  # bracketed ordinal at the start and the export name at the end of
+  # the line, tolerating trailing whitespace/CR; both shapes pass.
+  grep -qE '\[[ 0-9]+\].* tcc_new[[:space:]]*$' <<<"$PE_EXPORTS" \
     || { echo "ERROR: tcc_new not exported by $STAGED_BIN" >&2; exit 1; }
-  if grep -qE '\[[ 0-9]+\] (tinyc_main|main)$' <<<"$PE_EXPORTS"; then
+  if grep -qE '\[[ 0-9]+\].* (tinyc_main|main)[[:space:]]*$' <<<"$PE_EXPORTS"; then
     echo "native: main entry exported"
   else
     echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
