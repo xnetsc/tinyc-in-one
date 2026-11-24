@@ -13,7 +13,7 @@ TARGET=x86_64-linux-gnu ./build.sh   # emits tcc-x86_64-linux-gnu.mjs + tcc-x86_
 TARGET=aarch64-linux-gnu ./build.sh  # emits tcc-aarch64-linux-gnu.mjs + tcc-aarch64-linux-gnu.wasm
 ```
 
-Each module exports the libtcc `tcc_*` API plus `main`. The `wasm32-wasi` module additionally needs a wasm code generation backend in TCC, which does not exist yet; `build.sh` stops with that message for `TARGET=wasm32-wasi`. The two Darwin branches of `build.sh` follow upstream TCC's Makefile (`-DTCC_TARGET_MACHO` plus `tccmacho.c`); they have not been built or verified in this environment.
+Each module exports the libtcc `tcc_*` API plus a main entry (`tinyc_main` where the kernel provides it, otherwise `main`; the glue prefers `tinyc_main` and falls back to `main`). The eight general targets compile the upstream TCC tree. The `wasm32-wasi` module is built from the project's own WebAssembly code generation backend (the `wasm-backend/` tree at the repository root): that branch of `build.sh` assembles the upstream tree with the backend's `wasm-gen.c` / `wasm-link.c` sources and its patches, then compiles it with emcc like every other target.
 
 The glue layer (`index.mjs`, `worker.mjs`) is complete without the WASM build: `loadTinyc` also accepts an injected module (`module`, `createModule`, `wasmExports`, or an async `loadModule(target, files)` loader), which is how the test suite runs it.
 
@@ -46,7 +46,7 @@ The target's module (`tcc-<target>.wasm` / `tcc-<target>.mjs`) is loaded lazily 
 Target-specific manifest facts:
 
 - The Android manifests describe the bionic sysroot layout of the native Android builds: `libc: "bionic"`, `androidApi: 30`, and `dynamicLinker: "/system/bin/linker64"` (the interpreter of 64-bit Android ELF products).
-- The Darwin manifests contain TCC's own headers only. macOS system SDK headers are license-restricted and are not distributed with the package; the manifest marks this as `systemHeaders: "user-sdk"`, and system headers are supplied by pointing the dynamic-add mechanism at a local SDK path. Darwin targets compile to files only; a Mach-O product needs a code signature to run on Apple Silicon — at least an ad-hoc signature — wherever it was compiled.
+- The Darwin manifests contain TCC's own headers only. macOS system SDK headers are license-restricted and are not distributed with the package; the manifest marks this as `systemHeaders: "user-sdk"`, and system headers are supplied by adding them to the virtual filesystem and registering their directory (see *Virtual filesystem and adding files*). Darwin targets compile to files only; a Mach-O product needs a code signature to run on Apple Silicon — at least an ad-hoc signature — wherever it was compiled.
 
 ## Output formats
 
@@ -72,7 +72,7 @@ For every other target, the glue layer rejects run requests up front with `Tinyc
 
 ### How a wasm32 run works
 
-A WebAssembly module cannot instantiate another WebAssembly module from inside itself — instantiation is a host capability. So running never goes through the compiler module (native TCC provides no `tcc_run` for the wasm target). The glue layer takes the compiled product's bytes and instantiates them itself with the WebAssembly API:
+A WebAssembly module cannot instantiate another WebAssembly module from inside itself — instantiation is a host capability. So running never goes through the compiler module: the glue layer takes the compiled product's bytes and instantiates them itself with the WebAssembly API:
 
 - `state.run(args, options)` writes the product to a file in the virtual filesystem (`options.outputPath`, default `/a.out`), reads the bytes back and runs them; the WASI argv is `[outputPath, ...args]`.
 - `tinyc.callMain(['-run', src, ...progArgs])` first compiles `src` to `/a.out` through the exported main (the native main never sees `-run`), then runs the product with WASI argv `[src, ...progArgs]`.
@@ -106,9 +106,10 @@ Details that matter:
 
 ### libtcc1 helpers
 
-TCC's runtime support library (`vendor-tinycc/lib/`) was checked symbol by symbol against what a wasm32 target can emit. No JS shims are provided for it, for these reasons:
+TCC's runtime support library (`vendor-tinycc/lib/`) was checked symbol by symbol against what a wasm32 target can emit. Almost none of it needs JS shims, for the reasons below; the one exception is a family of `libtcc1.c` helpers that does surface as imports.
 
-- `libtcc1.c` — `__divdi3`, `__moddi3`, `__udivdi3`, `__umoddi3`, `__ashrdi3`, `__lshrdi3`, `__ashldi3`, and the float conversions `__floatundisf/df/xf`, `__fixunssfdi`, `__fixsfdi`, `__fixunsdfdi`, `__fixdfdi`, `__fixunsxfdi`, `__fixxfdi`: 64-bit integer arithmetic and float↔integer conversion helpers for 32-bit targets. wasm32 has native i64 arithmetic and native float↔i64 conversion instructions (and long double is f64 on this target), so the code generator emits instructions, not calls. This version's `lib/` tree contains no `__tcc_cvt_*` symbols; the conversion helpers are the `__fix*`/`__float*` family above.
+- `libtcc1.c` conversions — the float conversions `__floatundisf/df/xf`, `__fixunssfdi`, `__fixsfdi`, `__fixunsdfdi`, `__fixdfdi`, `__fixunsxfdi`, `__fixxfdi`: wasm32 has native float↔i64 conversion instructions (and long double is f64 on this target), so the code generator emits instructions — saturating `trunc_sat` for float→integer — not calls. This version's `lib/` tree contains no `__tcc_cvt_*` symbols; the conversion helpers are the `__fix*`/`__float*` family above.
+- `libtcc1.c` division and shifts — `__divdi3`, `__moddi3`, `__udivdi3`, `__umoddi3` (long long division and modulo) and `__ashldi3`, `__ashrdi3`, `__lshrdi3` (long long shifts by a variable count): these the code generator does emit as calls, and they appear in the compiled module as `env` imports. The target ships no libtcc1 and the package provides no default shim for them, so a program using long long division, modulo, or a variable-count long long shift fails to instantiate with `TinycMissingImportError` naming the helper; registering a JS implementation under that name as a custom shim (below) is the fix. Constant-count long long shifts are inlined by the code generator and need no helper.
 - `builtin.c` — the `__tcc_builtin_*` family (`ffs`, `clz`, `ctz`, `popcount`, `parity`, …): wasm has native `clz`/`ctz`/`popcnt` instructions; code generation handles them.
 - `va_list.c` — `__va_arg`: on the wasm target a va_list is a pointer into a memory argument area and `va_arg` is pointer advancement done by the code generator.
 - `alloca.S` — `alloca`/`__alloca`: wasm alloca adjusts the stack-pointer global in generated code.

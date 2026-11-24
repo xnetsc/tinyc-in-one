@@ -1,8 +1,9 @@
 # tinyc for Python
 
 TinyC (TCC) as an embedded compiler in Python. The package bundles one
-dual-form native file — the same file is the `tcc` command and the
-libtcc library — together with the headers and libraries it needs.
+dual-form native file per target — the same file is the `tcc` command
+and the libtcc library — together with the headers and libraries it
+needs. The binding is `ctypes` only, with no extra native components.
 
 ## Install
 
@@ -10,9 +11,31 @@ libtcc library — together with the headers and libraries it needs.
 pip install tinyc
 ```
 
-The native distribution is inside the package (`tinyc/native/`).
-`TINYC_DIST` (distribution directory) and `TINYC_NATIVE` (the dual
-file itself) override the bundled location.
+Wheels are published per host platform tag (`manylinux` x86_64 /
+aarch64, `win_amd64`, `macosx` arm64 / x86_64); each wheel carries
+that host's target variants. Inside the wheel, the `tinyc` package
+uses the unified layout shared by all the native packages:
+
+```
+tinyc/
+├─ packaging-manifest.json     the (host, target) combinations inside
+├─ natives/<host-triple>/toolchain/<target-triple>/tinyc[.exe]
+└─ sysroot/<target-triple>/    one sysroot per target, shared by all hosts
+```
+
+The host triple is detected from the platform (`$TINYC_HOST_TRIPLE`
+overrides detection, `$TINYC_TRIPLE` is an alias); the target
+defaults to the host (`$TINYC_TARGET_TRIPLE` selects a cross
+target). `$TINYC_DIST` overrides the package root used for the
+lookup, and `$TINYC_NATIVE` points at the dual-form file itself,
+bypassing the manifest lookup. A combination the wheel does not
+contain fails with an error naming the host, the target, and the
+combinations available. Hosts and targets are 64-bit only.
+
+The host/target matrix and the run rule (a compiled program runs
+in-process only when the target is the host's own platform; cross
+combinations compile to files) are in the
+[repository README](../../README.md).
 
 ## Command-line style
 

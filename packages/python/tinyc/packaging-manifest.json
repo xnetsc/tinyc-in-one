@@ -10,6 +10,8 @@
       "sysroot": "sysroot/aarch64-linux-android",
       "isa": "ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE",
       "status": "included",
+      "libPath": "sysroot/aarch64-linux-android/lib/tcc",
+      "libtcc1": "sysroot/aarch64-linux-android/lib/tcc/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "ELF executable",
@@ -36,6 +38,8 @@
       "sysroot": "sysroot/aarch64-linux-gnu",
       "isa": "ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE",
       "status": "included",
+      "libPath": "sysroot/aarch64-linux-gnu/lib/tcc",
+      "libtcc1": "sysroot/aarch64-linux-gnu/lib/tcc/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "ELF executable",
@@ -62,6 +66,8 @@
       "sysroot": "sysroot/riscv64-linux-gnu",
       "isa": "RV64GC baseline (I/M/A/F/D/C); no Vector extension (RVV) support",
       "status": "included",
+      "libPath": "sysroot/riscv64-linux-gnu/lib/tcc",
+      "libtcc1": "sysroot/riscv64-linux-gnu/lib/tcc/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "ELF executable",
@@ -88,6 +94,8 @@
       "sysroot": "sysroot/x86_64-linux-android",
       "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
       "status": "included",
+      "libPath": "sysroot/x86_64-linux-android/lib/tcc",
+      "libtcc1": "sysroot/x86_64-linux-android/lib/tcc/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "ELF executable",
@@ -114,6 +122,8 @@
       "sysroot": "sysroot/x86_64-linux-gnu",
       "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
       "status": "included",
+      "libPath": "sysroot/x86_64-linux-gnu/lib/tcc",
+      "libtcc1": "sysroot/x86_64-linux-gnu/lib/tcc/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "ELF executable",
@@ -140,6 +150,8 @@
       "sysroot": "sysroot/x86_64-w64-mingw32",
       "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
       "status": "included",
+      "libPath": "sysroot/x86_64-w64-mingw32/lib/tcc/win32",
+      "libtcc1": "sysroot/x86_64-w64-mingw32/lib/tcc/win32/lib/libtcc1.a",
       "outputs": {
         "exe": {
           "format": "PE executable",
@@ -164,11 +176,6 @@
     {
       "host": "aarch64-linux-gnu",
       "target": "aarch64-linux-gnu",
-      "status": "pending"
-    },
-    {
-      "host": "riscv64-linux-gnu",
-      "target": "riscv64-linux-gnu",
       "status": "pending"
     },
     {

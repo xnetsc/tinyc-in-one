@@ -14,9 +14,10 @@ Gradle（app 模块）：
 ```gradle
 dependencies {
     implementation files('libs/tinyc-android-release.aar')
-    // 或发布到 Maven 后：implementation 'com.tinyc:tinyc-android:<version>'
 }
 ```
+
+AAR 只带 arm64-v8a 与 x86_64 两个 ABI；应用的 minSdk 需不低于 24。
 
 初始化（Application 或首个使用点调一次）：
 
@@ -87,22 +88,31 @@ src/main/
 │  └─ TinycException.java
 ├─ jni/
 │  ├─ tinyc_jni.c         JNI 胶水：转发 tcc_* / tinyc_main，IO 回调跳板
-│  ├─ tinyc_kernel.h      内核新增声明（TCCIO、tinyc_main），与规格第 3、6 节一致
+│  ├─ tinyc_kernel_adapter.c  内核适配层，与 JNI 胶水一同编入 libtinyc.so
+│  ├─ tinyc_kernel.h      内核新增声明（TCCIO、tinyc_main）
 │  ├─ CMakeLists.txt      内核构建把 JNI 胶水编入 libtinyc.so 时用
 │  └─ Android.mk          同上的 ndk-build 版
-├─ jniLibs/<abi>/         libtinyc.so 的位置（arm64-v8a、x86_64）
+├─ jniLibs/<abi>/         libtinyc.so（arm64-v8a、x86_64），由 native-libs 构建放入
 └─ assets/
-   ├─ toolchain/<triple>/   TCC 自带头与 libtcc1.a
-   └─ sysroot/<triple>/     bionic 系统头与库
+   ├─ toolchain/<triple>/   TCC 自带头、libtcc1.a 与 runmain.o
+   └─ sysroot/<triple>/     bionic 系统头与库的目录（include/、lib/）
 ```
 
 ## 构建
 
-标准路径是 Gradle（JDK 17、Android SDK platform 35、Gradle 8.7）：
+`jniLibs` 里的 `libtinyc.so` 与 `assets/toolchain` 的实际内容是构建
+产物：源码树里只有目录布局，由 `native-libs` 模式用 NDK 生成
+（内核 unity 构建 + JNI 胶水，每个 ABI 一个 .so；同时把 TCC 自带头、
+libtcc1.a 与 runmain.o staged 进 toolchain assets；toolchain assets
+由占位变为实际内容时，它会递增 `TinycAssets.ASSETS_VERSION`，
+设备端据此弃用旧解压目录）。组装 AAR 前先跑一次：
 
 ```sh
-./build.sh            # = gradle assembleRelease，产物在 build/outputs/aar/
+./build.sh native-libs   # 需要 NDK（NDK_HOME / ANDROID_NDK_HOME）
+./build.sh               # = gradle assembleRelease，产物在 build/outputs/aar/
 ```
+
+Gradle 构建配置：JDK 17、Android SDK platform 35、AGP 8.6.1。
 
 辅助校验（不需要设备）：
 
@@ -116,25 +126,5 @@ src/main/
 ```
 
 设备侧测试在 `src/androidTest/`（`connectedAndroidTest`），需要真机
-或模拟器，且 jniLibs 里要有真实的 `libtinyc.so`。
-
-## 当前状态
-
-- `jniLibs/` 下是占位说明，没有真实 `libtinyc.so`：内核由双形态
-  内核构建产出后拷入（见各 ABI 目录的 PLACEHOLDER.md）。占位状态下
-  Java 编译、AAR 组装、JVM 测试都能过，运行时 `loadLibrary` 会失败。
-- `assets/` 下只有布局占位（`.gitkeep`），toolchain 与 sysroot 的
-  实际内容由构建流水线按 triple 填入；填入时递增
-  `TinycAssets.ASSETS_VERSION`。
-- 本地已验证：全部 Java 源码对 android.jar（API 35）编译通过；
-  JVM 纯逻辑测试 21 项全过；`javac -h` 生成的 21 个 native 方法在
-  `tinyc_jni.c` 中全部有实现；JNI 胶水对 aarch64 与 x86_64 两个
-  Android 目标各做了一次 NDK clang 编译检查（对上游 libtcc.h 与
-  `tinyc_kernel.h` 声明），无警告；手工组装的 .aar 结构完整
-  （二进制 AndroidManifest.xml、classes.jar、R.txt、
-  aar-metadata.properties、assets 与 jni 目录齐全）。
-- Gradle 标准构建在本仓库的 CI 沙箱里跑不起来：Gradle daemon 的
-  注册表自检在该文件系统上误判 daemon 已消失，daemon 起来即自停
-  （`--no-daemon` 与更换 GRADLE_USER_HOME 均复现）。这是该沙箱的
-  环境问题，`build.gradle` 本身按标准 AGP 8.6.1 配置，在正常开发
-  机上直接 `./build.sh` 即可。
+或模拟器；`consumer-test/` 是一个独立的消费者应用模块，它的设备测试
+以最终用户的方式集成 AAR 并调用公开 API。

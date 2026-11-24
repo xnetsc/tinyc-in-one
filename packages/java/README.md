@@ -7,38 +7,35 @@ TinyC 编译器的 Java 绑定：用 Panama FFM 直接调 libtcc 的 C ABI，不
 
 - JDK 22 或更新（Panama FFM 正式版；开发与测试在 JDK 25 上进行）。
 - 运行时加 `--enable-native-access=ALL-UNNAMED`（JDK 24+ 对原生访问的要求）。
-- 当前只带 linux-x86_64 内核。
 
 ## Jar 布局
+
+Jar 内是与 npm、Python 包相同的统一布局，按构建宿主打包：一个宿主的
+双形态文件 × 构建时 dist 里的全部目标（当前构建为 6 个目标），sysroot
+按目标一份、为该宿主的全部组合共用：
 
 ```
 tinyc.jar
 ├─ tinyc/*.class                 Panama 绑定、双入口封装、IO 跳板
-├─ tinyc-native.properties       版本与原生文件资源路径
-├─ native/linux-x86_64/tinyc     双形态内核文件（可执行 + 可 dlopen）
-└─ tcc-runtime/
-   ├─ libtcc1.a                  TCC 运行时库
-   └─ include/                   TCC 自带头文件
+├─ tinyc-native.properties       版本号
+├─ packaging-manifest.json       Jar 内的 (host, target) 组合清单
+├─ natives/<host>/toolchain/<target>/tinyc[.exe]
+└─ sysroot/<target>/             每目标一份：include/ 与 lib/tcc/
 ```
 
-首次加载时按版本把原生文件与 `tcc-runtime/` 解压到
-`~/.cache/tinyc-java/<version>/`，校验标记完整后复用；
-解压目录同时作为 TCC 运行时目录，新会话自动以它调用 `tcc_set_lib_path`。
+首次加载时按探测到的宿主/目标 triple 在清单里查组合，把该组合的
+二进制与目标 sysroot 解压到 `~/.cache/tinyc-java/<version>/`，
+组合标记完整后复用；运行时目录取清单的 `libPath` 字段，新会话自动
+以它调用 `tcc_set_lib_path`。宿主与目标可用环境变量
+`TINYC_HOST_TRIPLE` / `TINYC_TARGET_TRIPLE` 覆盖（系统属性
+`tinyc.host.triple` / `tinyc.target.triple` 亦可）。宿主与目标均为
+64 位，32 位宿主直接报不支持。
 
-## 原生文件来源与替换关系
+## 原生文件来源
 
-构建脚本 `build.sh` 的选择顺序：
-
-1. `../../build/bin/tinyc` 存在时，直接用主线双形态文件。
-2. 否则用 vendor 产物构建占位双形态文件：`vendor-tinycc/tcc.o`（薄壳 main）
-   与 `vendor-tinycc/libtcc.a` 以 `-pie -Wl,--export-dynamic` 链接，
-   再由 `scripts/clear-pie-flag.py` 清掉 `DT_FLAGS_1` 中的 `DF_1_PIE` 位
-   （带该位的 PIE 会被 glibc 的 dlopen 拒绝）。占位文件导出同一套 `tcc_*`
-   符号与 `main`；它没有 `tinyc_main` 别名，其 main 是上游 `tcc.c` 原样，
-   主线双形态内核的 `exit()` 审计不作用于占位文件。
-   运行时数据（`libtcc1.a` 与 `include/`）当前同样取自 `vendor-tinycc`。
-
-主线文件就位后重新运行 `build.sh` 即完成替换，Java 侧代码不变。
+`build.sh` 用仓库的 `packaging/stage_layout.py`，把主线构建
+`../../build/dist` 里能跑在构建宿主上的目标全部 staged 进 Jar。
+host == target 的原生组合不在 dist 里时，构建直接报错退出。
 
 ## 用法
 
@@ -134,8 +131,11 @@ null 回落 System 流）、`TccIO.capturing()`（内存攒积，out/err 分开�
 
 ```sh
 bash build.sh        # 产出 dist/tinyc.jar，并编好测试类
-bash run-tests.sh    # 两遍：系统属性直指本地文件 / Jar 解压分发模式
+bash run-tests.sh    # 三遍：A 系统属性直指本地文件 / B Jar 解压分发模式 / C 宿主模拟
 ```
 
-`build.sh` 的 JDK 定位顺序：`JAVA_HOME`、`~/workspace/envs/jdk-25`、
-系统 JVM、PATH。
+宿主模拟（C）由本包清单驱动：模拟的组合在包内则解析并跑全套，不在则
+断言错误指名该宿主并列出包内全部组合；32 位宿主单独断言拒绝。
+
+`build.sh` 与 `run-tests.sh` 用同一套规则定位 JDK：按候选逐个核验
+主版本号，取第一个 ≥ 22 的，保证编译与运行出自同一个 JDK。
