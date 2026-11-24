@@ -443,7 +443,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cd $env:GITHUB_WORKSPACE
           python -m venv C:\tmp\venv
-          C:\tmp\venv\Scripts\pip install packages/python/dist-wheels/*win_amd64*.whl
+          $wheel = (Get-ChildItem packages/python/dist-wheels/*win_amd64*.whl).FullName
+          C:\tmp\venv\Scripts\pip install $wheel
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force C:\tmp\pyctest | Out-Null
           Copy-Item packages/python/tests/test_tinyc.py C:\tmp\pyctest\
