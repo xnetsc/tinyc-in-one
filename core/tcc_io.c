@@ -76,8 +76,17 @@ void tinyc_io_out_fmt(const char *fmt, ...)
     free(big);
 }
 
+#ifdef _WIN32
+/* Defined with the Windows tinyc_io_open_out_stream below: delivers
+ * any captured -E output that is still sitting in its temp file. */
+static void tinyc_io_win_drain_out_streams(void);
+#endif
+
 void tinyc_io_flush_all(void)
 {
+#ifdef _WIN32
+    tinyc_io_win_drain_out_streams();
+#endif
     TCCIO *io = eff_io();
     if (io->flush) io->flush(io->ctx);
     else { fflush(stdout); fflush(stderr); }
@@ -407,6 +416,111 @@ FILE *tinyc_io_open_out_stream(void)
 {
     if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
     return funopen(NULL, NULL, funopen_write, NULL, NULL);
+}
+#elif defined(_WIN32)
+/* MSVCRT/MinGW has neither fopencookie nor funopen, and a plain FILE*
+ * offers no write or close hook, so this branch cannot forward on
+ * write the way the branches above do. The returned FILE* instead
+ * writes to a temporary file: the preprocessor's writes reach the
+ * file as its stdio buffer flushes, and in full at the caller's
+ * fclose (the only close the caller performs, in tinyc_main after
+ * tcc_delete). tinyc_io_flush_all drains the file to the current
+ * IO's out channel, and tinyc_main_io calls tinyc_io_flush_all after
+ * tinyc_main returns - after that fclose - so by the time a -E call
+ * returns, the captured output has been delivered in full, the same
+ * observable state the synchronous branches leave behind.
+ * The writer handle shares read access, so a drain while the stream
+ * is still open (tinyc_io_flush_all is also called from the error
+ * path mid-compile) delivers the bytes flushed so far, in order, and
+ * keeps the entry. A drain finds the stream finished when an
+ * exclusive open succeeds, which the writer's share mode refuses
+ * while its FILE* is still open; that drain delivers the rest,
+ * deletes the file and drops the entry. Delivery is plain file IO
+ * in the caller's thread - no reader thread, no pipe - so a drain
+ * never waits on the writer at any output size. */
+#include <fcntl.h>
+#include <io.h>
+#include <stdint.h>
+#include <windows.h>
+
+typedef struct WinOutStream {
+    struct WinOutStream *next;
+    char path[MAX_PATH];
+    long long delivered; /* bytes already passed to tinyc_io_write_out */
+} WinOutStream;
+
+static WinOutStream *g_win_out_streams;
+
+FILE *tinyc_io_open_out_stream(void)
+{
+    if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
+
+    char dir[MAX_PATH], path[MAX_PATH];
+    DWORD n = GetTempPathA(MAX_PATH, dir);
+    if (n == 0 || n > MAX_PATH) return NULL;
+    if (GetTempFileNameA(dir, "tio", 0, path) == 0) return NULL;
+
+    HANDLE hw = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hw == INVALID_HANDLE_VALUE) { DeleteFileA(path); return NULL; }
+    int fd = _open_osfhandle((intptr_t)hw, _O_BINARY);
+    if (fd < 0) { CloseHandle(hw); DeleteFileA(path); return NULL; }
+    FILE *fp = _fdopen(fd, "wb");
+    if (!fp) { _close(fd); DeleteFileA(path); return NULL; }
+
+    WinOutStream *e = malloc(sizeof *e);
+    if (!e) { fclose(fp); DeleteFileA(path); return NULL; }
+    strcpy(e->path, path);
+    e->delivered = 0;
+    e->next = g_win_out_streams;
+    g_win_out_streams = e;
+    return fp;
+}
+
+static void tinyc_io_win_drain_out_streams(void)
+{
+    WinOutStream **link = &g_win_out_streams;
+    while (*link) {
+        WinOutStream *e = *link;
+        int closed = 0;
+        HANDLE probe = CreateFileA(e->path, GENERIC_READ, 0, NULL,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                   NULL);
+        if (probe != INVALID_HANDLE_VALUE) {
+            closed = 1;
+            CloseHandle(probe);
+        }
+        HANDLE hr = CreateFileA(e->path, GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                NULL);
+        if (hr != INVALID_HANDLE_VALUE) {
+            LARGE_INTEGER pos;
+            pos.QuadPart = e->delivered;
+            if (SetFilePointerEx(hr, pos, NULL, FILE_BEGIN)) {
+                char buf[8192];
+                for (;;) {
+                    DWORD got = 0;
+                    if (!ReadFile(hr, buf, sizeof buf, &got, NULL) || got == 0)
+                        break;
+                    int w = tinyc_io_write_out(buf, got);
+                    if (w < 0)
+                        break;
+                    e->delivered += w;
+                    if (w < (int)got || got < sizeof buf)
+                        break;
+                }
+            }
+            CloseHandle(hr);
+        }
+        if (closed) {
+            DeleteFileA(e->path);
+            *link = e->next;
+            free(e);
+        } else {
+            link = &e->next;
+        }
+    }
 }
 #else
 FILE *tinyc_io_open_out_stream(void) { return NULL; }
