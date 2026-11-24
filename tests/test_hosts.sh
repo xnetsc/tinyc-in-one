@@ -171,13 +171,16 @@ if [ -f "$MDIST/bin/tinyc.exe" ]; then
         "$OBJDUMP" -p "$MDIST/bin/tinyc.exe" >> "$LOG" 2>&1
         # the export name table follows the address table in objdump output
         NAMES=$("$OBJDUMP" -p "$MDIST/bin/tinyc.exe" 2>/dev/null \
-            | awk '/\[Ordinal\/Name Pointer\] Table/{f=1} f' | grep -oE '\b(main|tinyc_main|tinyc_init|tcc_new|tcc_compile_string|tcc_run)\b' | sort -u)
+            | awk '/\[Ordinal\/Name Pointer\] Table/{f=1} f' | grep -oE '\b(main|tinyc_main_io|tinyc_main|tinyc_init|tcc_new|tcc_compile_string|tcc_run|tcc_io_stdio|tcc_io_null|tcc_io_buffer_merged|tcc_io_buffer|tcc_io_file|tcc_io_fd|tcc_io_callback|tcc_io_free|tcc_io_buffer_data|tcc_io_buffer_clear)\b' | sort -u)
         MISSING=""
-        for sym in main tinyc_main tinyc_init tcc_new tcc_compile_string tcc_run; do
+        for sym in main tinyc_main tinyc_main_io tinyc_init tcc_new tcc_compile_string tcc_run \
+                   tcc_io_stdio tcc_io_null tcc_io_buffer tcc_io_buffer_merged \
+                   tcc_io_file tcc_io_fd tcc_io_callback tcc_io_free \
+                   tcc_io_buffer_data tcc_io_buffer_clear; do
             echo "$NAMES" | grep -qx "$sym" || MISSING="$MISSING $sym"
         done
         if [ -z "$MISSING" ]; then
-            note "PASS: $MT export table lists main, tinyc_main, tinyc_init and the tcc_* API"
+            note "PASS: $MT export table lists the entry points, the tcc_* API and the tcc_io_* surface"
         else
             fail "$MT: export table missing:$MISSING"
         fi
