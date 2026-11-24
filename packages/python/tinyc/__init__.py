@@ -133,7 +133,14 @@ def resolve_native():
                 "root": root,
                 "binary_path": os.path.join(root, c["binary"]),
                 "sysroot_dir": os.path.join(root, c["sysroot"]),
-                "lib_path": os.path.join(root, c["sysroot"], "lib", "tcc"),
+                # The runtime directory ({B} base for tcc_set_lib_path)
+                # comes from the manifest, staged from the target's
+                # dist manifest: lib/tcc on ELF/Mach-O targets, one
+                # level up (lib/tcc/win32) on PE targets, whose search
+                # paths are {B}/lib and {B}/include.
+                "lib_path": (os.path.join(root, c["libPath"])
+                             if c.get("libPath") else
+                             os.path.join(root, c["sysroot"], "lib", "tcc")),
                 # Output formats come from the manifest (copied
                 # verbatim from the target's dist manifest); never
                 # hardcoded here.
@@ -161,8 +168,10 @@ def native_path():
 
 
 def lib_path():
-    """TCC runtime directory (libtcc1.a + include/) of the resolved
-    target sysroot."""
+    """TCC runtime directory of the resolved target sysroot: the
+    directory holding TCC's support files and headers in the shape
+    libtcc's search paths expect (libtcc1.a beside include/ on
+    ELF/Mach-O targets, under lib/ and include/ on PE targets)."""
     return resolve_native()["lib_path"]
 
 

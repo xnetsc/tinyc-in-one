@@ -174,8 +174,19 @@ EOF
 mkdir -p "$BUILD/test-classes" "$BUILD/test-runtime"
 "$JAVAC" -cp "$DIST/tinyc.jar" -d "$BUILD/test-classes" $(find src/test/java -name '*.java' | sort)
 cp "$STAGED_BIN" "$BUILD/test-runtime/$NATIVE_NAME"
-# 整个 lib/tcc 目录平铺进 test-runtime：除 libtcc1.a 与 include 外，
-# -run 需要的 runmain.o 等辅助目标文件也在其中
-cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/." "$BUILD/test-runtime/"
+if [ "$HOST_TRIPLE" = "x86_64-w64-mingw32" ]; then
+  # PE 形态与 dist 的 bin/ 同构：可执行文件在根下，支持文件在 lib/，
+  # 头文件在 include/（含 winapi/）——libtcc 的 PE 搜索路径是
+  # {B}/lib 与 {B}/include、{B}/include/winapi，{B} 就是
+  # test-runtime 本身。源数据是 sysroot 里 lib/tcc/win32 的
+  # lib 与 include 两棵子树。
+  mkdir -p "$BUILD/test-runtime/lib" "$BUILD/test-runtime/include"
+  cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/win32/lib/." "$BUILD/test-runtime/lib/"
+  cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/win32/include/." "$BUILD/test-runtime/include/"
+else
+  # 整个 lib/tcc 目录平铺进 test-runtime：除 libtcc1.a 与 include 外，
+  # -run 需要的 runmain.o 等辅助目标文件也在其中
+  cp -r "$JARROOT/sysroot/$HOST_TRIPLE/lib/tcc/." "$BUILD/test-runtime/"
+fi
 
 echo "built: $PWD/$DIST/tinyc.jar (version $VERSION, host $HOST_TRIPLE)"

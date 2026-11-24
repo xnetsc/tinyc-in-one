@@ -113,7 +113,14 @@ function resolveNative() {
           host, target, root,
           binaryPath: path.join(root, c.binary),
           sysrootDir: path.join(root, c.sysroot),
-          libPath: path.join(root, c.sysroot, 'lib', 'tcc'),
+          // The runtime directory ({B} base for tcc_set_lib_path)
+          // comes from the manifest, staged from the target's dist
+          // manifest: lib/tcc on ELF/Mach-O targets, one level up
+          // (lib/tcc/win32) on PE targets, whose search paths are
+          // {B}/lib and {B}/include.
+          libPath: c.libPath
+            ? path.join(root, c.libPath)
+            : path.join(root, c.sysroot, 'lib', 'tcc'),
           // Output formats come from the manifest (copied verbatim
           // from the target's dist manifest); never hardcoded here.
           outputs: c.outputs ?? null,

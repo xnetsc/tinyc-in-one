@@ -197,11 +197,29 @@ if [ "$MODE" = "native-libs" ]; then
     (cd "$SRC" && make -j"$(nproc)" >/dev/null)
     (cd "$SRC" && make cross-arm64 >/dev/null)
 
+    # runmain.o is the support object tcc_run loads for its entry
+    # shim. lib/Makefile builds it only in a native lib build (its
+    # COMMON_O gains runmain.o only when the lib build is not a
+    # cross build), so the cross-arm64 build does not produce one.
+    # Build both with the tree's own TCC for each target (the same
+    # approach as the Windows host build) and stage them next to
+    # libtcc1.a below.
+    "$SRC/tcc" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/lib/runmain.c" -o "$SRC/runmain.o"
+    "$SRC/arm64-tcc" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/lib/runmain.c" -o "$SRC/arm64-runmain.o"
+
     build_so() {
         local abi=$1 triple=$2 tdef=$3
         local cc=$TC/$triple$API-clang
         [ -x "$cc" ] || cc=$TC/$triple-clang
         echo "building libtinyc.so for $abi ($cc)"
+        # Device-side search paths: {B} is the extracted toolchain
+        # directory the Java layer registers at runtime; its lib/
+        # holds libtcc1.a and runmain.o (staged below), and the
+        # device's own libc.so lives in /system/lib64. The NDK
+        # sysroot path is a build-machine path and does not exist
+        # on the device, so it is not a library path.
         "$cc" -shared -fPIC -O2 \
             -o "src/main/jniLibs/$abi/libtinyc.so" \
             "$SRC/tcc.c" "$SRC/tcc_io.c" \
@@ -209,8 +227,8 @@ if [ "$MODE" = "native-libs" ]; then
             -I"$SRC" -I"$ROOT/core" -Isrc/main/jni \
             "$tdef" -DTARGETOS_ANDROID=1 \
             "-DCONFIG_SYSROOT=\"$SYSROOT\"" \
-            "-DCONFIG_TCC_CRTPREFIX=\"{R}/usr/lib/$triple/$API\"" \
-            "-DCONFIG_TCC_LIBPATHS=\"{R}/usr/lib/$triple/$API:{B}\"" \
+            "-DCONFIG_TCC_CRTPREFIX=\"{B}/lib\"" \
+            "-DCONFIG_TCC_LIBPATHS=\"{B}/lib:/system/lib64\"" \
             "-DCONFIG_TCC_SYSINCLUDEPATHS=\"{B}/include:{R}/usr/include:{R}/usr/include/$triple\"" \
             '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"' \
             -llog -ldl -lm
@@ -232,8 +250,10 @@ if [ "$MODE" = "native-libs" ]; then
         cp "$SRC"/include/*.h "$SRC/tcclib.h" "$dst/include/"
         if [ "$triple" = aarch64-linux-android ]; then
             cp "$SRC/arm64-libtcc1.a" "$dst/lib/libtcc1.a"
+            cp "$SRC/arm64-runmain.o" "$dst/lib/runmain.o"
         else
             cp "$SRC/libtcc1.a" "$dst/lib/libtcc1.a"
+            cp "$SRC/runmain.o" "$dst/lib/runmain.o"
         fi
         rm -f "$dst/.gitkeep" "$dst/include/.gitkeep" "$dst/lib/.gitkeep"
     done

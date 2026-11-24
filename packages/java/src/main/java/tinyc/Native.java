@@ -128,7 +128,13 @@ final class Native {
                 OUTPUTS_JSON = combo.outputsJson();
                 Path cache = extractCombination(combo);
                 file = cache.resolve(combo.binary);
-                runtime = cache.resolve(combo.sysroot).resolve("lib").resolve("tcc");
+                // 运行时目录（tcc_set_lib_path 的 {B} 基准）以清单的
+                // libPath 为准：ELF/Mach-O 目标是 sysroot 的 lib/tcc，
+                // PE 目标高一层（lib/tcc/win32，其搜索路径是
+                // {B}/lib 与 {B}/include）。清单缺该字段时回退旧值。
+                runtime = combo.libPath() != null
+                        ? cache.resolve(combo.libPath())
+                        : cache.resolve(combo.sysroot).resolve("lib").resolve("tcc");
             }
             FILE = file;
             RUNTIME_DIR = runtime;
@@ -298,7 +304,7 @@ final class Native {
     // ------------------------------------------------------------ 组合解析
 
     private record Combo(String host, String target, String binary, String sysroot,
-                         String outputsJson) {
+                         String outputsJson, String libPath, String libtcc1) {
     }
 
     private static Combo resolveCombination(String host, String target) throws IOException {
@@ -347,7 +353,9 @@ final class Native {
             String obj = body.substring(objStart, objEnd);
             combos.add(new Combo(jsonField(obj, "host"), jsonField(obj, "target"),
                     jsonField(obj, "binary"), jsonField(obj, "sysroot"),
-                    jsonRawValue(obj, "outputs")));
+                    jsonRawValue(obj, "outputs"),
+                    jsonFieldOrNull(obj, "libPath"),
+                    jsonFieldOrNull(obj, "libtcc1")));
             i = objEnd;
         }
         return combos;
@@ -397,6 +405,14 @@ final class Native {
         return obj.substring(i, end).trim();
     }
 
+    /** 可选字符串字段：缺失或不是字符串时返回 null（与 jsonField 的
+     * 必填语义相对）。 */
+    private static String jsonFieldOrNull(String obj, String key) {
+        String raw = jsonRawValue(obj, key);
+        if (raw == null || raw.length() < 2 || raw.charAt(0) != '"') return null;
+        return raw.substring(1, raw.length() - 1);
+    }
+
     private static String jsonField(String obj, String key) {
         String needle = "\"" + key + "\"";
         int at = obj.indexOf(needle);
@@ -428,8 +444,10 @@ final class Native {
                 ".cache", "tinyc-java", packageVersion());
         Path marker = cache.resolve(".ok-" + combo.host() + "-" + combo.target());
         Path binary = cache.resolve(combo.binary());
-        Path libtcc1 = cache.resolve(combo.sysroot()).resolve("lib").resolve("tcc")
-                .resolve("libtcc1.a");
+        Path libtcc1 = combo.libtcc1() != null
+                ? cache.resolve(combo.libtcc1())
+                : cache.resolve(combo.sysroot()).resolve("lib").resolve("tcc")
+                        .resolve("libtcc1.a");
         if (Files.isRegularFile(marker) && Files.isRegularFile(binary)
                 && Files.isRegularFile(libtcc1)) {
             return cache;

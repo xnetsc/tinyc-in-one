@@ -258,6 +258,18 @@ static StateCtx *ctx_find(TCCState *s, int create) {
     return c;
 }
 
+/* The adapter installs a state's IO as the kernel's process-wide
+ * current IO, and the kernel registry does not track ownership: if
+ * the IO being freed here is the installed one, uninstall it first.
+ * Left installed, the freed object dangles and the next current-IO
+ * dispatch (e.g. an error print on another state) calls through
+ * freed memory. */
+static void uninstall_if_current(TCCIO *io) {
+    if (io != NULL && tinyc_get_io() == io) {
+        tinyc_set_io(tcc_io_stdio());
+    }
+}
+
 static void ctx_remove(JNIEnv *env, TCCState *s) {
     pthread_mutex_lock(&g_states_lock);
     StateCtx **pp = &g_states;
@@ -269,6 +281,7 @@ static void ctx_remove(JNIEnv *env, TCCState *s) {
     if (c->io_ctx.io != NULL) (*env)->DeleteGlobalRef(env, c->io_ctx.io);
     if (c->io_ctx.pending != NULL) (*env)->DeleteGlobalRef(env, c->io_ctx.pending);
     if (c->error_listener != NULL) (*env)->DeleteGlobalRef(env, c->error_listener);
+    uninstall_if_current(c->tcc_io);
     free(c->tcc_io);
     free(c);
 }
@@ -411,6 +424,7 @@ Java_com_tinyc_TinycNative_nativeSetIO(JNIEnv *env, jclass cls,
         (*env)->DeleteGlobalRef(env, c->io_ctx.io);
         c->io_ctx.io = NULL;
     }
+    uninstall_if_current(c->tcc_io);
     free(c->tcc_io);
     c->tcc_io = NULL;
     if (io == NULL) {

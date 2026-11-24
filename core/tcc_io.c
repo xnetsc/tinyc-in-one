@@ -1,4 +1,9 @@
 /* tcc_io.c - TCCIO implementations and the current-IO registry. */
+#if defined(__ANDROID__) && !defined(_BSD_SOURCE)
+/* bionic declares funopen (used by tinyc_io_open_out_stream below)
+ * only under __USE_BSD, which _BSD_SOURCE enables. */
+# define _BSD_SOURCE 1
+#endif
 #include "tinyc_io.h"
 
 #include <stdarg.h>
@@ -388,7 +393,9 @@ FILE *tinyc_io_open_out_stream(void)
                                   .seek = NULL, .close = NULL };
     return fopencookie(NULL, "w", fns);
 }
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__ANDROID__)
+/* macOS and Android (bionic, API 24+) both provide BSD funopen with
+ * this callback shape; bionic has no fopencookie. */
 static int funopen_write(void *c, const char *b, int n)
 {
     (void)c;

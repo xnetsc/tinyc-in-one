@@ -129,6 +129,30 @@ def main():
             "isa": tman.get("isa"),
             "status": "included",
         }
+        # The runtime directory a package registers with
+        # tcc_set_lib_path (the {B} base) is defined once, here, from
+        # the target's dist manifest: its "libtcc1" entry locates the
+        # support library inside the sysroot, and libtcc's search
+        # rules place it directly in {B} on ELF/Mach-O targets but in
+        # {B}/lib on PE targets - so the PE runtime root is one level
+        # up (the win32 directory), not lib/tcc itself. Packages copy
+        # "libPath" verbatim, like "outputs"; "libtcc1" is the
+        # package-root-relative path of the support library itself.
+        libtcc1_rel = tman.get("libtcc1")
+        if libtcc1_rel:
+            parts = libtcc1_rel.replace(os.sep, "/").split("/")
+            # PE form is a property of the target backend (tcc.h keys
+            # the search paths on TCC_TARGET_PE), not of the staged
+            # binary's own file format: a Linux-hosted cross binary
+            # for the PE target is an ELF file with PE search rules.
+            # The dist manifest's outputs carry the target's form.
+            exe_format = (tman.get("outputs") or {}).get("exe", {})
+            pe_target = str(exe_format.get("format", "")).startswith("PE")
+            runtime_parts = parts[:-2] if pe_target else parts[:-1]
+            combo["libPath"] = (sysroot_rel.replace(os.sep, "/") + "/"
+                                + "/".join(runtime_parts))
+            combo["libtcc1"] = (sysroot_rel.replace(os.sep, "/") + "/"
+                                + "/".join(parts))
         # Output formats are defined once, in the target's dist
         # manifest ("outputs"); package manifests copy the value
         # verbatim so every host and every package agrees on what a
