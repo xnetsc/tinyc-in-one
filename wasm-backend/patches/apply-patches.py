@@ -47,6 +47,7 @@ PATCHES = [
      "ST_FUNC void gen_va_arg(CType *t);\n"
      "ST_FUNC void gen_clear_cache(void);\n"
      "ST_FUNC int wasm_output_file(TCCState *s1, const char *filename);\n"
+     "ST_FUNC void wasm_registry_state_deleted(TCCState *s1);\n"
      "ST_FUNC void gen_opv(int op);\n"
      "ST_FUNC void gen_vec_gv(void);\n"
      "ST_FUNC void gen_vec_home(void);\n"
@@ -681,6 +682,22 @@ PATCHES = [
      "#else\n"
      "            return tcc_error_noabort(\"-run is not available in a cross compiler\");\n"
      "#endif",
+     1),
+    # 5c. libtcc.c: tcc_delete tells the wasm backend when a state
+    #     dies, so a registry cycle owned by that state is drained
+    #     even when the state never output (its address may be reused
+    #     by the next tcc_new, so the backend cannot rely on pointer
+    #     identity alone to notice the takeover).
+    ("libtcc.c",
+     "LIBTCCAPI void tcc_delete(TCCState *s1)\n"
+     "{\n"
+     "    /* free sections */",
+     "LIBTCCAPI void tcc_delete(TCCState *s1)\n"
+     "{\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    wasm_registry_state_deleted(s1);\n"
+     "#endif\n"
+     "    /* free sections */",
      1),
     # 6. Makefile: cross-compiler definitions (Makefile:119, 136-137,
     #    171-174, 219).

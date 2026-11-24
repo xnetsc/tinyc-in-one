@@ -19,13 +19,16 @@
        compiled function and assert its return value. Creating a
        state registers a JS error callback in the module's function
        table, so this also covers the shipped build keeping that
-       table growable.
+       table growable. A third state's product is checked to export
+       only its own function: the backend's function registry
+       belongs to one output cycle of one state, so functions from
+       earlier states must not leak into a later state's module.
     3. x86_64-linux-gnu: cross-compile an object file and verify the
        ELF header and e_machine (format check only; the product is
        not runnable in a browser).
 -->
 <script type="module">
-import { loadTinyc, runWasmModule } from './pkg/index.mjs';
+import { loadTinyc, runWasmModule, TCC_OUTPUT } from './pkg/index.mjs';
 
 const log = [];
 let ok = true;
@@ -58,6 +61,10 @@ try {
   const bytes = t.exportFile('/hello.wasm');
   check('wasm32 product has the wasm magic',
     bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d);
+  const bytesAgain = t.exportFile('/hello.wasm');
+  check('re-exporting the same product returns identical bytes',
+    bytesAgain.length === bytes.length &&
+    bytesAgain.every((b, i) => b === bytes[i]));
   const dec = new TextDecoder();
   let text = '';
   const io = {
@@ -82,6 +89,29 @@ try {
   check('file-compiled answer2() returns 42',
     st2.run([], { entry: 'answer2' }) === 42);
   st2.delete();
+
+  // A later state's product must contain only its own program's
+  // functions: the backend's function registry belongs to one
+  // output cycle of one state, so answer/answer2 from the states
+  // above must not leak into this state's module. The product is
+  // written and exported exactly once (exportFile mirrors the
+  // product into the virtual FS, so the bytes are read from this
+  // single export), then instantiated directly.
+  const st3 = t.createState();
+  check('third state compileString returns 0',
+    st3.compileString('int answer3() { return 42; }') === 0);
+  st3.setOutputType(TCC_OUTPUT.EXE);
+  check('third state outputFile returns 0',
+    st3.outputFile('/answer3.wasm') === 0);
+  const mod3 = new WebAssembly.Module(t.exportFile('/answer3.wasm'));
+  const mod3Fns = WebAssembly.Module.exports(mod3)
+    .filter((e) => e.kind === 'function').map((e) => e.name);
+  check('third state module exports answer3', mod3Fns.includes('answer3'));
+  check('third state module does not export answer or answer2',
+    !mod3Fns.includes('answer') && !mod3Fns.includes('answer2'));
+  const inst3 = new WebAssembly.Instance(mod3, {});
+  check('third state answer3() returns 42', inst3.exports.answer3() === 42);
+  st3.delete();
 
   const t2 = await loadTinyc({ target: 'x86_64-linux-gnu' });
   log.push('INFO: x86_64-linux-gnu fsBackend=' + t2.fsBackend);

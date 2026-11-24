@@ -25,6 +25,16 @@ echo "== scalar2 assertions =="
 node tests/run-scalar2.mjs
 echo "node exit=$?"
 
+echo "== two-state registry isolation (libtcc API, one process) =="
+gcc -o tests/wasm32-libtcc.o -c build-src/libtcc.c -DTCC_TARGET_WASM32 -DCONFIG_TCC_CROSSPREFIX='"wasm32-"' -Ibuild-src -Wall -O2
+echo "libtcc build exit=$?"
+gcc -o tests/test-two-states tests/test-two-states.c tests/wasm32-libtcc.o -Ibuild-src -lm -ldl -lpthread
+echo "host build exit=$?"
+./tests/test-two-states
+echo "host exit=$?"
+node tests/run-two-states.mjs
+echo "node exit=$?"
+
 echo "== -run must be an explicit wasm error =="
 $TCC -nostdlib -run tests/test-input.c
 echo "run exit=$?"

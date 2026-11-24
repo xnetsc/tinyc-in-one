@@ -151,6 +151,70 @@ int nb_wsigs;
 WFunc wfuns[512];
 int nb_wfuns;
 
+/* The registries are process-wide storage, but their contents belong
+ * to one output cycle of one TCCState: the functions and signatures
+ * a single program accumulates across its translation units, written
+ * out as one module by wasm_output_file (wasm-link.c).  wreg_owner
+ * names the state the current contents belong to; wreg_cycle_closed
+ * records that the contents have been output.  The drain itself is
+ * lazy - it runs at the next intern (wasm_func_intern_sig, the only
+ * growth point) when the cycle is closed or a different state takes
+ * over - so an unchanged program can be output again identically,
+ * while any new compilation starts from an empty table and no
+ * function leaks from one program's module into the next.
+ *
+ * Compilation is serial (one translation unit at a time, with
+ * tcc_state naming the active state), so a different state interning
+ * over a non-empty table means the previous cycle ended without an
+ * output - an abandoned or failed compile - and its entries are not
+ * part of any program the new state is building.  Interleaving two
+ * states translation-unit by translation-unit is not a supported
+ * pattern for this backend: the table is keyed by name, so the two
+ * programs' same-named functions would merge into one entry.  The
+ * supported pattern is to finish one state's program (compile all
+ * of its units, then output) before another state compiles; the
+ * drain at the takeover point keeps each output limited to its own
+ * state's current cycle either way. */
+static TCCState *wreg_owner;
+static int wreg_cycle_closed;
+
+static void wasm_registry_reset(void)
+{
+    int i, j;
+    for (i = 0; i < nb_wfuns; i++) {
+        WFunc *f = &wfuns[i];
+        tcc_free(f->name);
+        for (j = 0; j < f->nfixs; j++)
+            tcc_free(f->fixs[j].name);
+        tcc_free(f->fixs);
+        wb_free(&f->final_body);
+    }
+    nb_wfuns = 0;
+    nb_wsigs = 0;
+    wreg_owner = NULL;
+    wreg_cycle_closed = 0;
+}
+
+/* Called by wasm_output_file (wasm-link.c) after a module was
+ * written: the current table becomes the previous cycle, drained at
+ * the next intern. */
+void wasm_registry_note_output(void)
+{
+    wreg_cycle_closed = 1;
+}
+
+/* Called from tcc_delete (patched into libtcc.c) for every state:
+ * a cycle owned by a state that is going away is drained now.  The
+ * takeover check in wasm_func_intern_sig cannot do this on its own:
+ * a deleted state's address may be reused by the next tcc_new, so
+ * pointer identity alone cannot distinguish the new state from the
+ * deleted owner. */
+ST_FUNC void wasm_registry_state_deleted(TCCState *s1)
+{
+    if (s1 == wreg_owner)
+        wasm_registry_reset();
+}
+
 static int wasm_type_of(CType *t)
 {
     if (t->t & VT_VECTOR) {
@@ -216,6 +280,12 @@ static WFunc *wasm_func_intern_sig(Sym *sym, WSig *sig, int from_call)
     int i;
     WFunc *f;
     const char *name = get_tok_str(sym->v, NULL);
+    /* start-of-cycle drain (see the registry comment above): the
+       previous cycle was output, or another state left a table it
+       never output - either way this intern opens a fresh cycle */
+    if (wreg_cycle_closed || (wreg_owner && tcc_state != wreg_owner))
+        wasm_registry_reset();
+    wreg_owner = tcc_state;
     /* keyed by name, not by Sym*: Sym objects do not outlive their
        translation unit, names do.  (Two static functions with the
        same name in different files would collide - a documented

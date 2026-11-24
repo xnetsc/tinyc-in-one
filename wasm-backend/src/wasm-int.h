@@ -72,10 +72,16 @@ typedef struct WFunc {
 } WFunc;
 
 /* function and signature registries, filled by the generator and
- * read back by the output stage */
+ * read back by the output stage.  Their contents belong to one
+ * output cycle of one TCCState; the generator drains them when a
+ * new cycle begins (see wasm-gen.c). */
 extern WSig wsigs[128];
 extern int nb_wsigs;
 extern WFunc wfuns[512];
 extern int nb_wfuns;
+
+/* called by the output stage after a module was written: marks the
+ * current registry contents as the previous cycle */
+void wasm_registry_note_output(void);
 
 #endif /* WASM_INT_H */

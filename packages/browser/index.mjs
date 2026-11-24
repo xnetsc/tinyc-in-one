@@ -666,6 +666,14 @@ export class VirtualFS {
     const nativePath = this._nativePath(path);
     const dir = nativePath.slice(0, nativePath.lastIndexOf('/')) || '/';
     if (typeof FS.mkdirTree === 'function') FS.mkdirTree(dir);
+    // The mirror write is a replace: the native copy must end up
+    // holding exactly `bytes`. The WasmFS FS.writeFile appends to a
+    // file that already exists (it writes at the file's current
+    // size), so an existing native file is unlinked first and the
+    // write lands as a fresh file with exactly the mirrored content.
+    if (typeof FS.unlink === 'function') {
+      try { FS.unlink(nativePath); } catch { /* not present natively */ }
+    }
     FS.writeFile(nativePath, bytes);
   }
 }

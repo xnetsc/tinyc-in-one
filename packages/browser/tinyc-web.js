@@ -2247,6 +2247,12 @@ var TinycWeb = (() => {
       const nativePath = this._nativePath(path);
       const dir = nativePath.slice(0, nativePath.lastIndexOf("/")) || "/";
       if (typeof FS.mkdirTree === "function") FS.mkdirTree(dir);
+      if (typeof FS.unlink === "function") {
+        try {
+          FS.unlink(nativePath);
+        } catch {
+        }
+      }
       FS.writeFile(nativePath, bytes);
     }
   };

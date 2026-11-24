@@ -391,6 +391,8 @@ ST_FUNC int wasm_output_file(TCCState *s, const char *filename)
     int r;
     tcc_enter_state(s);
     r = wasm_output_module(s, filename);
+    if (r == 0)
+        wasm_registry_note_output();
     tcc_exit_state(s);
     return r;
 }

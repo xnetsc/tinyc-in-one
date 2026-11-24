@@ -105,6 +105,84 @@ PASS vec_ucmp_init() = -2
 scalar2 assertions: 86 passed, 0 failed
 ALL SCALAR2 ASSERTIONS PASSED
 node exit=0
+== two-state registry isolation (libtcc API, one process) ==
+In file included from build-src/libtcc.c:28:
+build-src/tccdbg.c: In function 'tcc_debug_frame_end':
+build-src/tccdbg.c:882:9: warning: variable 'eh_section_sym' set but not used [-Wunused-but-set-variable]
+  882 |     int eh_section_sym;
+      |         ^~~~~~~~~~~~~~
+In file included from build-src/libtcc.c:58:
+build-src/wasm-link.c: In function 'wasm_sym_addr':
+build-src/wasm-link.c:150:9: warning: the comparison will always evaluate as 'true' for the address of 'name' will never be NULL [-Waddress]
+  150 |     if (sec->name && !strcmp(sec->name, ".text")) {
+      |         ^~~
+In file included from build-src/tccpp.c:22,
+                 from build-src/libtcc.c:26:
+build-src/tcc.h:589:10: note: 'name' declared here
+  589 |     char name[1];           /* section name */
+      |          ^~~~
+build-src/tccdbg.c: In function 'tcc_tcov_block_begin':
+build-src/tccdbg.c:2541:13: warning: ignoring return value of 'getcwd' declared with attribute 'warn_unused_result' [-Wunused-result]
+ 2541 |             getcwd (wd, sizeof(wd));
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+build-src/tccdbg.c: In function 'tcc_debug_start':
+build-src/tccdbg.c:1135:9: warning: ignoring return value of 'getcwd' declared with attribute 'warn_unused_result' [-Wunused-result]
+ 1135 |         getcwd(buf, sizeof(buf));
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~
+In file included from build-src/libtcc.c:57:
+build-src/wasm-gen.c: At top level:
+build-src/wasm-gen.c:2234:14: warning: 'gen_clear_cache' defined but not used [-Wunused-function]
+ 2234 | ST_FUNC void gen_clear_cache(void)
+      |              ^~~~~~~~~~~~~~~
+build-src/wasm-gen.c:2228:14: warning: 'gen_va_arg' defined but not used [-Wunused-function]
+ 2228 | ST_FUNC void gen_va_arg(CType *t)
+      |              ^~~~~~~~~~
+build-src/wasm-gen.c:2223:14: warning: 'gen_va_start' defined but not used [-Wunused-function]
+ 2223 | ST_FUNC void gen_va_start(void)
+      |              ^~~~~~~~~~~~
+build-src/wasm-gen.c:1772:14: warning: 'gen_cvt_csti' defined but not used [-Wunused-function]
+ 1772 | ST_FUNC void gen_cvt_csti(int t)
+      |              ^~~~~~~~~~~~
+build-src/wasm-gen.c:1753:14: warning: 'gen_cvt_sxtw' defined but not used [-Wunused-function]
+ 1753 | ST_FUNC void gen_cvt_sxtw(void)
+      |              ^~~~~~~~~~~~
+build-src/wasm-gen.c:532:14: warning: 'o' defined but not used [-Wunused-function]
+  532 | ST_FUNC void o(unsigned int c)
+      |              ^
+build-src/wasm-gen.c:409:13: warning: 'we_global_set' defined but not used [-Wunused-function]
+  409 | static void we_global_set(int idx) { we(0x24); we_uleb(idx); }
+      |             ^~~~~~~~~~~~~
+build-src/wasm-gen.c:408:13: warning: 'we_global_get' defined but not used [-Wunused-function]
+  408 | static void we_global_get(int idx) { we(0x23); we_uleb(idx); }
+      |             ^~~~~~~~~~~~~
+In file included from build-src/libtcc.c:27:
+build-src/tccgen.c:1692:14: warning: 'gbound_args' defined but not used [-Wunused-function]
+ 1692 | ST_FUNC void gbound_args(int nb_args)
+      |              ^~~~~~~~~~~
+libtcc build exit=0
+host build exit=0
+wrote tests/ts-m1.wasm
+wrote tests/ts-m1b.wasm
+wrote tests/ts-m3.wasm
+wrote tests/ts-m2.wasm
+wrote tests/ts-multi.wasm
+wrote tests/ts-m5.wasm
+test-two-states: all modules written
+host exit=0
+PASS: m1 exports exactly {fa}
+PASS: m1 fa() == 11
+PASS: m1b (same program output twice) exports exactly {fa}
+PASS: m1b fa() == 11
+PASS: m3 (same state, next program) exports exactly {fc}
+PASS: m3 fc() == 33
+PASS: m2 (second state) exports exactly {fb}
+PASS: m2 fb() == 22
+PASS: multi (one state, two files) exports {entry, helper}
+PASS: multi entry() == 8 (helper()+1 across files)
+PASS: m5 (after an abandoned state) exports exactly {fy}
+PASS: m5 fy() == 55
+run-two-states: all assertions passed
+node exit=0
 == -run must be an explicit wasm error ==
 tcc: error: wasm: -run is not supported for the wasm target; instantiate the generated module with a host wasm engine
 run exit=1
