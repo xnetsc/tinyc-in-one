@@ -12,7 +12,7 @@
 #ifdef TARGET_DEFS_ONLY
 
 // Number of registers available to allocator:
-#define NB_REGS 28 // x0-x18, x30, v0-v7
+#define NB_REGS 33 // x0-x18, x30, v0-v7, x19-x23 (regcache only)
 
 #define TREG_R(x) (x) // x = 0..18
 #define TREG_R30  19
@@ -45,6 +45,29 @@
 /* define if return values need to be extended explicitely
    at caller side (for interfacing with non-TCC compilers) */
 #define PROMOTE_RET
+
+/* Hardware x19-x23 have indices past the float registers in the
+   allocator's numbering; intr() maps the indices back to the
+   hardware numbers.  (The TREG_X* names in arm64-asm.c already use
+   the hardware numbering, hence CS here.)  They carry class 0 in
+   reg_classes, so the expression allocator never hands them out. */
+#define TREG_CS19 28
+#define TREG_CS20 29
+#define TREG_CS21 30
+#define TREG_CS22 31
+#define TREG_CS23 32
+
+#ifndef TCC_TARGET_PE
+/* Dedicated registers for the tccgen.c local-variable register cache:
+   x19-x23, callee-saved under AAPCS64.  The PE target is not
+   enabled: prolog saves there would need unwind data entries. */
+#define REGCACHE_NREGS 5
+#define REGCACHE_REGS regcache_regs
+ST_DATA const int regcache_regs[REGCACHE_NREGS];
+ST_FUNC void regcache_flush_all(void);
+ST_FUNC void regcache_disable(void);
+ST_FUNC int regcache_used_mask(void);
+#endif
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
 /******************************************************/
@@ -88,7 +111,12 @@ ST_DATA const int reg_classes[NB_REGS] = {
   RC_FLOAT | RC_F(4),
   RC_FLOAT | RC_F(5),
   RC_FLOAT | RC_F(6),
-  RC_FLOAT | RC_F(7)
+  RC_FLOAT | RC_F(7),
+  0, /* x19: regcache only, never allocated */
+  0, /* x20: regcache only, never allocated */
+  0, /* x21: regcache only, never allocated */
+  0, /* x22: regcache only, never allocated */
+  0  /* x23: regcache only, never allocated */
 };
 
 #if defined(CONFIG_TCC_BCHECK)
@@ -97,11 +125,14 @@ static unsigned long func_bound_ind;
 ST_DATA int func_bound_add_epilog;
 #endif
 
-#define IS_FREG(x) ((x) >= TREG_F(0))
+#define IS_FREG(x) ((x) >= TREG_F(0) && (x) <= TREG_F(7))
 
 static uint32_t intr(int r)
 {
-    assert(TREG_R(0) <= r && r <= TREG_R30);
+    assert((TREG_R(0) <= r && r <= TREG_R30) ||
+           (TREG_CS19 <= r && r <= TREG_CS23));
+    if (r >= TREG_CS19)
+        return r - TREG_CS19 + 19; /* regcache index -> hardware x19-x23 */
     return r < TREG_R30 ? r : 30;
 }
 
@@ -1022,6 +1053,24 @@ static int gv_addr(int r)
     return gv(r);
 }
 
+#ifndef TCC_TARGET_PE
+ST_DATA const int regcache_regs[REGCACHE_NREGS] = {
+    TREG_CS19, TREG_CS20, TREG_CS21, TREG_CS22, TREG_CS23
+};
+
+/* The prolog reserves REGCACHE_FRAME bytes of frame below the
+   parameter area (register i of REGCACHE_REGS gets the slot at
+   regcache_slot_base - 8*(i+1)) and REGCACHE_NREGS instruction slots
+   after the stack setup slots, which the epilog backpatches with the
+   saves of the registers actually used (a save is a single stur;
+   unused slots stay nop padding).  The reservation is made at the
+   end of gfunc_prolog so the parameter home slots in the fixed
+   224-byte area keep their stock offsets. */
+#define REGCACHE_FRAME (REGCACHE_NREGS * 8)
+static unsigned long arm64_regcache_save_offset;
+static int regcache_slot_base;
+#endif
+
 ST_FUNC void gfunc_call(int nb_args)
 {
     CType *return_type;
@@ -1034,6 +1083,9 @@ ST_FUNC void gfunc_call(int nb_args)
     int old_style = (func_type == FUNC_OLD);
     int var_nb_arg = variadic ? n_func_args(&vtop[-nb_args].type) : 0;
 
+#ifndef TCC_TARGET_PE
+    regcache_flush_all(); /* F3: no cached value crosses a call */
+#endif
     save_regs(nb_args + 1);
 
 #ifdef CONFIG_TCC_BCHECK
@@ -1353,7 +1405,20 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     /* In gfunc_epilog these will be replaced with stack setup code. */
     for (i = 0; i < ARM64_FUNC_STACK_SETUP_SLOTS; ++i)
         o(ARM64_NOP); // nop
+#ifndef TCC_TARGET_PE
+    arm64_regcache_save_offset = ind;
+    /* In gfunc_epilog these will be replaced with the saves of the
+       regcache registers the function actually used. */
+    for (i = 0; i < REGCACHE_NREGS; ++i)
+        o(ARM64_NOP); // nop
+#endif
     loc = 0;
+#ifndef TCC_TARGET_PE
+    /* reserve the regcache save slots below everything the prolog
+       proper allocated */
+    regcache_slot_base = loc;
+    loc -= REGCACHE_FRAME;
+#endif
 #ifdef CONFIG_TCC_BCHECK
     if (tcc_state->do_bounds_check)
         gen_bounds_prolog();
@@ -1583,9 +1648,28 @@ ST_FUNC void gfunc_return(CType *func_type)
 
 ST_FUNC void gfunc_epilog(void)
 {
+#ifndef TCC_TARGET_PE
+    int i, mask = regcache_used_mask();
+#endif
 #ifdef CONFIG_TCC_BCHECK
     if (tcc_state->do_bounds_check)
         gen_bounds_epilog();
+#endif
+
+#ifndef TCC_TARGET_PE
+    /* backpatch the regcache saves into the reserved prolog area;
+       registers the function never used stay nop padding */
+    if (mask) {
+        addr_t saved_ind = ind;
+        ind = arm64_regcache_save_offset;
+        for (i = 0; i < REGCACHE_NREGS; i++)
+            if (mask & (1 << i))
+                arm64_strx(3, intr(regcache_regs[i]), 29,
+                           regcache_slot_base - 8 * (i + 1));
+            else
+                o(ARM64_NOP);
+        ind = saved_ind;
+    }
 #endif
 
     if (loc) {
@@ -1600,6 +1684,13 @@ ST_FUNC void gfunc_epilog(void)
             write32le(cur_text_section->data + i, ARM64_NOP); // nop
         ind = saved_ind;
     }
+#ifndef TCC_TARGET_PE
+    /* restore the regcache registers the function used */
+    for (i = 0; i < REGCACHE_NREGS; i++)
+        if (mask & (1 << i))
+            arm64_ldrx(0, 3, intr(regcache_regs[i]), 29,
+                       regcache_slot_base - 8 * (i + 1));
+#endif
     o(0x910003bf); // mov sp,x29
     o(0xa8ce7bfd); // ldp x29,x30,[sp],#224
 

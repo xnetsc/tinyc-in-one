@@ -111,11 +111,11 @@ enum {
 #define TCC_TARGET_NATIVE_STRUCT_COPY
 ST_FUNC void gen_struct_copy(int size);
 
-#ifndef TCC_TARGET_PE
 /* Dedicated registers for the tccgen.c local-variable register cache:
-   callee-saved under the SysV ABI and class 0 in reg_classes, so the
-   expression allocator never hands them out.  The PE target is not
-   enabled: prolog saves there would need unwind data entries. */
+   callee-saved under both the SysV and the Windows x64 ABI and class 0
+   in reg_classes, so the expression allocator never hands them out.
+   On the PE target the prolog saves are described to the unwinder
+   through pe_add_unwind_data_saves (UWOP_SAVE_NONVOL entries). */
 #define TREG_RBX 3
 #define TREG_R12 12
 #define TREG_R13 13
@@ -127,7 +127,6 @@ ST_DATA const int regcache_regs[REGCACHE_NREGS];
 ST_FUNC void regcache_flush_all(void);
 ST_FUNC void regcache_disable(void);
 ST_FUNC int regcache_used_mask(void);
-#endif
 
 /******************************************************/
 #else /* ! TARGET_DEFS_ONLY */
@@ -728,6 +727,24 @@ static void gen_bounds_epilog(void)
 }
 #endif
 
+ST_DATA const int regcache_regs[REGCACHE_NREGS] = {
+    TREG_RBX, TREG_R12, TREG_R13, TREG_R14, TREG_R15
+};
+
+/* The prolog reserves REGCACHE_FRAME bytes of frame below the
+   parameter area (register i of REGCACHE_REGS gets the slot at
+   regcache_slot_base - 8*(i+1)) and REGCACHE_SAVE_SIZE bytes of code
+   after the fixed prolog, which the epilog backpatches with the
+   saves of the registers actually used (a save is a mov of 4 bytes
+   with an 8-bit displacement, 7 with a 32-bit one; the reservation
+   covers the worst case and the rest is nop padding).  The frame
+   reservation is made at the end of gfunc_prolog so the parameter
+   home slots keep their stock offsets. */
+#define REGCACHE_FRAME (REGCACHE_NREGS * 8)
+#define REGCACHE_SAVE_SIZE (REGCACHE_NREGS * 7)
+static unsigned long regcache_save_offset;
+static int regcache_slot_base;
+
 #ifdef TCC_TARGET_PE
 
 #define REGN 4
@@ -811,6 +828,7 @@ void gfunc_call(int nb_args)
         gbound_args(nb_args);
 #endif
 
+    regcache_flush_all(); /* F3: no cached value crosses a call */
     save_regs(nb_args);
 
     args_size = (nb_args < REGN ? REGN : nb_args) * PTR_SIZE;
@@ -950,6 +968,8 @@ void gfunc_prolog(Sym *func_sym)
     addr = PTR_SIZE * 2;
     ind += FUNC_PROLOG_SIZE;
     func_sub_sp_offset = ind;
+    regcache_save_offset = ind;
+    ind += REGCACHE_SAVE_SIZE; /* backpatched by gfunc_epilog */
     reg_param_index = 0;
 
     sym = func_type->ref;
@@ -1003,12 +1023,17 @@ void gfunc_prolog(Sym *func_sym)
     if (tcc_state->do_bounds_check)
         gen_bounds_prolog();
 #endif
+    /* reserve the regcache save slots below everything the prolog
+       proper allocated (parameters, bounds) */
+    regcache_slot_base = loc;
+    loc -= REGCACHE_FRAME;
 }
 
 /* generate function epilog */
 void gfunc_epilog(void)
 {
-    int v, start;
+    int v, start, i, mask, n;
+    PEUnwindSave saves[REGCACHE_NREGS];
 
     /* align local size to word & save local variables */
     func_scratch = (func_scratch + 15) & -16;
@@ -1019,6 +1044,12 @@ void gfunc_epilog(void)
         gen_bounds_epilog();
 #endif
 
+    /* restore the regcache registers the function used */
+    mask = regcache_used_mask();
+    for (i = 0; i < REGCACHE_NREGS; i++)
+        if (mask & (1 << i))
+            gen_modrm64(0x8b, regcache_regs[i], VT_LOCAL, NULL,
+                        regcache_slot_base - 8 * (i + 1));
     o(0xc9); /* leave */
     if (func_ret_sub == 0) {
         o(0xc3); /* ret */
@@ -1031,7 +1062,30 @@ void gfunc_epilog(void)
     v = -loc;
     start = func_sub_sp_offset - FUNC_PROLOG_SIZE;
     cur_text_section->data_offset = ind;
-    pe_add_unwind_data(start, ind, v);
+    if (mask) {
+        /* backpatch the regcache saves into the reserved prolog
+           area, recording each save for the unwind data; registers
+           the function never used stay nop padding.  A save's frame
+           offset is taken from the stack pointer at the end of the
+           prolog, which is v bytes below rbp. */
+        ind = regcache_save_offset;
+        n = 0;
+        for (i = 0; i < REGCACHE_NREGS; i++)
+            if (mask & (1 << i)) {
+                gen_modrm64(0x89, regcache_regs[i], VT_LOCAL, NULL,
+                            regcache_slot_base - 8 * (i + 1));
+                saves[n].reg = regcache_regs[i];
+                saves[n].code_off = ind - start;
+                saves[n].frame_off = v + regcache_slot_base - 8 * (i + 1);
+                n++;
+            }
+        gen_fill_nops(REGCACHE_SAVE_SIZE - (ind - regcache_save_offset));
+        ind = cur_text_section->data_offset;
+        pe_add_unwind_data_saves(start, ind, v,
+                                 FUNC_PROLOG_SIZE + REGCACHE_SAVE_SIZE,
+                                 saves, n);
+    } else
+        pe_add_unwind_data(start, ind, v);
 
     ind = start;
     if (v >= 4096) {
@@ -1231,26 +1285,6 @@ static int arg_prepare_reg(int idx) {
   else
       return idx >= 0 && idx < REGN ? arg_regs[idx] : 0;
 }
-
-ST_DATA const int regcache_regs[REGCACHE_NREGS] = {
-    TREG_RBX, TREG_R12, TREG_R13, TREG_R14, TREG_R15
-};
-
-/* The prolog reserves REGCACHE_FRAME bytes of frame below the
-   parameter area (register i of REGCACHE_REGS gets the slot at
-   regcache_slot_base - 8*(i+1)) and REGCACHE_SAVE_SIZE bytes of code
-   after the fixed prolog, which the epilog backpatches with the
-   saves of the registers actually used (a save is a mov of 4 bytes
-   with an 8-bit displacement, 7 with a 32-bit one; the reservation
-   covers the worst case and the rest is nop padding).  The
-   reservation is made at the end of gfunc_prolog so the parameter
-   home slots and the variadic register save area keep their stock
-   offsets (the save area pointer in the variadic prolog is an
-   absolute -200). */
-#define REGCACHE_FRAME (REGCACHE_NREGS * 8)
-#define REGCACHE_SAVE_SIZE (REGCACHE_NREGS * 7)
-static unsigned long regcache_save_offset;
-static int regcache_slot_base;
 
 /* Generate function call. The function address is pushed first, then
    all the parameters in call order. This functions pops all the

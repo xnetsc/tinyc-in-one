@@ -2004,6 +2004,95 @@ ST_FUNC void pe_add_unwind_data(unsigned start, unsigned end, unsigned stack)
         put_elf_reloc(symtab_section, pd, o, R_XXX_RELATIVE, s1->uw_sym);
 }
 
+/* Build a per-function UNWIND_INFO for a function whose prolog saves
+   nonvolatile registers into frame slots (the register cache in
+   x86_64-gen.c): the saves, in reverse prolog order, followed by the
+   same frame setup codes as the shared info.  A save whose frame
+   offset fits the scaled 16-bit form uses UWOP_SAVE_NONVOL, larger
+   offsets use UWOP_SAVE_NONVOL_FAR.  The info goes into the text
+   section, like the shared one; returns its offset there. */
+static unsigned pe_add_unwind_info_saves(TCCState *s1, unsigned prolog_size,
+                                         const PEUnwindSave *saves, int nb_saves)
+{
+    Section *s;
+    unsigned char *p;
+    unsigned o, nslots;
+    int j;
+
+    if (NULL == s1->uw_pdata) {
+        s1->uw_pdata = find_section(s1, ".pdata");
+        s1->uw_pdata->sh_addralign = 4;
+    }
+    if (0 == s1->uw_sym)
+        s1->uw_sym = put_elf_sym(symtab_section, 0, 0, 0, 0, text_section->sh_num, ".uw_base");
+
+    /* two slots for the frame setup codes, two per save (three for
+       a save with a far frame offset) */
+    nslots = 2;
+    for (j = 0; j < nb_saves; j++)
+        nslots += (saves[j].frame_off >> 3) <= 0xffff ? 2 : 3;
+
+    s = text_section;
+    section_ptr_add(s, -s->data_offset & 3); /* align */
+    o = s->data_offset;
+    p = section_ptr_add(s, 4 + 2 * nslots);
+
+    *p++ = 0x01; // UBYTE: 3 Version , UBYTE: 5 Flags
+    *p++ = prolog_size; // UBYTE Size of prolog
+    *p++ = nslots; // UBYTE Count of unwind codes
+    *p++ = 0x05; // UBYTE: 4 Frame Register (rbp), UBYTE: 4 Frame Register offset (scaled)
+    /* Unwind codes array (descending order).  The saves come first:
+       they are undone while the stack pointer still has its
+       end-of-prolog value, which their frame offsets are taken from. */
+    for (j = nb_saves - 1; j >= 0; j--) {
+        unsigned fo = saves[j].frame_off;
+        *p++ = saves[j].code_off;
+        if ((fo >> 3) <= 0xffff) {
+            *p++ = (saves[j].reg << 4) | 0x04; // UWOP_SAVE_NONVOL
+            *p++ = (fo >> 3) & 0xff;
+            *p++ = (fo >> 3) >> 8;
+        } else {
+            *p++ = (saves[j].reg << 4) | 0x05; // UWOP_SAVE_NONVOL_FAR
+            *p++ = fo & 0xff;
+            *p++ = (fo >> 8) & 0xff;
+            *p++ = (fo >> 16) & 0xff;
+            *p++ = (fo >> 24) & 0xff;
+        }
+    }
+    *p++ = 0x04; *p++ = 0x03; // 3:0 UWOP_SET_FPREG (mov rsp -> rbp)
+    *p++ = 0x01; *p++ = 0x50; // 0:5 UWOP_PUSH_NONVOL (push rbp)
+
+    return o;
+}
+
+ST_FUNC void pe_add_unwind_data_saves(unsigned start, unsigned end, unsigned stack,
+                                      unsigned prolog_size,
+                                      const PEUnwindSave *saves, int nb_saves)
+{
+    TCCState *s1 = tcc_state;
+    Section *pd;
+    unsigned o, n, d;
+    struct /* _RUNTIME_FUNCTION */ {
+      DWORD BeginAddress;
+      DWORD EndAddress;
+      DWORD UnwindData;
+    } *p;
+
+    d = pe_add_unwind_info_saves(s1, prolog_size, saves, nb_saves);
+    pd = s1->uw_pdata;
+    o = pd->data_offset;
+    p = section_ptr_add(pd, sizeof *p);
+
+    /* record this function */
+    p->BeginAddress = start;
+    p->EndAddress = end;
+    p->UnwindData = d;
+
+    /* put relocations on it */
+    for (n = o + sizeof *p; o < n; o += sizeof p->BeginAddress)
+        put_elf_reloc(symtab_section, pd, o, R_XXX_RELATIVE, s1->uw_sym);
+}
+
 #elif defined(TCC_TARGET_ARM64)
 /* ARM64 unwind codes:
    save_fplr_x: 10iiiiii  - stp x29,lr,[sp,#-(i+1)*8]!

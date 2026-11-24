@@ -233,7 +233,11 @@ static void regcache_writeback(int idx)
     RegCacheEntry *e = &regcache_entries[idx];
     if (e->state != RC_CLEAN) {
         SValue sv;
-        sv.type.t = e->type_t;
+        /* the store only needs the base type and its sign/qualifier
+           bits: drop the struct-field bits (the VT_ENUM marker of an
+           enum local lives there), the fabricated type has no ref
+           for type_size() to consult about them */
+        sv.type.t = e->type_t & ~VT_STRUCT_MASK;
         sv.type.ref = NULL;
         sv.r = VT_LOCAL | VT_LVAL;
         sv.c.i = e->offset;

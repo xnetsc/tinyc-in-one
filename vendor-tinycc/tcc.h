@@ -1779,6 +1779,20 @@ ST_FUNC int pe_setsubsy(TCCState *s1, const char *arg);
 #if defined(TCC_TARGET_X86_64) || defined(TCC_TARGET_ARM64)
 ST_FUNC void pe_add_unwind_data(unsigned start, unsigned end, unsigned stack);
 #endif
+#if defined TCC_TARGET_X86_64
+/* one nonvolatile register saved by a function prolog, described
+   for pe_add_unwind_data_saves: reg is the register number,
+   code_off the offset of the end of the save instruction from the
+   start of the function, frame_off the offset of the saved value
+   from the stack pointer at the end of the prolog */
+typedef struct PEUnwindSave {
+    int reg;
+    int code_off;
+    unsigned frame_off;
+} PEUnwindSave;
+ST_FUNC void pe_add_unwind_data_saves(unsigned start, unsigned end, unsigned stack,
+    unsigned prolog_size, const PEUnwindSave *saves, int nb_saves);
+#endif
 PUB_FUNC int tcc_get_dllexports(const char *filename, char **pp);
 /* symbol properties stored in Elf32_Sym->st_other */
 # define ST_PE_EXPORT 0x10

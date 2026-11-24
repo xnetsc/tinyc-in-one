@@ -1,7 +1,7 @@
 #ifdef TARGET_DEFS_ONLY
 
 // Number of registers available to allocator:
-#define NB_REGS 19 // x10-x17 aka a0-a7, f10-f17 aka fa0-fa7, xxx, ra, sp
+#define NB_REGS 24 // x10-x17 aka a0-a7, f10-f17 aka fa0-fa7, xxx, ra, sp, s2-s6 (regcache only)
 #define CONFIG_TCC_ASM
 
 #define TREG_R(x) (x) // x = 0..7
@@ -33,6 +33,26 @@
 /* define if return values need to be extended explicitely
    at caller side (for interfacing with non-TCC compilers) */
 #define PROMOTE_RET
+
+/* Hardware s2-s6 have indices past the sp register in the
+   allocator's numbering; ireg() maps the indices back to the
+   hardware numbers.  They carry class 0 in reg_classes, so the
+   expression allocator never hands them out. */
+#define TREG_CS2 19
+#define TREG_CS3 20
+#define TREG_CS4 21
+#define TREG_CS5 22
+#define TREG_CS6 23
+
+/* Dedicated registers for the tccgen.c local-variable register cache:
+   s2-s6, callee-saved under the RISC-V ABI.  (s0 is this backend's
+   frame base register and is not available.) */
+#define REGCACHE_NREGS 5
+#define REGCACHE_REGS regcache_regs
+ST_DATA const int regcache_regs[REGCACHE_NREGS];
+ST_FUNC void regcache_flush_all(void);
+ST_FUNC void regcache_disable(void);
+ST_FUNC int regcache_used_mask(void);
 
 #else
 #define USING_GLOBALS
@@ -79,7 +99,12 @@ ST_DATA const int reg_classes[NB_REGS] = {
   RC_FLOAT | RC_F(7),
   0,
   1 << TREG_RA,
-  1 << TREG_SP
+  1 << TREG_SP,
+  0, /* s2: regcache only, never allocated */
+  0, /* s3: regcache only, never allocated */
+  0, /* s4: regcache only, never allocated */
+  0, /* s5: regcache only, never allocated */
+  0  /* s6: regcache only, never allocated */
 };
 
 #if defined(CONFIG_TCC_BCHECK)
@@ -94,13 +119,16 @@ static int ireg(int r)
       return 1; // ra
     if (r == TREG_SP)
       return 2; // sp
+    if (r >= TREG_CS2 && r <= TREG_CS6)
+      return r - TREG_CS2 + 18; /* regcache index -> hardware s2-s6 */
     assert(r >= 0 && r < 8);
     return r + 10;  // tccrX --> aX == x(10+X)
 }
 
 static int is_ireg(int r)
 {
-    return (unsigned)r < 8 || r == TREG_RA || r == TREG_SP;
+    return (unsigned)r < 8 || r == TREG_RA || r == TREG_SP
+        || (r >= TREG_CS2 && r <= TREG_CS6);
 }
 
 static int freg(int r)
@@ -347,8 +375,19 @@ ST_FUNC void load(int r, SValue *sv)
         //assert(!fc); XXX support offseted regs
         if (is_freg(r) && is_freg(v))
           ER(0x53, 0, rr, freg(v), freg(v), bt == VT_DOUBLE ? 0x11 : 0x10); //fsgnj.[sd] RR, V, V == fmv.[sd] RR, V
-        else if (is_ireg(r) && is_ireg(v))
-          EI(0x13, 0, rr, ireg(v), 0); // addi RR, V, 0 == mv RR, V
+        else if (is_ireg(r) && is_ireg(v)) {
+          /* A 32-bit integer is held sign-extended to full width in
+             this backend (loads use lw, arithmetic the w forms), so
+             moving an int-typed value between registers must extend
+             it again: a plain mv would leak the upper bits of a wider
+             source value into int-typed consumers.  With this, a
+             register move of an int is the exact equivalent of a
+             store/load round trip through its frame slot. */
+          if (bt == VT_INT)
+            EI(0x13 | 8, 0, rr, ireg(v), 0); // addiw RR, V, 0 == sext.w RR, V
+          else
+            EI(0x13, 0, rr, ireg(v), 0); // addi RR, V, 0 == mv RR, V
+        }
         else {
             int func7 = is_ireg(r) ? 0x70 : 0x78;
             size = type_size(&sv->type, &align);
@@ -584,6 +623,23 @@ static void reg_pass(CType *type, int *prc, int *fieldofs, int named)
     }
 }
 
+ST_DATA const int regcache_regs[REGCACHE_NREGS] = {
+    TREG_CS2, TREG_CS3, TREG_CS4, TREG_CS5, TREG_CS6
+};
+
+/* The prolog reserves REGCACHE_FRAME bytes of frame below the
+   parameter area (register i of REGCACHE_REGS gets the slot at
+   regcache_slot_base - 8*(i+1)) and REGCACHE_NREGS instruction slots
+   at its end, which the epilog backpatches with the saves of the
+   registers actually used (a save is a single sd; unused slots stay
+   nop padding).  The reservation is made at the end of gfunc_prolog
+   so the parameter home slots keep their stock offsets.  The slots
+   sit just below the parameter area, so their offsets always fit
+   the 12-bit load/store immediate. */
+#define REGCACHE_FRAME (REGCACHE_NREGS * 8)
+static unsigned long riscv_regcache_save_offset;
+static int regcache_slot_base;
+
 ST_FUNC void gfunc_call(int nb_args)
 {
     int i, align, size, areg[2];
@@ -599,6 +655,7 @@ ST_FUNC void gfunc_call(int nb_args)
         gbound_args(nb_args);
 #endif
 
+    regcache_flush_all(); /* F3: no cached value crosses a call */
     areg[0] = 0; /* int arg regs */
     areg[1] = 8; /* float arg regs */
     sa = vtop[-nb_args].type.ref->next;
@@ -876,6 +933,15 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
             ES(0x23, 3, 8, 10 + areg[0], -8 + num_va_regs * 8); // sd aX, loc(s0)
         }
     }
+    riscv_regcache_save_offset = ind;
+    /* In gfunc_epilog these will be replaced with the saves of the
+       regcache registers the function actually used. */
+    for (i = 0; i < REGCACHE_NREGS; ++i)
+        EI(0x13, 0, 0, 0, 0); // nop
+    /* reserve the regcache save slots below everything the prolog
+       proper allocated */
+    regcache_slot_base = loc;
+    loc -= REGCACHE_FRAME;
 #ifdef CONFIG_TCC_BCHECK
     if (tcc_state->do_bounds_check)
         gen_bounds_prolog();
@@ -921,15 +987,35 @@ ST_FUNC void arch_transfer_ret_regs(int aftercall)
 ST_FUNC void gfunc_epilog(void)
 {
     int v, saved_ind, d, large_ofs_ind;
+    int i, mask = regcache_used_mask();
 
 #ifdef CONFIG_TCC_BCHECK
     if (tcc_state->do_bounds_check)
         gen_bounds_epilog();
 #endif
 
+    /* backpatch the regcache saves into the reserved prolog area;
+       registers the function never used stay nop padding */
+    if (mask) {
+        int rc_saved_ind = ind;
+        ind = riscv_regcache_save_offset;
+        for (i = 0; i < REGCACHE_NREGS; i++)
+            if (mask & (1 << i))
+                ES(0x23, 3, 8, ireg(regcache_regs[i]),
+                   regcache_slot_base - 8 * (i + 1)); // sd sX, slot(s0)
+            else
+                EI(0x13, 0, 0, 0, 0); // nop
+        ind = rc_saved_ind;
+    }
+
     loc = (loc - num_va_regs * 8);
     d = v = (-loc + 15) & -16;
 
+    /* restore the regcache registers the function used */
+    for (i = 0; i < REGCACHE_NREGS; i++)
+        if (mask & (1 << i))
+            EI(0x03, 3, ireg(regcache_regs[i]), 8,
+               regcache_slot_base - 8 * (i + 1)); // ld sX, slot(s0)
     EI(0x13, 0, 2, 8, num_va_regs * 8); // addi sp, s0, num_va_regs*8
     EI(0x03, 3, 1, 8, -8); // ld ra, -8(s0)
     EI(0x03, 3, 8, 8, -16); // ld s0, -16(s0)
