@@ -591,12 +591,188 @@ void tinyc_diag_mark_ptr(const char *label, const void *p)
 /* deadlock-free at any output size: the program can write without a   */
 /* concurrent reader, and its stdin is fully materialized before it    */
 /* starts. One file per channel, so out and err never interleave.      */
-/* On Windows both functions are no-ops.                               */
+/* The Windows form implements the same contract over the CRT fd       */
+/* table (_dup/_dup2): that is the fd space the run program's stdio    */
+/* actually uses, because its imports bind to the same msvcrt this     */
+/* image links. Its temp files are created under the system temp       */
+/* directory (msvcrt tmpfile() targets the drive root, where it can    */
+/* fail), the redirected fds are switched to binary mode for the       */
+/* duration so bytes pass through unaltered, and the stdin FILE's      */
+/* buffered state is discarded with fflush(stdin) - the msvcrt         */
+/* semantics for an input stream - where the POSIX form uses           */
+/* clearerr + __fpurge.                                                */
 
 #ifdef _WIN32
 
-void tinyc_run_redirect_begin(int keep_stdin) { (void)keep_stdin; }
-void tinyc_run_redirect_end(void) {}
+#include <fcntl.h>
+#include <io.h>
+#include <stdint.h>
+#include <windows.h>
+
+typedef struct {
+    int depth;          /* nesting count; the redirect lives at depth 1 */
+    TCCIO *io;          /* IO captured at the outermost begin */
+    int saved[3];       /* _dup of the original fd; -1 = channel untouched,
+                           -2 = the fd was closed at begin */
+    int prev_mode[3];   /* translation mode of the fd before the redirect */
+    FILE *tmp[3];       /* per-channel temporary file, NULL if unused */
+    char path[3][MAX_PATH]; /* temp file to delete at end; "" if none */
+} WinRunRedir;
+
+static WinRunRedir g_win_run_redir;
+
+/* Create one channel's temp file under the system temp directory,
+ * opened binary read/write; its path is returned for deletion at
+ * the end. Same creation pattern as the Windows out-stream above. */
+static FILE *win_redir_tmpfile(char path_out[MAX_PATH])
+{
+    char dir[MAX_PATH];
+    DWORD n = GetTempPathA(MAX_PATH, dir);
+    if (n == 0 || n > MAX_PATH) return NULL;
+    if (GetTempFileNameA(dir, "trr", 0, path_out) == 0) return NULL;
+    HANDLE hw = CreateFileA(path_out, GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hw == INVALID_HANDLE_VALUE) { DeleteFileA(path_out); return NULL; }
+    int fd = _open_osfhandle((intptr_t)hw, _O_BINARY);
+    if (fd < 0) { CloseHandle(hw); DeleteFileA(path_out); return NULL; }
+    FILE *fp = _fdopen(fd, "w+b");
+    if (!fp) { _close(fd); DeleteFileA(path_out); return NULL; }
+    return fp;
+}
+
+/* Point CRT fd at tmp's file in binary mode, remembering how to
+ * restore it (both the handle and the translation mode). */
+static void win_redir_install(WinRunRedir *r, int fd, FILE *tmp)
+{
+    int saved = _dup(fd);
+    r->saved[fd] = saved >= 0 ? saved : -2;
+    r->prev_mode[fd] = _setmode(fd, _O_BINARY);
+    if (_dup2(_fileno(tmp), fd) < 0) {
+        if (saved >= 0) _close(saved);
+        r->saved[fd] = -1;
+        return;
+    }
+    _setmode(fd, _O_BINARY);
+}
+
+void tinyc_run_redirect_begin(int keep_stdin)
+{
+    WinRunRedir *r = &g_win_run_redir;
+    if (r->depth > 0) { r->depth++; return; }
+    TCCIO *io = g_current_io;
+    if (!io || io == &g_stdio_io) return;
+
+    /* Output buffered so far belongs to the real fds / the IO itself,
+     * not to the run program's channels. */
+    tinyc_io_flush_all();
+    fflush(stdout);
+    fflush(stderr);
+
+    char out_path[MAX_PATH], err_path[MAX_PATH];
+    FILE *out_tmp = win_redir_tmpfile(out_path);
+    FILE *err_tmp = out_tmp ? win_redir_tmpfile(err_path) : NULL;
+    if (!out_tmp || !err_tmp) {
+        if (out_tmp) { fclose(out_tmp); DeleteFileA(out_path); }
+        if (err_tmp) { fclose(err_tmp); DeleteFileA(err_path); }
+        return;
+    }
+    r->io = io;
+    r->tmp[0] = NULL;
+    r->tmp[1] = out_tmp;
+    r->tmp[2] = err_tmp;
+    r->path[0][0] = '\0';
+    strcpy(r->path[1], out_path);
+    strcpy(r->path[2], err_path);
+    r->saved[0] = r->saved[1] = r->saved[2] = -1;
+    win_redir_install(r, 1, out_tmp);
+    win_redir_install(r, 2, err_tmp);
+
+    if (!keep_stdin) {
+        char in_path[MAX_PATH];
+        FILE *in_tmp = win_redir_tmpfile(in_path);
+        if (in_tmp) {
+            /* Drain read_in up front; the program then reads the
+             * file to EOF at its own pace. A read error ends the
+             * input the same way EOF does. A NULL read_in is EOF. */
+            char buf[8192];
+            for (;;) {
+                int n = io->read_in ? io->read_in(io->ctx, buf, sizeof buf) : 0;
+                if (n <= 0) break;
+                if (fwrite(buf, 1, (size_t)n, in_tmp) != (size_t)n) break;
+            }
+            rewind(in_tmp);
+            r->tmp[0] = in_tmp;
+            strcpy(r->path[0], in_path);
+            /* The stdin FILE still carries the previous fd 0's state:
+             * a sticky EOF flag and possibly bytes buffered from it.
+             * Both belong to the old stream, not to read_in's bytes;
+             * reset the FILE before the program reads through it
+             * (fflush on an input stream discards its buffer in
+             * msvcrt). */
+            clearerr(stdin);
+            fflush(stdin);
+            win_redir_install(r, 0, in_tmp);
+        }
+    }
+    r->depth = 1;
+}
+
+void tinyc_run_redirect_end(void)
+{
+    WinRunRedir *r = &g_win_run_redir;
+    if (r->depth == 0) return;
+    if (--r->depth > 0) return;
+
+    /* The run program's stdio buffers empty into the capture files
+     * while the fds still point at them. */
+    fflush(stdout);
+    fflush(stderr);
+
+    int fd;
+    for (fd = 0; fd < 3; fd++) {
+        if (r->saved[fd] >= 0) {
+            _dup2(r->saved[fd], fd);
+            _close(r->saved[fd]);
+            _setmode(fd, r->prev_mode[fd]);
+        } else if (r->saved[fd] == -2) {
+            _close(fd);
+        }
+        r->saved[fd] = -1;
+    }
+    if (r->tmp[0]) {
+        /* Leave the host a clean stdin FILE: drop the run program's
+         * EOF flag and any input it left buffered. */
+        clearerr(stdin);
+        fflush(stdin);
+    }
+
+    /* Deliver each captured channel through the IO, now that the real
+     * fds are back (an IO channel that falls back to stdio writes to
+     * the real stream). A NULL channel function discards, matching
+     * tinyc_io_write_out/err. */
+    TCCIO *io = r->io;
+    char buf[8192];
+    size_t n;
+    if (r->tmp[1] && io->write_out) {
+        rewind(r->tmp[1]);
+        while ((n = fread(buf, 1, sizeof buf, r->tmp[1])) > 0)
+            io->write_out(io->ctx, buf, n);
+    }
+    if (r->tmp[2] && io->write_err) {
+        rewind(r->tmp[2]);
+        while ((n = fread(buf, 1, sizeof buf, r->tmp[2])) > 0)
+            io->write_err(io->ctx, buf, n);
+    }
+    for (fd = 0; fd < 3; fd++) {
+        if (r->tmp[fd]) fclose(r->tmp[fd]);
+        r->tmp[fd] = NULL;
+        if (r->path[fd][0]) DeleteFileA(r->path[fd]);
+        r->path[fd][0] = '\0';
+    }
+    r->io = NULL;
+    if (io && io->flush) io->flush(io->ctx);
+}
 
 #else
 
