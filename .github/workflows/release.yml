@@ -448,8 +448,7 @@ jobs:
           New-Item -ItemType Directory -Force C:\tmp\pyctest | Out-Null
           Copy-Item packages/python/tests/test_tinyc.py C:\tmp\pyctest\
           cd C:\tmp\pyctest
-          C:\tmp\venv\Scripts\python -m unittest test_tinyc *>
-            $env:GITHUB_WORKSPACE\test-outputs\python-consumer.log
+          C:\tmp\venv\Scripts\python -m unittest test_tinyc *> $env:GITHUB_WORKSPACE\test-outputs\python-consumer.log
           if ($LASTEXITCODE -ne 0) { Get-Content $env:GITHUB_WORKSPACE\test-outputs\python-consumer.log; exit $LASTEXITCODE }
 
       - name: Collect release assets
