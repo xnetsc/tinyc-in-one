@@ -58,7 +58,11 @@ public class TinycConsumerTest {
         try (Tinyc t = Tinyc.create(paths)) {
             t.setOutputType(Tinyc.OUTPUT_MEMORY);
             t.compileString("int main(void) { return 42; }");
-            t.relocate();
+            // No relocate() first: tcc_run loads runmain.o and
+            // relocates itself, and a state already relocated by
+            // tcc_relocate no longer has the sections that load
+            // needs (the kernel now refuses the composition with a
+            // clean error instead of crashing).
             assertEquals(42, t.run("prog"));
         }
     }

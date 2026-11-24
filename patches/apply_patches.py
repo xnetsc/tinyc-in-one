@@ -145,6 +145,51 @@ patch("tcc.c",
       'printf("-> %s\\n", f->name);',
       'tinyc_io_out_fmt("-> %s\\n", f->name);')
 
+# ---- libtcc.c: API-form -E output goes through the current IO ------
+# The tcc.c patch below routes -E output for the CLI form, which sets
+# s->ppfp itself. In API form nothing replaces the ppfp that tcc_new
+# sets to stdout, so preprocessed output bypassed the installed IO
+# entirely (and tinyc_io_open_out_stream was never called). Route it
+# for the duration of tcc_compile when ppfp still points at stdout:
+# the stream writes synchronously into the current IO (the Windows
+# temp-file stream is drained by tinyc_io_flush_all on the way out).
+# The local is assigned before setjmp and never modified inside the
+# protected block, so it survives an error longjmp; the tail runs on
+# both paths.
+patch("libtcc.c",
+      """    tcc_enter_state(s1);
+    s1->error_set_jmp_enabled = 1;
+""",
+      """    tcc_enter_state(s1);
+    s1->error_set_jmp_enabled = 1;
+
+    /* tinyc: route API-form -E output through the current IO */
+    FILE *tinyc_pp_stream = NULL;
+    if (s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout) {
+        tinyc_pp_stream = tinyc_io_open_out_stream();
+        if (tinyc_pp_stream)
+            s1->ppfp = tinyc_pp_stream;
+    }
+""")
+patch("libtcc.c",
+      """    tccgen_finish(s1);
+    preprocess_end(s1);
+    s1->error_set_jmp_enabled = 0;
+    tcc_exit_state(s1);
+    return s1->nb_errors != 0 ? -1 : 0;
+""",
+      """    tccgen_finish(s1);
+    preprocess_end(s1);
+    s1->error_set_jmp_enabled = 0;
+    tcc_exit_state(s1);
+    if (tinyc_pp_stream) {
+        fclose(tinyc_pp_stream);
+        s1->ppfp = stdout;
+        tinyc_io_flush_all();
+    }
+    return s1->nb_errors != 0 ? -1 : 0;
+""")
+
 # ---- tcc.c: -E output goes through the current IO when one is set ---
 patch("tcc.c",
       """            if (s->outfile && 0!=strcmp("-",s->outfile)) {
@@ -161,6 +206,40 @@ patch("tcc.c",
                  * one is installed (NULL stream keeps stdout). */
                 ppfp = tinyc_io_open_out_stream();
             }""")
+
+# ---- tccrun.c: no host kill / crash on a relocated state -----------
+# A successful tcc_relocate ends in cleanup_sections, which frees
+# every section except the symbol tables and NULLs the slots while
+# nb_sections stays: the state then serves symbol lookup and calls
+# only. Composing the public API as relocate() then run() on one
+# state sent tcc_run into tcc_add_support, whose object load matches
+# section names by dereferencing s1->sections[j] unconditionally -
+# a NULL slot reads its name at +0x80 and the host dies at fault
+# address 0x80. The composition cannot work (runmain.o was never in
+# the relocated image and a second relocation is unsupported), so
+# fail cleanly at the door instead. Likewise, a second tcc_relocate
+# called exit() into the host process; report and return like every
+# other libtcc error.
+patch("tccrun.c",
+      """    /* tcc -dt -run ... nothing to do if no main() */
+    if ((s1->dflag & 16) && (addr_t)-1 == get_sym_addr(s1, "main", 0, 1))
+        return 0;""",
+      """    /* tinyc: an already-relocated state cannot run (see above) */
+    if (s1->run_ptr) {
+        tcc_error_noabort("tcc_run: state was already relocated");
+        return -1;
+    }
+
+    /* tcc -dt -run ... nothing to do if no main() */
+    if ((s1->dflag & 16) && (addr_t)-1 == get_sym_addr(s1, "main", 0, 1))
+        return 0;""")
+patch("tccrun.c",
+      """    if (s1->run_ptr)
+        exit(tcc_error_noabort("'tcc_relocate()' twice is no longer supported"));""",
+      """    if (s1->run_ptr) {
+        tcc_error_noabort("'tcc_relocate()' twice is no longer supported");
+        return -1;
+    }""")
 
 # ---- tccrun.c: a missing runmain.o ends tcc_run at the load --------
 # tcc_run loads runmain.o for the entry shim it calls after
