@@ -406,6 +406,14 @@ jobs:
 
       - name: npm package - bundle, pack, consumer test on the tarballs
         shell: msys2 {0}
+        env:
+          # The MSYS2 login shell rebuilds PATH from MSYS2_PATH_TYPE,
+          # and the setup-msys2 default (minimal) replaces the
+          # inherited PATH with the Windows system directories alone,
+          # dropping the hosted tool cache entry setup-node added and
+          # leaving npm/node unresolvable. Inherit the full PATH for
+          # this step only; the MSYS2 directories still precede it.
+          MSYS2_PATH_TYPE: inherit
         run: |
           export TINYC_DIST_DIR=$PWD/stage-dist
           WS=$PWD
