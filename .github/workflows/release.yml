@@ -146,6 +146,13 @@ jobs:
           node /tmp/pw/browser-run.mjs /tmp/browser-consumer \
             > "$GITHUB_WORKSPACE/test-outputs/browser-consumer.log" 2>&1
 
+      - name: Wasm backend - full regression suite
+        run: |
+          rc=0
+          bash wasm-backend/tests/run-regression.sh || rc=$?
+          cp wasm-backend/tests/test-output.txt test-outputs/wasm-backend-regression.log
+          exit $rc
+
       - name: Android package - native libs, then the Gradle AAR
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}

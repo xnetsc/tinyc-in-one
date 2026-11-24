@@ -292,3 +292,4 @@ PASS e_cvtsd() = 87
 sse assertions: 23 passed, 0 failed
 ALL SSE ASSERTIONS PASSED
 node exit=0
+regression result: PASS

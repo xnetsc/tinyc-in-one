@@ -167,12 +167,175 @@ static void end_switch(void);
 static void do_Static_assert(void);
 
 /* ------------------------------------------------------------------------- */
+/* Register cache for scalar local variables.  On backends that define
+   REGCACHE_REGS (callee-saved registers outside the allocator's
+   classes), eligible locals are kept in a dedicated register across
+   statements within a basic block; the frame slot is written back at
+   flush points: control transfers, calls and jump-target bindings.
+   Reads and writes are intercepted in gv(), vstore() and gaddrof().
+   While code emission is suppressed (nocode_wanted) the layer is
+   frozen: dirty entries only become deferred-dirty, so no value is
+   ever lost in code that is parsed but not emitted. */
+
+#ifdef REGCACHE_NREGS
+
+#define RC_CLEAN    0
+#define RC_DIRTY    1 /* register is newer than the frame slot */
+#define RC_DEFERRED 2 /* write-back owed, emission was suppressed */
+#define REGCACHE_MAX_BLACKLIST 1024
+
+typedef struct {
+    int32_t offset; /* frame offset: the cache key */
+    int type_t;     /* declared type, selects the store width */
+    uint8_t reg;    /* dedicated register holding the value */
+    uint8_t state;  /* RC_CLEAN / RC_DIRTY / RC_DEFERRED */
+} RegCacheEntry;
+
+static RegCacheEntry regcache_entries[REGCACHE_NREGS];
+static int regcache_nb;
+static int32_t regcache_blacklist[REGCACHE_MAX_BLACKLIST];
+static int regcache_nblack;
+static int regcache_used;     /* mask over REGCACHE_REGS indices */
+static int regcache_disabled; /* latched by setjmp: no new promotions */
+static int regcache_asm_ban;  /* promotion off while asm is parsed */
+
+static int regcache_find(int32_t offset)
+{
+    int i;
+    for (i = 0; i < regcache_nb; i++)
+        if (regcache_entries[i].offset == offset)
+            return i;
+    return -1;
+}
+
+static int regcache_blacklisted(int32_t offset)
+{
+    int i;
+    for (i = 0; i < regcache_nblack; i++)
+        if (regcache_blacklist[i] == offset)
+            return 1;
+    return 0;
+}
+
+static void regcache_blacklist_add(int32_t offset)
+{
+    if (regcache_blacklisted(offset))
+        return;
+    if (regcache_nblack < REGCACHE_MAX_BLACKLIST)
+        regcache_blacklist[regcache_nblack++] = offset;
+    else
+        regcache_disabled = 1; /* cannot track more addresses */
+}
+
+/* write the register back to the frame slot if it is newer */
+static void regcache_writeback(int idx)
+{
+    RegCacheEntry *e = &regcache_entries[idx];
+    if (e->state != RC_CLEAN) {
+        SValue sv;
+        sv.type.t = e->type_t;
+        sv.type.ref = NULL;
+        sv.r = VT_LOCAL | VT_LVAL;
+        sv.c.i = e->offset;
+        sv.sym = NULL;
+        store(e->reg, &sv);
+        e->state = RC_CLEAN;
+    }
+}
+
+static void regcache_drop(int idx)
+{
+    regcache_entries[idx] = regcache_entries[--regcache_nb];
+}
+
+static void regcache_flush_entry(int idx)
+{
+    regcache_writeback(idx);
+    regcache_drop(idx);
+}
+
+/* Write back every dirty entry and drop all entries.  While emission
+   is suppressed, dirty entries become deferred-dirty instead and are
+   kept: the register stays authoritative until a flush point with
+   emission enabled writes it back. */
+ST_FUNC void regcache_flush_all(void)
+{
+    int i;
+    if (nocode_wanted) {
+        for (i = 0; i < regcache_nb; i++)
+            if (regcache_entries[i].state == RC_DIRTY)
+                regcache_entries[i].state = RC_DEFERRED;
+        return;
+    }
+    for (i = 0; i < regcache_nb; i++)
+        regcache_writeback(i);
+    regcache_nb = 0;
+}
+
+ST_FUNC void regcache_disable(void)
+{
+    regcache_flush_all();
+    regcache_disabled = 1;
+}
+
+ST_FUNC int regcache_used_mask(void)
+{
+    return regcache_used;
+}
+
+static void regcache_reset(void)
+{
+    regcache_nb = 0;
+    regcache_nblack = 0;
+    regcache_used = 0;
+    regcache_disabled = 0;
+    regcache_asm_ban = 0;
+}
+
+/* a dedicated register not used by any live entry, or -1 */
+static int regcache_free_reg(void)
+{
+    int i, j;
+    for (i = 0; i < REGCACHE_NREGS; i++) {
+        int reg = REGCACHE_REGS[i];
+        for (j = 0; j < regcache_nb; j++)
+            if (regcache_entries[j].reg == reg)
+                break;
+        if (j == regcache_nb) {
+            regcache_used |= 1 << i;
+            return reg;
+        }
+    }
+    return -1;
+}
+
+static int regcache_new_entry(SValue *sv, int reg, int state)
+{
+    int idx = regcache_nb++;
+    regcache_entries[idx].offset = sv->c.i;
+    regcache_entries[idx].type_t = sv->type.t;
+    regcache_entries[idx].reg = reg;
+    regcache_entries[idx].state = state;
+    return idx;
+}
+
+#endif /* REGCACHE_NREGS */
+
+/* ------------------------------------------------------------------------- */
 /* Automagical code suppression */
 
 /* Clear 'nocode_wanted' at forward label if it was used */
 ST_FUNC void gsym(int t)
 {
   if (t) {
+#ifdef REGCACHE_NREGS
+    /* F2: the binding revives code, so clear the automatic
+       suppression first: the flush then writes back for real and the
+       chain is bound past the write-backs.  Under hard nocode the
+       flush still degrades to the deferred-dirty conversion. */
+    CODE_ON();
+    regcache_flush_all();
+#endif
     gsym_addr(t, ind);
     CODE_ON();
   }
@@ -181,7 +344,12 @@ ST_FUNC void gsym(int t)
 /* Clear 'nocode_wanted' if current pc is a label */
 static int gind()
 {
-  int t = ind;
+  int t;
+  CODE_ON();
+#ifdef REGCACHE_NREGS
+  regcache_flush_all(); /* F2, see gsym() */
+#endif
+  t = ind;
   CODE_ON();
   if (debug_modes)
     tcc_tcov_block_begin(tcc_state);
@@ -191,6 +359,9 @@ static int gind()
 /* Set 'nocode_wanted' after unconditional (backwards) jump */
 static void gjmp_addr_acs(int t)
 {
+#ifdef REGCACHE_NREGS
+  regcache_flush_all(); /* F1: every edge leaves memory consistent */
+#endif
   gjmp_addr(t);
   CODE_OFF();
 }
@@ -198,6 +369,9 @@ static void gjmp_addr_acs(int t)
 /* Set 'nocode_wanted' after unconditional (forwards) jump */
 static int gjmp_acs(int t)
 {
+#ifdef REGCACHE_NREGS
+  regcache_flush_all(); /* F1 */
+#endif
   t = gjmp(t);
   CODE_OFF();
   return t;
@@ -1082,6 +1256,9 @@ static int gvtst(int inv, int t)
 {
     int op, x, u;
 
+#ifdef REGCACHE_NREGS
+    regcache_flush_all(); /* F1: also covers the gjmp_cond path below */
+#endif
     gvtst_set(inv, t);
     t = vtop->jtrue, u = vtop->jfalse;
     if (inv)
@@ -1591,6 +1768,17 @@ static void move_reg(int r, int s, int t)
 /* get address of vtop (vtop MUST BE an lvalue) */
 ST_FUNC void gaddrof(void)
 {
+#ifdef REGCACHE_NREGS
+    /* F4: a local whose address is materialized leaves the cache for
+       the rest of the function */
+    if (!nocode_wanted
+        && (vtop->r & (VT_VALMASK | VT_LVAL)) == (VT_LOCAL | VT_LVAL)) {
+        int idx = regcache_find(vtop->c.i);
+        if (idx >= 0)
+            regcache_flush_entry(idx);
+        regcache_blacklist_add(vtop->c.i);
+    }
+#endif
     vtop->r &= ~VT_LVAL;
     /* tricky: if saved lvalue, then we can go back to lvalue */
     if ((vtop->r & VT_VALMASK) == VT_LLOCAL)
@@ -1845,6 +2033,135 @@ static int adjust_bf(SValue *sv, int bit_pos, int bit_size)
     return t;
 }
 
+#ifdef REGCACHE_NREGS
+/* A local is cacheable when it is a named, fixed-slot scalar of an
+   integer class whose address has never been materialized in this
+   function.  The check runs on the SValue and its symbol, so it is
+   exact at every interception point. */
+static int regcache_eligible(SValue *sv)
+{
+    int bt;
+    Sym *s, *cls;
+
+    if (regcache_disabled || regcache_asm_ban)
+        return 0;
+    if ((sv->r & (VT_VALMASK | VT_LVAL)) != (VT_LOCAL | VT_LVAL))
+        return 0;
+    if (sv->type.t & (VT_BITFIELD | VT_ARRAY_MASK | VT_VOLATILE))
+        return 0;
+    bt = sv->type.t & VT_BTYPE;
+    if (bt != VT_INT && bt != VT_PTR && bt != VT_LLONG)
+        return 0;
+    if (USING_TWO_WORDS(bt))
+        return 0;
+    s = sv->sym;
+    if (!s || s->c != sv->c.i)
+        return 0;
+    /* the declared type must be in the cached classes too: an access
+       can be a cast view of the local with a different width */
+    bt = s->type.t & VT_BTYPE;
+    if (bt != VT_INT && bt != VT_PTR && bt != VT_LLONG)
+        return 0;
+    if (s->type.t & (VT_BITFIELD | VT_ARRAY_MASK | VT_VOLATILE))
+        return 0;
+    if ((s->r & VT_VALMASK) != VT_LOCAL)
+        return 0; /* byref parameter or asm register variable */
+    if (s->a.addrtaken)
+        return 0;
+    if (regcache_blacklisted(sv->c.i))
+        return 0;
+    for (cls = cur_scope ? cur_scope->cl.s : NULL; cls; cls = cls->next)
+        if (cls->cleanup_sym == s)
+            return 0; /* __attribute__((cleanup)) locals stay out */
+#ifdef CONFIG_TCC_BCHECK
+    if (tcc_state->do_bounds_check)
+        return 0;
+#endif
+    return 1;
+}
+
+/* gv() read interception: returns nonzero when vtop was materialized
+   from the cache.  The dedicated register itself is never handed
+   out: code generation modifies the register gv() returns in place
+   (gen_op on its first operand, casts), so the caller gets a copy in
+   a transient register and the cached value stays intact. */
+static int regcache_read_hook(int rc)
+{
+    int idx, reg, treg;
+    SValue sv;
+
+    if (nocode_wanted)
+        return 0;
+    if ((vtop->r & (VT_VALMASK | VT_LVAL)) != (VT_LOCAL | VT_LVAL))
+        return 0;
+    idx = regcache_find(vtop->c.i);
+    if (!regcache_eligible(vtop) || rc != RC_INT) {
+        /* not usable from the cache here: write back and drop any
+           entry, the stock path then reads the current frame slot */
+        if (idx >= 0)
+            regcache_flush_entry(idx);
+        return 0;
+    }
+    if (idx < 0) {
+        reg = regcache_free_reg();
+        if (reg < 0)
+            return 0;
+        sv = *vtop;
+        sv.type = vtop->sym->type; /* promote at the declared width:
+            this access may be a narrower cast view of the local, and
+            later accesses can need the full value */
+        load(reg, &sv); /* the stock load, into the dedicated register */
+        idx = regcache_new_entry(&sv, reg, RC_CLEAN);
+    }
+    treg = get_reg(RC_INT);
+    sv.type = vtop->type;
+    sv.r = regcache_entries[idx].reg;
+    sv.c.i = 0;
+    sv.sym = NULL;
+    load(treg, &sv); /* register copy with the access type's width */
+    vtop->r = treg;
+    return 1;
+}
+
+/* vstore() write interception: returns nonzero when the source value
+   was moved into the destination's cache register (marked dirty)
+   instead of being stored to its frame slot. */
+static int regcache_store_hook(int dbt)
+{
+    SValue *dest = vtop - 1;
+    SValue sv;
+    int idx, sreg, reg;
+
+    if (nocode_wanted || USING_TWO_WORDS(dbt))
+        return 0;
+    if (!regcache_eligible(dest))
+        return 0;
+    if ((dest->type.t & VT_BTYPE) != (dest->sym->type.t & VT_BTYPE))
+        return 0; /* a cast view of the local: the stock store keeps
+                     the widths straight */
+    sreg = vtop->r & VT_VALMASK;
+    if (sreg >= VT_CONST)
+        return 0;
+    idx = regcache_find(dest->c.i);
+    if (idx < 0) {
+        reg = regcache_free_reg();
+        if (reg < 0)
+            return 0;
+        idx = regcache_new_entry(dest, reg, RC_DIRTY);
+    }
+    reg = regcache_entries[idx].reg;
+    if (reg != sreg) {
+        sv.type = dest->type;
+        sv.r = sreg;
+        sv.c.i = 0;
+        sv.sym = NULL;
+        load(reg, &sv); /* register move with the destination's width */
+    }
+    regcache_entries[idx].state = RC_DIRTY;
+    return 1;
+}
+#endif /* REGCACHE_NREGS */
+
 /* store vtop a register belonging to class 'rc'. lvalues are
    converted to values. Cannot be used if cannot be converted to
    register value (such as structures). */
@@ -1852,6 +2169,11 @@ ST_FUNC int gv(int rc)
 {
     int r, r2, r_ok, r2_ok, rc2, bt;
     int bit_pos, bit_size, size, align;
+
+#ifdef REGCACHE_NREGS
+    if (regcache_read_hook(rc))
+        return vtop->r;
+#endif
 
     /* NOTE: get_reg can modify vstack[] */
     if (vtop->type.t & VT_BITFIELD) {
@@ -3933,6 +4255,10 @@ ST_FUNC void vstore(void)
                 vtop->type.t = ft & VT_TYPE;
             }
 
+#ifdef REGCACHE_NREGS
+            if (regcache_store_hook(dbt))
+                goto regcache_stored;
+#endif
             /* if lvalue was saved on stack, must read it */
             if ((vtop[-1].r & VT_VALMASK) == VT_LLOCAL) {
                 SValue sv;
@@ -3961,6 +4287,9 @@ ST_FUNC void vstore(void)
                 /* single word */
                 store(r, vtop - 1);
             }
+#ifdef REGCACHE_NREGS
+        regcache_stored:
+#endif
         vswap();
         vtop--; /* NOT vpop() because on x86 it would flush the fp stack */
     }
@@ -6480,6 +6809,19 @@ special_math_val:
 
             next();
             vcheck_cmp(); /* the generators don't like VT_CMP on vtop */
+#ifdef REGCACHE_NREGS
+            /* F6: a setjmp call latches the cache off for the rest of
+               the function (the call itself is flushed by F3) */
+            if ((vtop - nb_args)->r & VT_SYM) {
+                Sym *csym = (vtop - nb_args)->sym;
+                if (csym && (csym->v == TOK_setjmp || csym->v == TOK__setjmp
+#ifndef TCC_TARGET_PE
+                    || csym->v == TOK_sigsetjmp || csym->v == TOK___sigsetjmp
+#endif
+                    ))
+                    regcache_disable();
+            }
+#endif
             gfunc_call(nb_args);
 
             if (ret_nregs < 0) {
@@ -7628,6 +7970,9 @@ again:
             gexpr();
             if ((vtop->type.t & VT_BTYPE) != VT_PTR)
                 expect("pointer");
+#ifdef REGCACHE_NREGS
+            regcache_flush_all(); /* F1 */
+#endif
             ggoto();
 
         } else if (tok >= TOK_UIDENT) {
@@ -7659,7 +8004,17 @@ again:
         skip(';');
 
     } else if (t == TOK_ASM1 || t == TOK_ASM2 || t == TOK_ASM3) {
+#ifdef REGCACHE_NREGS
+        /* F5: asm may touch any memory and clobber any register;
+           asm_instr() also materializes its operands internally, so
+           promotion stays off until it returns */
+        regcache_flush_all();
+        regcache_asm_ban++;
         asm_instr();
+        regcache_asm_ban--;
+#else
+        asm_instr();
+#endif
 
     } else {
         if (tok == ':' && t >= TOK_UIDENT) {
@@ -8840,6 +9195,9 @@ static void gen_function(Sym *sym)
     local_scope = 0;
     rsym = 0;
     nb_temp_local_vars = 0;
+#ifdef REGCACHE_NREGS
+    regcache_reset();
+#endif
 
     gfunc_prolog(sym);
     tcc_debug_prolog_epilog(tcc_state, 0);
