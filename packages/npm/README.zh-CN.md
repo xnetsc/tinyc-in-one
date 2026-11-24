@@ -9,7 +9,7 @@
 ## 安装
 
 ```
-npm install tinyc
+npm install @xnetx/tinyc
 ```
 
 你所在宿主的原生文件放在按宿主分的子包
@@ -38,7 +38,7 @@ triple 由平台探测（`$TINYC_HOST_TRIPLE` 可覆盖探测，`$TINYC_TRIPLE`
 ## 命令行式
 
 ```js
-const tcc = require('tinyc');
+const tcc = require('@xnetx/tinyc');
 
 const code = tcc.runCli(['hello.c', '-o', 'hello']);  // 退出码
 const [code2, output] = tcc.runCliCapture(['--version']);

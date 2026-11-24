@@ -128,10 +128,10 @@ npm、Python、Java 三个包内部用同一套布局：
 `packaging-manifest.json` 里查该组合。包内没有该组合时报错，并
 指明当前宿主、目标与包内可用组合。
 
-### npm —— `tinyc`
+### npm —— `@xnetx/tinyc`
 
 ```
-npm install tinyc
+npm install @xnetx/tinyc
 ```
 
 原生文件放在按宿主分的子包 `@xnetx/tinyc-native-<宿主-triple>`
@@ -139,7 +139,7 @@ npm install tinyc
 工作）。绑定用 koffi。
 
 ```js
-const tcc = require('tinyc');
+const tcc = require('@xnetx/tinyc');
 
 const code = tcc.runCli(['hello.c', '-o', 'hello']);   // 退出码
 const [code2, output] = tcc.runCliCapture(['--version']);

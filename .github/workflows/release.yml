@@ -103,7 +103,7 @@ jobs:
           rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
           npm init -y >/dev/null
           npm install --silent \
-            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/xnetx-tinyc-[0-9]*.tgz \
             "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-x86_64-linux-gnu/*.tgz
           cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
           node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
@@ -167,13 +167,14 @@ jobs:
             -C build/dist-host aarch64-linux-gnu
           (cd build/dist-host/x86_64-w64-mingw32 && \
             zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-x86_64-w64-mingw32-cross.zip" .)
-          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-x86_64-linux-gnu.tgz
+          cp packages/npm/xnetx-tinyc-[0-9]*.tgz release-assets/tinyc-npm-x86_64-linux-gnu.tgz
           cp packages/npm/native-packages/@xnetx/tinyc-native-x86_64-linux-gnu/*.tgz release-assets/
           cp packages/python/dist-wheels/*manylinux*x86_64*.whl release-assets/
           cp packages/java/dist/tinyc.jar release-assets/tinyc-x86_64-linux-gnu.jar
           cp packages/android/build/outputs/aar/tinyc-android-release.aar release-assets/
           (cd packages/browser && zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-web.zip" \
-            index.mjs runtime-shims.mjs worker.mjs package.json \
+            index.mjs runtime-shims.mjs vfs-store.mjs worker.mjs tinyc-web.js package.json \
+            README.md README.zh-CN.md \
             sysroot-manifest.json sysroot-manifests sysroot tcc-*.mjs tcc-*.wasm)
           ls -la release-assets/
 
@@ -266,7 +267,7 @@ jobs:
           rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
           npm init -y >/dev/null
           npm install --silent \
-            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/xnetx-tinyc-[0-9]*.tgz \
             "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-aarch64-linux-gnu/*.tgz
           cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
           node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
@@ -297,7 +298,7 @@ jobs:
         run: |
           mkdir -p release-assets
           tar -czf release-assets/tinyc-aarch64-linux-gnu.tar.gz -C build/dist .
-          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-aarch64-linux-gnu.tgz
+          cp packages/npm/xnetx-tinyc-[0-9]*.tgz release-assets/tinyc-npm-aarch64-linux-gnu.tgz
           cp packages/npm/native-packages/@xnetx/tinyc-native-aarch64-linux-gnu/*.tgz release-assets/
           cp packages/python/dist-wheels/*manylinux*aarch64*.whl release-assets/
           cp packages/java/dist/tinyc.jar release-assets/tinyc-aarch64-linux-gnu.jar
@@ -426,7 +427,7 @@ jobs:
           rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
           npm init -y >/dev/null
           npm install --silent \
-            "$WS"/packages/npm/tinyc-*.tgz \
+            "$WS"/packages/npm/xnetx-tinyc-[0-9]*.tgz \
             "$WS"/packages/npm/native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32/*.tgz
           cp "$WS/tests/consumer/npm-consumer.test.js" .
           node npm-consumer.test.js > "$WS/test-outputs/npm-consumer.log" 2>&1
@@ -458,7 +459,7 @@ jobs:
           New-Item -ItemType Directory -Force release-assets | Out-Null
           Compress-Archive -Path build/dist-host/x86_64-w64-mingw32/* `
             -DestinationPath release-assets/tinyc-x86_64-w64-mingw32.zip
-          Copy-Item packages/npm/tinyc-*.tgz release-assets/tinyc-npm-x86_64-w64-mingw32.tgz
+          Copy-Item packages/npm/xnetx-tinyc-[0-9]*.tgz release-assets/tinyc-npm-x86_64-w64-mingw32.tgz
           Copy-Item packages/npm/native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32/*.tgz release-assets/
           Copy-Item packages/python/dist-wheels/*win_amd64*.whl release-assets/
           Copy-Item packages/java/dist/tinyc.jar release-assets/tinyc-x86_64-w64-mingw32.jar
@@ -587,7 +588,7 @@ jobs:
           rm -rf /tmp/npm-consumer && mkdir -p /tmp/npm-consumer && cd /tmp/npm-consumer
           npm init -y >/dev/null
           npm install --silent \
-            "$GITHUB_WORKSPACE"/packages/npm/tinyc-*.tgz \
+            "$GITHUB_WORKSPACE"/packages/npm/xnetx-tinyc-[0-9]*.tgz \
             "$GITHUB_WORKSPACE"/packages/npm/native-packages/@xnetx/tinyc-native-${{ matrix.triple }}/*.tgz
           cp "$GITHUB_WORKSPACE/tests/consumer/npm-consumer.test.js" .
           node npm-consumer.test.js > "$GITHUB_WORKSPACE/test-outputs/npm-consumer.log" 2>&1
@@ -617,7 +618,7 @@ jobs:
           mkdir -p release-assets
           tar -czf release-assets/tinyc-${{ matrix.triple }}.tar.gz \
             -C mac-test-bundle/dist .
-          cp packages/npm/tinyc-*.tgz release-assets/tinyc-npm-${{ matrix.triple }}.tgz
+          cp packages/npm/xnetx-tinyc-[0-9]*.tgz release-assets/tinyc-npm-${{ matrix.triple }}.tgz
           cp packages/npm/native-packages/@xnetx/tinyc-native-${{ matrix.triple }}/*.tgz release-assets/
           cp packages/python/dist-wheels/*.whl release-assets/
           cp packages/java/dist/tinyc.jar release-assets/tinyc-${{ matrix.triple }}.jar

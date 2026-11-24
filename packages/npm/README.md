@@ -10,7 +10,7 @@ libraries it needs, and drives it with koffi.
 ## Install
 
 ```
-npm install tinyc
+npm install @xnetx/tinyc
 ```
 
 The native files for your host ship in a per-host subpackage,
@@ -45,7 +45,7 @@ combinations compile to files) are in the
 ## Command-line style
 
 ```js
-const tcc = require('tinyc');
+const tcc = require('@xnetx/tinyc');
 
 const code = tcc.runCli(['hello.c', '-o', 'hello']);  // exit code
 const [code2, output] = tcc.runCliCapture(['--version']);

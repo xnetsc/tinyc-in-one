@@ -148,10 +148,10 @@ the combination up in `packaging-manifest.json`. A combination the
 package does not contain fails with an error naming the host, the
 target, and the combinations available.
 
-### npm — `tinyc`
+### npm — `@xnetx/tinyc`
 
 ```
-npm install tinyc
+npm install @xnetx/tinyc
 ```
 
 The native files ship in a per-host subpackage,
@@ -161,7 +161,7 @@ works standalone when it carries its own `natives/`). The binding
 uses koffi.
 
 ```js
-const tcc = require('tinyc');
+const tcc = require('@xnetx/tinyc');
 
 const code = tcc.runCli(['hello.c', '-o', 'hello']);   // exit code
 const [code2, output] = tcc.runCliCapture(['--version']);

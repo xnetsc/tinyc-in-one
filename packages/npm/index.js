@@ -131,8 +131,10 @@ function resolveNative() {
   }
   if (!sawManifest) {
     throw new TinyCError(
-      'tinyc: packaging-manifest.json not found in this package; ' +
-      'the native distribution is missing (run bundle_native.js)');
+      'tinyc: packaging-manifest.json not found; the native distribution is missing ' +
+      `(a registry install needs the platform subpackage @xnetx/tinyc-native-${host} ` +
+      'installed alongside - it is an optional dependency, so do not disable optional ' +
+      'dependencies; in a repository checkout, run bundle_native.js)');
   }
   throw new TinyCError(
     `tinyc: no native build for host ${host} / target ${target} in this package; ` +
