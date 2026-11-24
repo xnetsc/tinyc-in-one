@@ -11,6 +11,23 @@ cd "$(dirname "$0")"
 
 NAME=$(cat build/native-name.txt)
 CP="dist/tinyc.jar:build/test-classes"
+NATIVE_PATH="$PWD/build/test-runtime/$NAME"
+LIB_PATH="$PWD/build/test-runtime"
+# Windows 宿主（Git Bash/MSYS2/Cygwin）：原生 JVM 的 -cp 分隔符是 ';'，
+# 且只认 Windows 形态路径（C:\...），$PWD 的 /c/... 形态它不认——-cp
+# 与两个 -D 路径都经 cygpath 转成 Windows 形态。其余宿主保持 ':' 分隔
+# 与原始路径不变。
+case "$(uname -s)" in
+  MINGW64_NT*|MSYS_NT*|CYGWIN_NT*)
+    if command -v cygpath >/dev/null 2>&1; then
+      CP="$(cygpath -w "$PWD/dist/tinyc.jar");$(cygpath -w "$PWD/build/test-classes")"
+      NATIVE_PATH=$(cygpath -w "$NATIVE_PATH")
+      LIB_PATH=$(cygpath -w "$LIB_PATH")
+    else
+      CP="$PWD/dist/tinyc.jar;$PWD/build/test-classes"
+    fi
+    ;;
+esac
 # JDK 定位与 build.sh 同一套规则：按版本逐个核验候选，取第一个主版本号
 # >= 22 的，保证运行时 java 与 build.sh 编译用的 javac 出自同一个 JDK。
 javac_major() {
@@ -47,8 +64,8 @@ JDK_BIN=$(resolve_jdk_bin) || {
 JAVA="$JDK_BIN/java --enable-native-access=ALL-UNNAMED"
 
 echo "=== mode A: tinyc.native.path (dev) ==="
-$JAVA -Dtinyc.native.path="$PWD/build/test-runtime/$NAME" \
-      -Dtinyc.lib.path="$PWD/build/test-runtime" \
+$JAVA -Dtinyc.native.path="$NATIVE_PATH" \
+      -Dtinyc.lib.path="$LIB_PATH" \
       -cp "$CP" tinyc.TinyCTest
 
 echo "=== mode B: jar extraction (distribution) ==="
