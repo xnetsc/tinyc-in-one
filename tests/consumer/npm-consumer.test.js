@@ -44,7 +44,10 @@ try {
     const [code] = tinyc.runCliCapture([src, '-o', exe]);
     assert.strictEqual(code, 0);
     const out = execFileSync(exe, [], { encoding: 'utf8' });
-    assert.strictEqual(out, 'hello from tinyc\n');
+    // The product is a native executable: on Windows its printf emits
+    // CRLF (CRT text mode, the same as MSVC-produced programs), so
+    // compare the content exactly, modulo line endings only.
+    assert.strictEqual(out.replace(/\r\n/g, '\n'), 'hello from tinyc\n');
   });
 
   ok('State API compiles a function and calls it in process', () => {

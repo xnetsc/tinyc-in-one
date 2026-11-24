@@ -30,7 +30,9 @@ test('cli: compile and run an executable', () => {
   assert.strictEqual(code, 0, out.toString());
   const r = require('child_process').spawnSync(exe, [], { encoding: 'buffer' });
   assert.strictEqual(r.status, 7);
-  assert.strictEqual(r.stdout.toString(), 'hi-js\n');
+  // A Windows build of the product prints CRLF (CRT text mode);
+  // normalize line endings, compare everything else byte-exactly.
+  assert.strictEqual(r.stdout.toString().replace(/\r\n/g, '\n'), 'hi-js\n');
 });
 
 test('cli: bad source returns nonzero and captures the error', () => {
@@ -66,7 +68,7 @@ test('cli: dynamic add of a local include dir and a local static library', () =>
   const exe = path.join(d, 'prog');
   [code, out] = tcc.runCliCapture(['-I' + inc, main, path.join(d, 'libdyn.a'), '-o', exe]);
   assert.strictEqual(code, 0, out.toString());
-  assert.strictEqual(execFileSync(exe).toString(), 'dyn 99 1234\n');
+  assert.strictEqual(execFileSync(exe).toString().replace(/\r\n/g, '\n'), 'dyn 99 1234\n');
 });
 
 test('api: compileString and call the compiled function', () => {

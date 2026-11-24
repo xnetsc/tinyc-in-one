@@ -31,7 +31,9 @@ class CliModeTests(unittest.TestCase):
             self.assertEqual(code, 0, out)
             r = subprocess.run([exe], capture_output=True)
             self.assertEqual(r.returncode, 7)
-            self.assertEqual(r.stdout, b"hi-py\n")
+            # A Windows build of the product prints CRLF (CRT text
+            # mode, like MSVC output); normalize line endings only.
+            self.assertEqual(r.stdout.replace(b"\r\n", b"\n"), b"hi-py\n")
 
     def test_bad_source_reports_error_and_returns_nonzero(self):
         with tempfile.TemporaryDirectory() as d:
@@ -82,7 +84,8 @@ class CliModeTests(unittest.TestCase):
                 ["-I" + inc, main, liba, "-o", exe])
             self.assertEqual(code, 0, out)
             r = subprocess.run([exe], capture_output=True)
-            self.assertEqual(r.stdout, b"dyn 99 1234\n")
+            self.assertEqual(r.stdout.replace(b"\r\n", b"\n"),
+                             b"dyn 99 1234\n")
 
 
 class ApiModeTests(unittest.TestCase):
