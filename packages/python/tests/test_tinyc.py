@@ -249,8 +249,18 @@ class HostSimulationTests(unittest.TestCase):
         root = os.path.dirname(os.path.abspath(tinyc.__file__))
         with open(os.path.join(root, "packaging-manifest.json")) as f:
             combos = json.load(f)["combinations"]
+        # The simulated host is one this package does not stage.
+        # Each wheel stages only its own host's combinations, so
+        # which host is missing differs per package: on the Windows
+        # wheel the mingw32 host is the one combination present.
+        staged_hosts = {c["host"] for c in combos}
+        absent_host = next(
+            h for h in ("x86_64-w64-mingw32", "aarch64-linux-gnu",
+                        "x86_64-linux-gnu", "arm64-apple-darwin",
+                        "x86_64-apple-darwin")
+            if h not in staged_hosts)
         r = self.run_child(
-            {"TINYC_HOST_TRIPLE": "x86_64-w64-mingw32"},
+            {"TINYC_HOST_TRIPLE": absent_host},
             "import tinyc\n"
             "try:\n"
             "    tinyc.resolve_native()\n"
@@ -258,7 +268,8 @@ class HostSimulationTests(unittest.TestCase):
             "except Exception as e:\n"
             "    print('ERR', e)\n")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(b"no native build for host x86_64-w64-mingw32", r.stdout)
+        self.assertIn(f"no native build for host {absent_host}".encode(),
+                      r.stdout)
         # Every combination this package does contain must be named
         # in the error's available list.
         for c in combos:
