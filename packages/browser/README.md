@@ -1,5 +1,7 @@
 # tinyc-web
 
+**English** | [简体中文](README.zh-CN.md)
+
 TinyC (TCC) for the browser: the compiler built to WebAssembly, with a JavaScript glue layer, a virtual filesystem, and a Web Worker interface.
 
 ## Build prerequisite

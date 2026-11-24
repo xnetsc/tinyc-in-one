@@ -1,45 +1,57 @@
-# TinyC Java 服务器包
+# TinyC Java server package
 
-TinyC 编译器的 Java 绑定：用 Panama FFM 直接调 libtcc 的 C ABI，不经 JNI，
-不带额外原生件（绑定层是纯 Java，原生侧只有 TCC 内核文件本身）。
+**English** | [简体中文](README.zh-CN.md)
 
-## 要求
+Java bindings for the TinyC compiler: call libtcc's C ABI directly
+through Panama FFM — no JNI, no extra native components (the binding
+layer is pure Java; on the native side there is only the TCC kernel
+file itself).
 
-- JDK 22 或更新（Panama FFM 正式版；开发与测试在 JDK 25 上进行）。
-- 运行时加 `--enable-native-access=ALL-UNNAMED`（JDK 24+ 对原生访问的要求）。
+## Requirements
 
-## Jar 布局
+- JDK 22 or newer (Panama FFM in its final form; development and
+  tests run on JDK 25).
+- Pass `--enable-native-access=ALL-UNNAMED` at runtime (JDK 24+'s
+  requirement for native access).
 
-Jar 内是与 npm、Python 包相同的统一布局，按构建宿主打包：一个宿主的
-双形态文件 × 构建时 dist 里的全部目标（当前构建为 6 个目标），sysroot
-按目标一份、为该宿主的全部组合共用：
+## Jar layout
+
+The Jar uses the same unified layout as the npm and Python packages,
+packed per build host: one host's dual-form file × every target in
+the dist at build time (the current build carries 6 targets), with
+one sysroot per target shared by all of that host's combinations:
 
 ```
 tinyc.jar
-├─ tinyc/*.class                 Panama 绑定、双入口封装、IO 跳板
-├─ tinyc-native.properties       版本号
-├─ packaging-manifest.json       Jar 内的 (host, target) 组合清单
+├─ tinyc/*.class                 Panama bindings, dual-entry wrappers, IO trampoline
+├─ tinyc-native.properties       version number
+├─ packaging-manifest.json       the (host, target) combinations inside the Jar
 ├─ natives/<host>/toolchain/<target>/tinyc[.exe]
-└─ sysroot/<target>/             每目标一份：include/ 与 lib/tcc/
+└─ sysroot/<target>/             one per target: include/ and lib/tcc/
 ```
 
-首次加载时按探测到的宿主/目标 triple 在清单里查组合，把该组合的
-二进制与目标 sysroot 解压到 `~/.cache/tinyc-java/<version>/`，
-组合标记完整后复用；运行时目录取清单的 `libPath` 字段，新会话自动
-以它调用 `tcc_set_lib_path`。宿主与目标可用环境变量
-`TINYC_HOST_TRIPLE` / `TINYC_TARGET_TRIPLE` 覆盖（系统属性
-`tinyc.host.triple` / `tinyc.target.triple` 亦可）。宿主与目标均为
-64 位，32 位宿主直接报不支持。
+On first load, the detected host/target triples are looked up in the
+manifest, and that combination's binary and target sysroot are
+extracted to `~/.cache/tinyc-java/<version>/`; once the combination
+marker is complete, the extraction is reused. The runtime directory
+comes from the manifest's `libPath` field, and a new session passes
+it to `tcc_set_lib_path` automatically. Host and target can be
+overridden with the environment variables `TINYC_HOST_TRIPLE` /
+`TINYC_TARGET_TRIPLE` (the system properties `tinyc.host.triple` /
+`tinyc.target.triple` work too). Hosts and targets are 64-bit; a
+32-bit host is reported as unsupported directly.
 
-## 原生文件来源
+## Where the native files come from
 
-`build.sh` 用仓库的 `packaging/stage_layout.py`，把主线构建
-`../../build/dist` 里能跑在构建宿主上的目标全部 staged 进 Jar。
-host == target 的原生组合不在 dist 里时，构建直接报错退出。
+`build.sh` uses the repository's `packaging/stage_layout.py` to
+stage into the Jar every target in the mainline build
+`../../build/dist` that can run on the build host. If the native
+combination with host == target is not in the dist, the build fails
+with an error.
 
-## 用法
+## Usage
 
-会话式 API（细粒度，对应 `tcc_*`）：
+Session-style API (fine-grained, corresponding to `tcc_*`):
 
 ```java
 try (TccSession s = TinyC.newSession()) {
@@ -55,36 +67,45 @@ try (TccSession s = TinyC.newSession()) {
 }
 ```
 
-命令行式入口（粗粒度，参数与 tcc 命令行一致，返回退出码）：
+Command-line-style entry (coarse-grained; the arguments match the
+tcc command line, and it returns the exit code):
 
 ```java
 int rc = TinyC.runCli("-o", "hello", "hello.c");
 ```
 
-`runCli` 调原生文件导出的真 main（`tinyc_main` 优先，无则 `main`）：
-`argv[0]` 由封装层填原生文件的真实路径；已知运行时目录且参数中没有 `-B` 时
-自动补 `-B<运行时目录>`；调用全程持锁串行，返回后冲刷 C stdio。
-main 返回即返回，不结束宿主进程。
+`runCli` calls the real main exported by the native file
+(`tinyc_main` preferred, `main` otherwise): the wrapper fills
+`argv[0]` with the native file's real path; when the runtime
+directory is known and the arguments contain no `-B`, it appends
+`-B<runtime directory>` automatically; the call is serialized under
+a lock for its whole duration, and C stdio is flushed after it
+returns. When main returns, `runCli` returns — it does not end the
+host process.
 
-动态添加本地文件（真实路径直读，不拷贝）：
+Adding local files dynamically (real paths, read directly, no
+copying):
 
 ```java
-s.addIncludePath("/home/user/mylib/include");      // 目录
-s.addIncludePath("/opt/foo");                       // 单个头文件 /opt/foo/bar.h 取其父目录
+s.addIncludePath("/home/user/mylib/include");      // a directory
+s.addIncludePath("/opt/foo");                       // a single header /opt/foo/bar.h: its parent directory is taken
 s.addLibraryPath("/home/user/mylib/lib");
-s.addFile("/home/user/mylib/libfoo.a");             // 单个库文件，不走 -l 搜索
+s.addFile("/home/user/mylib/libfoo.a");             // a single library file, not via -l search
 ```
 
-开发/测试时可用系统属性绕过 Jar 解压，直接指定本地原生文件：
+During development and testing, system properties can bypass the Jar
+extraction and point at a local native file directly:
 
 ```
 -Dtinyc.native.path=/path/to/tinyc -Dtinyc.lib.path=/path/to/runtime-dir
 ```
 
-`tinyc.lib.path` 是含 `libtcc1.a` 与 `include/` 的目录；不给时若原生文件
-同目录下有 `libtcc1.a` 就用该目录，再否则不自动设置 lib 路径。
+`tinyc.lib.path` is the directory holding `libtcc1.a` and
+`include/`; when it is not given, if there is a `libtcc1.a` next to
+the native file that directory is used, and otherwise no lib path
+is set automatically.
 
-## API 对照（libtcc.h）
+## API map (libtcc.h)
 
 | Java | C |
 |---|---|
@@ -96,46 +117,67 @@ s.addFile("/home/user/mylib/libfoo.a");             // 单个库文件，不走 
 | `defineSymbol` / `undefineSymbol` | `tcc_define_symbol` / `tcc_undefine_symbol` |
 | `addSymbol` | `tcc_add_symbol` |
 | `setErrorHandler` / `setIO` | `tcc_set_error_func` |
-| `TinyC.runCli(io, ...)` | `tinyc_main_io`（io 经 `tcc_io_callback` 组成 TCCIO） |
+| `TinyC.runCli(io, ...)` | `tinyc_main_io` (io composed into a TCCIO via `tcc_io_callback`) |
 | `TinyC.runCli(...)` | `tinyc_main` |
 | `compileString` | `tcc_compile_string` |
-| `compileFile` | `tcc_add_file`（libtcc.h 没有 `tcc_compile_file`） |
-| `setOutputType` | `tcc_set_output_type`（常量 `TinyC.TCC_OUTPUT_*`） |
+| `compileFile` | `tcc_add_file` (libtcc.h has no `tcc_compile_file`) |
+| `setOutputType` | `tcc_set_output_type` (constants `TinyC.TCC_OUTPUT_*`) |
 | `outputFile` | `tcc_output_file` |
-| `run` | `tcc_run`（目标程序在宿主进程内运行，其 exit 与崩溃归宿主） |
+| `run` | `tcc_run` (the target program runs inside the host process; its exit and crashes belong to the host) |
 | `relocate` / `getSymbol` | `tcc_relocate` / `tcc_get_symbol` |
 
 ## IO
 
-`TccIO` 是三个通道的接口：`writeOut`、`writeErr`、`readIn`，数据以字节传递。
-现成实现：`TccIO.stdio()`（System 流）、`TccIO.of(out, err, in)`（流适配，
-null 回落 System 流）、`TccIO.capturing()`（内存攒积，out/err 分开取）。
+`TccIO` is a three-channel interface: `writeOut`, `writeErr`,
+`readIn`, with data passed as bytes. Ready-made implementations:
+`TccIO.stdio()` (the System streams), `TccIO.of(out, err, in)`
+(stream adapter; null falls back to the System streams),
+`TccIO.capturing()` (accumulates in memory, out/err retrieved
+separately).
 
-当前接入状态：
+Current wiring:
 
-- 错误通道：`TccSession.setIO(io)` 或 `setErrorHandler(handler)` 后，
-  libtcc 的错误文本经 Panama upcall 跳板以字节交给 `writeErr`。
-- 全部三通道：`TinyC.runCli(io, args...)` 把 `writeOut` / `writeErr` /
-  `readIn` 的跳板经内核 `tcc_io_callback` 组成回调型 TCCIO，传给
-  `tinyc_main_io`，在该次调用期间作为编译器的当前 IO：编译器自身的
-  输出（版本、预处理结果等）走 `writeOut`、诊断走 `writeErr`、
-  `readIn` 随 TCCIO 一并传给内核。不带 io 的 `runCli(args...)` 走
-  `tinyc_main`，输出走进程真实 stdio，与命令行一致。
-- 跳板遵守四条规矩：异常不穿 C 边界（抓住存下、原生调用返回后以
-  `TccException` 重抛）；字节传递不假设 `\0` 结尾；stub 所在 Arena
-  钉到调用结束（会话错误回调钉到 `close()`）；回调在调用线程同步执行。
-- 默认不设任何回调：libtcc 的报错走进程真实 stderr，与命令行一致。
-- 带 IO 跑 `-run` 时，目标程序在运行期间的 stdin 由 `readIn` 喂入、stdout 与 stderr 分别经 `writeOut` 与 `writeErr` 交付；不带 IO 时目标程序用进程真实 stdio。
+- Error channel: after `TccSession.setIO(io)` or
+  `setErrorHandler(handler)`, libtcc's error text is handed to
+  `writeErr` as bytes through a Panama upcall trampoline.
+- All three channels: `TinyC.runCli(io, args...)` composes the
+  `writeOut` / `writeErr` / `readIn` trampolines into a callback
+  TCCIO via the kernel's `tcc_io_callback`, passes it to
+  `tinyc_main_io`, and it serves as the compiler's current IO for
+  that call: the compiler's own output (version, preprocessor
+  results, and the like) goes to `writeOut`, diagnostics go to
+  `writeErr`, and `readIn` is passed to the kernel along with the
+  TCCIO. `runCli(args...)` without io goes through `tinyc_main`,
+  with output on the process's real stdio, matching the command
+  line.
+- The trampolines obey four rules: exceptions never cross the C
+  boundary (they are caught and stored, then rethrown as
+  `TccException` after the native call returns); bytes are passed
+  without assuming a `\0` terminator; the Arena holding a stub is
+  pinned until the call ends (a session error callback is pinned
+  until `close()`); callbacks execute synchronously on the calling
+  thread.
+- By default no callback is set: libtcc's errors go to the process's
+  real stderr, matching the command line.
+- When `-run` runs with IO, the target program's stdin is fed by
+  `readIn` while it runs, and its stdout and stderr are delivered
+  through `writeOut` and `writeErr` respectively; without IO, the
+  target program uses the process's real stdio.
 
-## 构建与测试
+## Building and tests
 
 ```sh
-bash build.sh        # 产出 dist/tinyc.jar，并编好测试类
-bash run-tests.sh    # 三遍：A 系统属性直指本地文件 / B Jar 解压分发模式 / C 宿主模拟
+bash build.sh        # produces dist/tinyc.jar and compiles the test classes
+bash run-tests.sh    # three passes: A system properties pointing at local files / B Jar extraction distribution mode / C host simulation
 ```
 
-宿主模拟（C）由本包清单驱动：模拟的组合在包内则解析并跑全套，不在则
-断言错误指名该宿主并列出包内全部组合；32 位宿主单独断言拒绝。
+Host simulation (C) is driven by this package's manifest: if the
+simulated combination is in the package, it is resolved and the full
+suite runs; if not, the test asserts the error names that host and
+lists every combination in the package. A 32-bit host has a separate
+assertion rejecting it.
 
-`build.sh` 与 `run-tests.sh` 用同一套规则定位 JDK：按候选逐个核验
-主版本号，取第一个 ≥ 22 的，保证编译与运行出自同一个 JDK。
+`build.sh` and `run-tests.sh` locate the JDK by the same rule:
+candidates are checked one by one for their major version and the
+first one ≥ 22 is taken, so compilation and running come from the
+same JDK.

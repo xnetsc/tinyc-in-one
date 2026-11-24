@@ -1,5 +1,7 @@
 # tinyc for Python
 
+**English** | [简体中文](README.zh-CN.md)
+
 TinyC (TCC) as an embedded compiler in Python. The package bundles one
 dual-form native file per target — the same file is the `tcc` command
 and the libtcc library — together with the headers and libraries it
