@@ -461,6 +461,10 @@ function makeFakeEmscripten(overrides = {}) {
     FS: {
       mkdirTree() {},
       writeFile(p, bytes) { nativeFiles.set(p, bytes); },
+      readFile(p) {
+        if (!nativeFiles.has(p)) throw new Error(`no such file: ${p}`);
+        return nativeFiles.get(p);
+      },
       unlink(p) { nativeFiles.delete(p); },
     },
     ccall() { throw new Error('ccall must not be reached'); },
@@ -534,6 +538,39 @@ test('fsBackend: a failing OPFS mount attempt falls back to memory without throw
   });
 });
 
+test('fsBackend: a backend that traps on first use falls back to memory', async () => {
+  await withWorkerGlobals(async () => {
+    // The mount itself succeeds; the backend's operations throw on
+    // first use, like the WasmFS OPFS backend of a build whose
+    // async operations have nothing to suspend into. The probe in
+    // the mount attempt must absorb that and leave the instance on
+    // the memory backend, with mirroring rooted at the module FS
+    // root exactly as if no mount had happened.
+    const fake = makeFakeEmscripten({
+      _wasmfs_create_opfs_backend() {},
+      _wasmfs_create_directory() {},
+      async ccall(name) {
+        return name === 'wasmfs_create_opfs_backend' ? 4242 : 0;
+      },
+    });
+    const serve = fake.FS.writeFile;
+    fake.FS.writeFile = (p, bytes) => {
+      if (p.startsWith('/opfs/')) throw new Error('RuntimeError: unreachable');
+      serve(p, bytes);
+    };
+    fake.FS.readFile = (p) => {
+      if (p.startsWith('/opfs/')) throw new Error('RuntimeError: unreachable');
+      if (!fake.nativeFiles.has(p)) throw new Error(`no such file: ${p}`);
+      return fake.nativeFiles.get(p);
+    };
+    const tinyc = await loadTinyc({ module: fake });
+    assert.equal(tinyc.fsBackend, 'memory');
+    tinyc.addFileSync('/src/main.c', 'int main() {}');
+    assert.ok(fake.nativeFiles.has('/src/main.c'));
+    assert.ok(![...fake.nativeFiles.keys()].some((p) => p.startsWith('/opfs/')));
+  });
+});
+
 // ---------------------------------------------------------------------
 // OPFS path translation: with the OPFS backend mounted, every path
 // that crosses into the native module is rooted at /opfs
@@ -585,6 +622,7 @@ function makeOpfsEmscripten(overrides = {}) {
     _tcc_new() {},
     _tcc_delete() {},
     _tcc_set_lib_path() {},
+    _tcc_set_options() {},
     _tcc_add_include_path() {},
     _tcc_add_sysinclude_path() {},
     _tcc_add_library_path() {},

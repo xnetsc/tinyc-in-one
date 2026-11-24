@@ -2768,10 +2768,16 @@ var TinycWeb = (() => {
       this.handle = handle;
       this._io = null;
       this._deleted = false;
+      this._outputTypeSet = false;
     }
     _call(name, returnType, argTypes, args) {
       if (this._deleted) throw new TinycError("tinyc: state already deleted");
-      return this._bridge.call(name, returnType, argTypes, [this.handle, ...args]);
+      return this._bridge.call(
+        name,
+        returnType,
+        ["number", ...argTypes],
+        [this.handle, ...args]
+      );
     }
     _checkRc(name, rc) {
       if (typeof rc === "number" && rc < 0) {
@@ -2858,10 +2864,23 @@ var TinycWeb = (() => {
       return this;
     }
     setOutputType(type) {
-      return this._checkRc(
+      const rc = this._checkRc(
         "tcc_set_output_type",
         this._call("tcc_set_output_type", "number", ["number"], [type])
       );
+      this._outputTypeSet = true;
+      return rc;
+    }
+    /* tcc_set_output_type is not a plain setter in libtcc: it also
+     * creates the state's ELF sections (tccelf_new), and upstream's
+     * contract is that it MUST be called before any compilation —
+     * compiling without it runs tccelf_end_file over sections that
+     * do not exist and traps inside put_elf_sym. Establish the
+     * MEMORY default lazily, exactly once, at the first compiling
+     * entry point; an explicit setOutputType beforehand suppresses
+     * the default, and tccelf_new is never run twice on one state. */
+    _ensureOutputType() {
+      if (!this._outputTypeSet) this.setOutputType(TCC_OUTPUT.MEMORY);
     }
     /** Add a file (source, object or archive) by virtual path. The file
      *  must exist in the instance's virtual FS; it is synced to the
@@ -2875,12 +2894,14 @@ var TinycWeb = (() => {
         throw new TinycError(`tinyc: addFile: ${p} is not in the virtual FS`);
       }
       this._instance.fs.syncFile(p);
+      this._ensureOutputType();
       return this._checkRc(
         "tcc_add_file",
         this._call("tcc_add_file", "number", ["string"], [this._bridge.modulePath(p)])
       );
     }
     compileString(source) {
+      this._ensureOutputType();
       return this._checkRc(
         "tcc_compile_string",
         this._call("tcc_compile_string", "number", ["string"], [source])
@@ -2897,6 +2918,7 @@ var TinycWeb = (() => {
       const src = this._instance.fs.readTextFile(p);
       const marked = `#line 1 "${p}"
 ${src}`;
+      this._ensureOutputType();
       return this._checkRc(
         "tcc_compile_string",
         this._call("tcc_compile_string", "number", ["string"], [marked])
@@ -3138,14 +3160,6 @@ ${src}`;
      *  read fails naming exportFileAsync as the alternative. */
     exportFile(path) {
       const p = normalizeVfsPath(path);
-      let cacheMiss = null;
-      if (this.fs.hasFile(p)) {
-        try {
-          return this.fs.readFile(p);
-        } catch (err) {
-          cacheMiss = err;
-        }
-      }
       const FS = this._bridge.native?.FS;
       if (FS && typeof FS.readFile === "function") {
         try {
@@ -3155,10 +3169,14 @@ ${src}`;
         } catch {
         }
       }
-      if (cacheMiss) {
-        throw new TinycError(
-          `tinyc: ${p} is persisted in the virtual FS store but is not in the in-memory cache; read it with exportFileAsync() instead`
-        );
+      if (this.fs.hasFile(p)) {
+        try {
+          return this.fs.readFile(p);
+        } catch {
+          throw new TinycError(
+            `tinyc: ${p} is persisted in the virtual FS store but is not in the in-memory cache; read it with exportFileAsync() instead`
+          );
+        }
       }
       throw new TinycError(`tinyc: no such file in virtual FS: ${p}`);
     }
@@ -3166,7 +3184,6 @@ ${src}`;
      *  when it is not in the content cache. */
     async exportFileAsync(path) {
       const p = normalizeVfsPath(path);
-      if (this.fs.hasFile(p)) return this.fs.readFileAsync(p);
       const FS = this._bridge.native?.FS;
       if (FS && typeof FS.readFile === "function") {
         try {
@@ -3176,6 +3193,7 @@ ${src}`;
         } catch {
         }
       }
+      if (this.fs.hasFile(p)) return this.fs.readFileAsync(p);
       throw new TinycError(`tinyc: no such file in virtual FS: ${p}`);
     }
     /** exportFile as a Blob, e.g. for a download link or a File
@@ -3335,6 +3353,9 @@ ${src}`;
       const state = new TinycState(this, handle ?? {});
       this._states.add(state);
       state._installErrorFunc();
+      if (isRunnableTarget(this.target)) {
+        state.setOptions("-nostdlib");
+      }
       if (this._bridge.has("tcc_add_include_path")) {
         for (const dir of this.fs.getIncludeDirs()) state.addIncludePath(dir);
       }
@@ -3448,6 +3469,37 @@ ${src}`;
   }
   var OPFS_MOUNT_POINT = "/opfs";
   var opfsBackendByModule = /* @__PURE__ */ new WeakMap();
+  var OPFS_PROBE_DIR = OPFS_MOUNT_POINT + "/.tinyc-probe";
+  var OPFS_PROBE_FILE = OPFS_PROBE_DIR + "/probe";
+  var OPFS_PROBE_BYTES = new Uint8Array([116, 105, 110, 121, 99]);
+  function probeOpfsBackend(FS) {
+    if (!FS || typeof FS.writeFile !== "function" || typeof FS.readFile !== "function") {
+      return false;
+    }
+    try {
+      if (typeof FS.mkdirTree === "function") FS.mkdirTree(OPFS_PROBE_DIR);
+      FS.writeFile(OPFS_PROBE_FILE, OPFS_PROBE_BYTES);
+      const back = FS.readFile(OPFS_PROBE_FILE);
+      if (!back || back.length !== OPFS_PROBE_BYTES.length) return false;
+      for (let i = 0; i < OPFS_PROBE_BYTES.length; i++) {
+        if (back[i] !== OPFS_PROBE_BYTES[i]) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      try {
+        FS.unlink(OPFS_PROBE_FILE);
+      } catch {
+      }
+      if (typeof FS.rmdir === "function") {
+        try {
+          FS.rmdir(OPFS_PROBE_DIR);
+        } catch {
+        }
+      }
+    }
+  }
   async function tryMountOpfsBackend(native, bridge) {
     const canMemo = native !== null && (typeof native === "object" || typeof native === "function");
     if (canMemo) {
@@ -3472,7 +3524,7 @@ ${src}`;
             [OPFS_MOUNT_POINT, 511, backend],
             { async: true }
           );
-          if (rc === 0) result = "opfs";
+          if (rc === 0 && probeOpfsBackend(native.FS)) result = "opfs";
         }
       }
     } catch {

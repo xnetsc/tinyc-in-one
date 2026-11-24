@@ -550,7 +550,6 @@ int tinyc_init(void)
             tinyc_init_mark("tinyc_init:initialized");
         }
     }
-    tinyc_set_io(tcc_io_stdio());
     return 0;
 }
 #endif

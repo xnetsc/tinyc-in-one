@@ -23,6 +23,9 @@ public final class TccSession implements AutoCloseable {
     private final AtomicReference<Throwable> callbackError = new AtomicReference<>();
     private Arena callbackArena;
     private TccIO io;
+    /** setIO 经 tcc_io_callback 建的 TCCIO，已用 tcc_set_io 装在本会话的
+     * state 上；由本类持有，close 时在 tcc_delete 之后释放。 */
+    private MemorySegment stateIoPtr;
     private boolean closed;
 
     TccSession(MemorySegment state) {
@@ -243,7 +246,7 @@ public final class TccSession implements AutoCloseable {
 
     // ---- 错误回调与 IO ----
 
-    private void installErrorCallback(TccIO callbackIo) {
+    private void installErrorCallback(TccIO callbackIo, boolean installStateIo) {
         ensureOpen();
         if (callbackArena == null) {
             callbackArena = Arena.ofConfined();
@@ -254,10 +257,44 @@ public final class TccSession implements AutoCloseable {
         } catch (Throwable t) {
             throw new TccException("tcc_set_error_func failed", t);
         }
+        if (installStateIo) {
+            installStateIo(callbackIo);
+        }
         this.io = callbackIo;
     }
 
-    /** 设置错误处理器：libtcc 的每条错误/警告文本交给 handler。对应 {@code tcc_set_error_func}。 */
+    /** 把 io 的三通道经跳板组成回调型 TCCIO 并用 {@code tcc_set_io} 装到
+     * 本会话的 state 上：本会话的编译器输出（-E、verbose）与 run 的
+     * 目标程序 stdio 从此走该 IO，与其它会话互不影响。重复 setIO 时
+     * 先装新的再释放旧的，state 不会指向已释放的 TCCIO。 */
+    private void installStateIo(TccIO callbackIo) {
+        MemorySegment[] stubs = TccIoUpcalls.mainIoStubs(callbackIo, callbackArena, callbackError);
+        MemorySegment newPtr;
+        try {
+            newPtr = (MemorySegment) Native.TCC_IO_CALLBACK.invokeExact(
+                    stubs[0], stubs[1], stubs[2], MemorySegment.NULL);
+            if (newPtr == null || newPtr.address() == 0) {
+                throw new TccException("tcc_io_callback returned NULL");
+            }
+            Native.TCC_SET_IO.invokeExact(state, newPtr);
+        } catch (TccException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new TccException("tcc_set_io failed", t);
+        }
+        MemorySegment oldPtr = stateIoPtr;
+        stateIoPtr = newPtr;
+        if (oldPtr != null) {
+            try {
+                Native.TCC_IO_FREE.invokeExact(oldPtr);
+            } catch (Throwable t) {
+                throw new TccException("tcc_io_free failed", t);
+            }
+        }
+    }
+
+    /** 设置错误处理器：libtcc 的每条错误/警告文本交给 handler。对应 {@code tcc_set_error_func}。
+     * 只接错误通道，不装 state IO：本会话的 -E 输出与 run 的 stdio 仍走 stdio。 */
     public void setErrorHandler(Consumer<String> handler) {
         installErrorCallback(new TccIO() {
             @Override
@@ -279,18 +316,21 @@ public final class TccSession implements AutoCloseable {
             public int readIn(byte[] buf) {
                 return 0;
             }
-        });
+        }, false);
     }
 
     /**
-     * 设置 IO：错误通道经 {@code tcc_set_error_func} 接入本会话，libtcc 的
-     * 错误/警告文本经 upcall 跳板以字节交给 {@code io.writeErr}。
-     * writeOut / readIn 在命令行式入口 {@link TinyC#runCli(TccIO, String...)}
-     * 生效：三通道在那里经 {@code tcc_io_callback} 组成 TCCIO 传给
-     * {@code tinyc_main_io}。
+     * 设置 IO：两条接入并行。错误通道经 {@code tcc_set_error_func} 接入
+     * 本会话，libtcc 的错误/警告文本经 upcall 跳板以字节交给
+     * {@code io.writeErr}；同时三通道经 {@code tcc_io_callback} 组成
+     * TCCIO、用 {@code tcc_set_io} 装到本会话的 state 上，本会话的
+     * -E 输出、verbose 输出与 {@link #run} 时目标程序的 stdio 走该 IO
+     * （run 的 stdin 由 {@code io.readIn} 喂入），其它会话与命令行式
+     * 入口不受影响。命令行式入口 {@link TinyC#runCli(TccIO, String...)}
+     * 的 IO 则经 {@code tinyc_main_io} 装在该次 main 所建的 state 上。
      */
     public void setIO(TccIO io) {
-        installErrorCallback(io);
+        installErrorCallback(io, true);
     }
 
     /** 当前设置的 IO，未设置时为 null。 */
@@ -311,6 +351,16 @@ public final class TccSession implements AutoCloseable {
         } catch (Throwable t) {
             throw new TccException("tcc_delete failed", t);
         } finally {
+            // state 已删除，装在它上面的 TCCIO 不会再被调用，此时释放；
+            // 跳板所在的 Arena 最后关。
+            if (stateIoPtr != null) {
+                try {
+                    Native.TCC_IO_FREE.invokeExact(stateIoPtr);
+                } catch (Throwable ignored) {
+                    // 释放失败不掩盖 close 本身的结果
+                }
+                stateIoPtr = null;
+            }
             if (callbackArena != null) {
                 callbackArena.close();
                 callbackArena = null;

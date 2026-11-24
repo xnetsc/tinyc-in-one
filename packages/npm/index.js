@@ -7,8 +7,11 @@
  *     arguments, exactly like running the tcc command.
  *   - State wraps the libtcc tcc_* API for step-by-step control.
  *
- * Compiler output goes through the TCCIO interface; with no IO
- * installed it writes directly to the process's real stdout/stderr.
+ * Compiler output goes through the TCCIO interface, per state:
+ * a State carries its own IO (State#setIO), and runCli's IO is
+ * installed on the states the CLI main creates for that call. With
+ * no IO installed, output writes directly to the process's real
+ * stdout/stderr.
  */
 const fs = require('fs');
 const path = require('path');
@@ -188,6 +191,7 @@ function load() {
     tcc_set_lib_path: _lib.func('void tcc_set_lib_path(void *s, const char *p)'),
     tcc_set_output_type: _lib.func('void tcc_set_output_type(void *s, int t)'),
     tcc_set_error_func: _lib.func('void tcc_set_error_func(void *s, void *opaque, TccErrorFunc *cb)'),
+    tcc_set_io: _lib.func('void tcc_set_io(void *s, void *io)'),
     tcc_compile_string: _lib.func('int tcc_compile_string(void *s, const char *src)'),
     tcc_add_include_path: _lib.func('void tcc_add_include_path(void *s, const char *p)'),
     tcc_add_sysinclude_path: _lib.func('void tcc_add_sysinclude_path(void *s, const char *p)'),
@@ -329,7 +333,7 @@ function runCliCapture(args) {
 
 class State {
   static _fnSeq = 0;
-  constructor(outputType = TCC_OUTPUT_MEMORY) {
+  constructor(outputType = TCC_OUTPUT_MEMORY, io = null) {
     const f = load();
     this._f = f;
     this._s = f.tcc_new();
@@ -342,9 +346,29 @@ class State {
     f.tcc_set_lib_path(this._s, libPath());
     if (outputType !== null) f.tcc_set_output_type(this._s, outputType);
     this._relocated = false;
+    this._io = null;
+    if (io !== null && io !== undefined) this.setIO(io);
+  }
+  /* Install an IO on this state only (an IO instance, 'capture', a
+   * function, or a writable; null detaches back to stdio). All of
+   * this state's compiler output that does not go through the error
+   * callback - -E output, verbose traces, run stdio - is routed
+   * through it; other states and runCli are unaffected. The state
+   * holds the IO until setIO(null), close(), or replacement; do not
+   * close the IO while it is installed. */
+  setIO(io) {
+    const coerced = coerceIO(io);
+    this._f.tcc_set_io(this._s, coerced ? coerced.ptr : null);
+    this._io = coerced;
+    return this;
   }
   close() {
-    if (this._s) { this._f.tcc_delete(this._s); this._s = null; }
+    if (this._s) {
+      if (this._io) this._f.tcc_set_io(this._s, null);
+      this._f.tcc_delete(this._s);
+      this._s = null;
+    }
+    this._io = null;
     if (this._errCb) { koffi.unregister(this._errCb); this._errCb = null; }
   }
   _check(ret, what) {

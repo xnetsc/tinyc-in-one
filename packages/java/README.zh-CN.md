@@ -117,9 +117,12 @@ null 回落 System 流）、`TccIO.capturing()`（内存攒积，out/err 分开�
 
 - 错误通道：`TccSession.setIO(io)` 或 `setErrorHandler(handler)` 后，
   libtcc 的错误文本经 Panama upcall 跳板以字节交给 `writeErr`。
+- 会话 IO：`TccSession.setIO(io)` 还把三通道组成回调型 TCCIO，经
+  内核 `tcc_set_io` 装到本会话自己的 state 上；本会话的预处理输出
+  与它运行的目标程序 stdio 走该 IO，与其它会话互不影响。
 - 全部三通道：`TinyC.runCli(io, args...)` 把 `writeOut` / `writeErr` /
   `readIn` 的跳板经内核 `tcc_io_callback` 组成回调型 TCCIO，传给
-  `tinyc_main_io`，在该次调用期间作为编译器的当前 IO：编译器自身的
+  `tinyc_main_io`，装在该次 main 所建的 state 上：编译器自身的
   输出（版本、预处理结果等）走 `writeOut`、诊断走 `writeErr`、
   `readIn` 随 TCCIO 一并传给内核。不带 io 的 `runCli(args...)` 走
   `tinyc_main`，输出走进程真实 stdio，与命令行一致。

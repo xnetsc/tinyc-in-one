@@ -140,11 +140,16 @@ Current wiring:
 - Error channel: after `TccSession.setIO(io)` or
   `setErrorHandler(handler)`, libtcc's error text is handed to
   `writeErr` as bytes through a Panama upcall trampoline.
+- Session IO: `TccSession.setIO(io)` also composes the three
+  channels into a callback TCCIO and installs it on the session's
+  own state with the kernel's `tcc_set_io`; the session's
+  preprocessor output and the stdio of programs it runs go through
+  that IO, independently of other sessions.
 - All three channels: `TinyC.runCli(io, args...)` composes the
   `writeOut` / `writeErr` / `readIn` trampolines into a callback
   TCCIO via the kernel's `tcc_io_callback`, passes it to
-  `tinyc_main_io`, and it serves as the compiler's current IO for
-  that call: the compiler's own output (version, preprocessor
+  `tinyc_main_io`, and it is installed on the state main creates
+  for that call: the compiler's own output (version, preprocessor
   results, and the like) goes to `writeOut`, diagnostics go to
   `writeErr`, and `readIn` is passed to the kernel along with the
   TCCIO. `runCli(args...)` without io goes through `tinyc_main`,

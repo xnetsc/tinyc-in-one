@@ -1393,11 +1393,19 @@ export class TinycState {
     this.handle = handle;
     this._io = null;
     this._deleted = false;
+    this._outputTypeSet = false;
   }
 
   _call(name, returnType, argTypes, args) {
     if (this._deleted) throw new TinycError('tinyc: state already deleted');
-    return this._bridge.call(name, returnType, argTypes, [this.handle, ...args]);
+    // The handle goes in as the first argument AND as a leading
+    // 'number' in argTypes: the bridge converts args[i] through
+    // argTypes[i], so prepending the handle to the values alone
+    // shifts every converter one slot left (a 'string' converter
+    // lands on the numeric handle, and the real string argument
+    // reaches the module unconverted, as 0).
+    return this._bridge.call(name, returnType,
+      ['number', ...argTypes], [this.handle, ...args]);
   }
 
   _checkRc(name, rc) {
@@ -1485,8 +1493,22 @@ export class TinycState {
   }
 
   setOutputType(type) {
-    return this._checkRc('tcc_set_output_type',
+    const rc = this._checkRc('tcc_set_output_type',
       this._call('tcc_set_output_type', 'number', ['number'], [type]));
+    this._outputTypeSet = true;
+    return rc;
+  }
+
+  /* tcc_set_output_type is not a plain setter in libtcc: it also
+   * creates the state's ELF sections (tccelf_new), and upstream's
+   * contract is that it MUST be called before any compilation —
+   * compiling without it runs tccelf_end_file over sections that
+   * do not exist and traps inside put_elf_sym. Establish the
+   * MEMORY default lazily, exactly once, at the first compiling
+   * entry point; an explicit setOutputType beforehand suppresses
+   * the default, and tccelf_new is never run twice on one state. */
+  _ensureOutputType() {
+    if (!this._outputTypeSet) this.setOutputType(TCC_OUTPUT.MEMORY);
   }
 
   /** Add a file (source, object or archive) by virtual path. The file
@@ -1501,11 +1523,13 @@ export class TinycState {
       throw new TinycError(`tinyc: addFile: ${p} is not in the virtual FS`);
     }
     this._instance.fs.syncFile(p);
+    this._ensureOutputType();
     return this._checkRc('tcc_add_file',
       this._call('tcc_add_file', 'number', ['string'], [this._bridge.modulePath(p)]));
   }
 
   compileString(source) {
+    this._ensureOutputType();
     return this._checkRc('tcc_compile_string',
       this._call('tcc_compile_string', 'number', ['string'], [source]));
   }
@@ -1520,6 +1544,7 @@ export class TinycState {
     const p = normalizeVfsPath(path);
     const src = this._instance.fs.readTextFile(p);
     const marked = `#line 1 "${p}"\n${src}`;
+    this._ensureOutputType();
     return this._checkRc('tcc_compile_string',
       this._call('tcc_compile_string', 'number', ['string'], [marked]));
   }
@@ -1735,14 +1760,11 @@ export class Tinyc {
    *  read fails naming exportFileAsync as the alternative. */
   exportFile(path) {
     const p = normalizeVfsPath(path);
-    let cacheMiss = null;
-    if (this.fs.hasFile(p)) {
-      try {
-        return this.fs.readFile(p);
-      } catch (err) {
-        cacheMiss = err;
-      }
-    }
+    // The module FS copy is authoritative: it is where TCC writes,
+    // and a compile can rewrite a path the virtual FS already holds
+    // a mirror of (TinycState.run writes the fixed DEFAULT_RUN_OUTPUT
+    // on every call). Read it first and refresh the mirror; only a
+    // path the module FS does not have falls back to the mirror.
     const FS = this._bridge.native?.FS;
     if (FS && typeof FS.readFile === 'function') {
       try {
@@ -1750,14 +1772,18 @@ export class Tinyc {
         this.fs.addFileSync(p, bytes);
         return this.fs.readFile(p);
       } catch {
-        // fall through to the error below
+        // not in the module FS: fall through to the virtual FS copy
       }
     }
-    if (cacheMiss) {
-      throw new TinycError(
-        `tinyc: ${p} is persisted in the virtual FS store but is not in ` +
-        `the in-memory cache; read it with exportFileAsync() instead`
-      );
+    if (this.fs.hasFile(p)) {
+      try {
+        return this.fs.readFile(p);
+      } catch {
+        throw new TinycError(
+          `tinyc: ${p} is persisted in the virtual FS store but is not in ` +
+          `the in-memory cache; read it with exportFileAsync() instead`
+        );
+      }
     }
     throw new TinycError(`tinyc: no such file in virtual FS: ${p}`);
   }
@@ -1766,7 +1792,6 @@ export class Tinyc {
    *  when it is not in the content cache. */
   async exportFileAsync(path) {
     const p = normalizeVfsPath(path);
-    if (this.fs.hasFile(p)) return this.fs.readFileAsync(p);
     const FS = this._bridge.native?.FS;
     if (FS && typeof FS.readFile === 'function') {
       try {
@@ -1774,9 +1799,10 @@ export class Tinyc {
         this.fs.addFileSync(p, bytes);
         return bytes;
       } catch {
-        // fall through to the error below
+        // not in the module FS: fall through to the virtual FS copy
       }
     }
+    if (this.fs.hasFile(p)) return this.fs.readFileAsync(p);
     throw new TinycError(`tinyc: no such file in virtual FS: ${p}`);
   }
 
@@ -1943,6 +1969,19 @@ export class Tinyc {
     const state = new TinycState(this, handle ?? {});
     this._states.add(state);
     state._installErrorFunc();
+    if (isRunnableTarget(this.target)) {
+      // The wasm target is freestanding: no crt1.o/crti.o exist for
+      // it anywhere, and this package's run model enters the product
+      // through a named export, never through a C runtime startup.
+      // Without -nostdlib, tcc_set_output_type for any non-MEMORY
+      // type fails inside tccelf_add_crtbegin ('crt1.o not found')
+      // and poisons the state's error count, which also makes the
+      // next compile report failure. The backend's own test suite
+      // drives the target with -nostdlib throughout; mirror that as
+      // the state default here. Other targets keep the hosted
+      // default: their EXE output does link the C runtime.
+      state.setOptions('-nostdlib');
+    }
     if (this._bridge.has('tcc_add_include_path')) {
       for (const dir of this.fs.getIncludeDirs()) state.addIncludePath(dir);
     }
@@ -2111,10 +2150,58 @@ async function loadSysroot(instance, sysrootOpt) {
 // backend in place; loadTinyc succeeds either way. The outcome is
 // memoized per native module (repeat loads of a cached module do
 // not mount twice) and reported as instance.fsBackend.
+//
+// A successful mount alone does not prove the backend works: in a
+// build without pthreads the backend's file operations are async
+// JS, and without Asyncify/JSPI to suspend into, the first real
+// operation traps — after wasmfs_create_directory has already
+// reported success. The mount is therefore followed by a
+// write/read probe through the same JS FS operations the
+// virtual-FS mirror uses (probeOpfsBackend below); only a probe
+// whose bytes read back intact lets the instance report 'opfs'.
+// A failed probe leaves the mount point in place but unused: the
+// instance reports 'memory' and no path is ever rooted under it.
 // ---------------------------------------------------------------------
 
 const OPFS_MOUNT_POINT = '/opfs';
 const opfsBackendByModule = new WeakMap();
+
+const OPFS_PROBE_DIR = OPFS_MOUNT_POINT + '/.tinyc-probe';
+const OPFS_PROBE_FILE = OPFS_PROBE_DIR + '/probe';
+const OPFS_PROBE_BYTES = new Uint8Array([0x74, 0x69, 0x6e, 0x79, 0x63]); // "tinyc"
+
+/** First-use probe of a freshly mounted OPFS backend: create a
+ *  directory, write a small file into it and read the bytes back,
+ *  through the JS FS API the virtual-FS mirror drives. Returns
+ *  true only when every step succeeds and the bytes match. Any
+ *  throw — the trap a non-suspending async backend produces on
+ *  first use is a catchable RuntimeError at this boundary — and
+ *  any mismatch means the backend cannot serve the working set.
+ *  The probe directory is removed again on every path, so a
+ *  working backend keeps no trace of it. */
+function probeOpfsBackend(FS) {
+  if (!FS || typeof FS.writeFile !== 'function' ||
+      typeof FS.readFile !== 'function') {
+    return false;
+  }
+  try {
+    if (typeof FS.mkdirTree === 'function') FS.mkdirTree(OPFS_PROBE_DIR);
+    FS.writeFile(OPFS_PROBE_FILE, OPFS_PROBE_BYTES);
+    const back = FS.readFile(OPFS_PROBE_FILE);
+    if (!back || back.length !== OPFS_PROBE_BYTES.length) return false;
+    for (let i = 0; i < OPFS_PROBE_BYTES.length; i++) {
+      if (back[i] !== OPFS_PROBE_BYTES[i]) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try { FS.unlink(OPFS_PROBE_FILE); } catch { /* not there */ }
+    if (typeof FS.rmdir === 'function') {
+      try { FS.rmdir(OPFS_PROBE_DIR); } catch { /* not there */ }
+    }
+  }
+}
 
 async function tryMountOpfsBackend(native, bridge) {
   const canMemo =
@@ -2146,8 +2233,9 @@ async function tryMountOpfsBackend(native, bridge) {
           { async: true }
         );
         // wasmfs_create_directory returns 0 on success and a
-        // negative errno on failure, like mkdir.
-        if (rc === 0) result = 'opfs';
+        // negative errno on failure, like mkdir. A mounted backend
+        // still has to survive the probe before it is reported.
+        if (rc === 0 && probeOpfsBackend(native.FS)) result = 'opfs';
       }
     }
   } catch {

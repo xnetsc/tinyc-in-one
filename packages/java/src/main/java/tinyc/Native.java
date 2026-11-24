@@ -69,6 +69,7 @@ final class Native {
     static final MethodHandle TCC_DELETE;
     static final MethodHandle TCC_SET_LIB_PATH;
     static final MethodHandle TCC_SET_ERROR_FUNC;
+    static final MethodHandle TCC_SET_IO;
     static final MethodHandle TCC_SET_OPTIONS;
     static final MethodHandle TCC_ADD_INCLUDE_PATH;
     static final MethodHandle TCC_ADD_SYSINCLUDE_PATH;
@@ -174,6 +175,7 @@ final class Native {
             TCC_SET_LIB_PATH = required(linker, lookup, "tcc_set_lib_path", vAA);
             TCC_SET_ERROR_FUNC = required(linker, lookup, "tcc_set_error_func",
                     FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, ADDRESS));
+            TCC_SET_IO = required(linker, lookup, "tcc_set_io", vAA);
             TCC_SET_OPTIONS = required(linker, lookup, "tcc_set_options", iAA);
             TCC_ADD_INCLUDE_PATH = required(linker, lookup, "tcc_add_include_path", iAA);
             TCC_ADD_SYSINCLUDE_PATH = required(linker, lookup, "tcc_add_sysinclude_path", iAA);

@@ -6,7 +6,9 @@ Two entry styles over one dual-form native file (executable + library):
   arguments, exactly like running the tcc command.
 - State wraps the libtcc tcc_* API for step-by-step control.
 
-Output of the compiler itself goes through the TCCIO interface.
+Output of the compiler itself goes through the TCCIO interface,
+per state: a State carries its own IO (State.set_io), and run_cli's
+IO is installed on the states the CLI main creates for that call.
 With no IO installed it writes directly to the process's real
 stdout/stderr, exactly like the command line.
 """
@@ -226,6 +228,9 @@ def _load():
                                 ctypes.POINTER(ctypes.c_char_p)]
     lib.tcc_set_error_func.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
                                        ctypes.c_void_p]
+    lib.tcc_set_io.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    lib.tcc_get_io.restype = ctypes.c_void_p
+    lib.tcc_get_io.argtypes = [ctypes.c_void_p]
     lib.tcc_delete.argtypes = [ctypes.c_void_p]
     lib.tinyc_main.restype = ctypes.c_int
     lib.tinyc_main.argtypes = [ctypes.c_int,
@@ -272,7 +277,7 @@ _IO_READ = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
 
 
 class IO:
-    """A TCCIO object. Pass to run_cli(io=...) or State.set_io_via_cli.
+    """A TCCIO object. Pass to run_cli(io=...) or State.set_io(...).
 
     Build one with the class methods, or pass any of these directly
     where an io argument is accepted:
@@ -452,7 +457,7 @@ class State:
     and the output type defaults to TCC_OUTPUT_MEMORY.
     """
 
-    def __init__(self, output_type=TCC_OUTPUT_MEMORY):
+    def __init__(self, output_type=TCC_OUTPUT_MEMORY, io=None):
         lib = _load()
         self._lib = lib
         self._s = lib.tcc_new()
@@ -466,11 +471,31 @@ class State:
         if output_type is not None:
             lib.tcc_set_output_type(self._s, output_type)
         self._relocated = False
+        self._io = None
+        if io is not None:
+            self.set_io(io)
+
+    def set_io(self, io):
+        """Install an IO on this state only (an IO instance,
+        "capture", a callable, or a binary file object; None detaches
+        back to stdio). Compiler output of this state that does not
+        go through the error callback - -E output, verbose traces,
+        run stdio - is routed through it; other states and run_cli
+        are unaffected. The state keeps the IO object alive until
+        set_io(None), close(), or replacement; do not close the IO
+        while it is installed."""
+        io = _coerce_io(io)
+        self._lib.tcc_set_io(self._s,
+                             ctypes.c_void_p(io.ptr) if io else None)
+        self._io = io
 
     def close(self):
         if self._s:
+            if self._io is not None:
+                self._lib.tcc_set_io(self._s, None)
             self._lib.tcc_delete(ctypes.c_void_p(self._s))
             self._s = None
+        self._io = None
 
     def __enter__(self):
         return self

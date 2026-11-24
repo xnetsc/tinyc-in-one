@@ -113,8 +113,10 @@ class ExecutableModeTests(unittest.TestCase):
 
     def test_exports_present(self):
         out = subprocess.run(["nm", "-D", DUAL], capture_output=True, text=True).stdout
-        for sym in ["main", "tinyc_main", "tinyc_main_io", "tcc_new",
-                    "tcc_compile_string", "tcc_io_buffer", "tinyc_set_io"]:
+        for sym in ["main", "tinyc_main", "tinyc_main_io",
+                    "tinyc_main_with_io", "tcc_new",
+                    "tcc_compile_string", "tcc_io_buffer",
+                    "tcc_set_io", "tcc_get_io"]:
             self.assertIn(" T " + sym, out)
 
 
@@ -182,6 +184,136 @@ class LibraryModeTests(unittest.TestCase):
         fn = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_int)(addr)
         self.assertEqual(fn(6, 7), 42)
         lib.tcc_delete(ctypes.c_void_p(s))
+
+
+class PerStateIoTests(unittest.TestCase):
+    """IO is per-state: two states with different buffer IOs used in
+    alternation keep their compiler output separate, and a
+    tinyc_main_io call in between disturbs neither state's IO."""
+
+    @classmethod
+    def setUpClass(cls):
+        lib = load()
+        lib.tcc_new.restype = ctypes.c_void_p
+        lib.tcc_delete.argtypes = [ctypes.c_void_p]
+        lib.tcc_set_lib_path.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lib.tcc_set_output_type.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.tcc_compile_string.restype = ctypes.c_int
+        lib.tcc_compile_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        lib.tcc_set_io.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        lib.tcc_get_io.restype = ctypes.c_void_p
+        lib.tcc_get_io.argtypes = [ctypes.c_void_p]
+        lib.tcc_io_stdio.restype = ctypes.c_void_p
+        cls.lib = lib
+
+    def make_state(self, io=None, output_type=1):
+        lib = self.lib
+        s = lib.tcc_new()
+        self.assertTrue(s)
+        lib.tcc_set_lib_path(s, os.path.join(DIST, "lib", "tcc").encode())
+        lib.tcc_set_output_type(s, output_type)
+        if io is not None:
+            lib.tcc_set_io(s, io)
+        return s
+
+    def buffer_bytes(self, io, channel):
+        n = ctypes.c_size_t()
+        p = self.lib.tcc_io_buffer_data(io, channel, ctypes.byref(n))
+        return ctypes.string_at(p, n.value) if p else b""
+
+    def test_default_io_is_the_stdio_singleton(self):
+        lib = self.lib
+        s = self.make_state()
+        try:
+            self.assertEqual(lib.tcc_get_io(s), lib.tcc_io_stdio())
+            io = lib.tcc_io_buffer()
+            try:
+                lib.tcc_set_io(s, io)
+                self.assertEqual(lib.tcc_get_io(s), io)
+                lib.tcc_set_io(s, None)
+                self.assertEqual(lib.tcc_get_io(s), lib.tcc_io_stdio())
+            finally:
+                lib.tcc_io_free(io)
+        finally:
+            lib.tcc_delete(ctypes.c_void_p(s))
+
+    def test_two_states_interleaved_keep_output_separate(self):
+        lib = self.lib
+        io_a, io_b = lib.tcc_io_buffer(), lib.tcc_io_buffer()
+        a = self.make_state(io_a)
+        b = self.make_state(io_b)
+        try:
+            # No error callback is installed, so diagnostics take the
+            # default path into the state's own IO err channel.
+            self.assertNotEqual(
+                lib.tcc_compile_string(a, b"int fa( { broken_a }"), 0)
+            err_a = self.buffer_bytes(io_a, 1)
+            self.assertIn(b"error", err_a)
+            self.assertEqual(self.buffer_bytes(io_b, 1), b"")
+
+            self.assertNotEqual(
+                lib.tcc_compile_string(b, b"int fb( { broken_b }"), 0)
+            err_b = self.buffer_bytes(io_b, 1)
+            self.assertIn(b"error", err_b)
+            # B's compile added nothing to A's IO, and vice versa.
+            self.assertEqual(self.buffer_bytes(io_a, 1), err_a)
+
+            self.assertNotEqual(
+                lib.tcc_compile_string(a, b"int fa2( { broken_a2 }"), 0)
+            self.assertGreater(len(self.buffer_bytes(io_a, 1)), len(err_a))
+            self.assertEqual(self.buffer_bytes(io_b, 1), err_b)
+        finally:
+            lib.tcc_delete(ctypes.c_void_p(a))
+            lib.tcc_delete(ctypes.c_void_p(b))
+            lib.tcc_io_free(io_a)
+            lib.tcc_io_free(io_b)
+
+    def test_preprocess_output_goes_to_owning_state(self):
+        lib = self.lib
+        io_a, io_b = lib.tcc_io_buffer(), lib.tcc_io_buffer()
+        # TCC_OUTPUT_PREPROCESS = 5
+        a = self.make_state(io_a, output_type=5)
+        b = self.make_state(io_b, output_type=5)
+        try:
+            self.assertEqual(lib.tcc_compile_string(
+                a, b"#define VA 111\nint xa = VA;\n"), 0)
+            self.assertIn(b"int xa = 111;", self.buffer_bytes(io_a, 0))
+            self.assertEqual(self.buffer_bytes(io_b, 0), b"")
+            self.assertEqual(lib.tcc_compile_string(
+                b, b"#define VB 222\nint xb = VB;\n"), 0)
+            self.assertIn(b"int xb = 222;", self.buffer_bytes(io_b, 0))
+            self.assertNotIn(b"xb", self.buffer_bytes(io_a, 0))
+        finally:
+            lib.tcc_delete(ctypes.c_void_p(a))
+            lib.tcc_delete(ctypes.c_void_p(b))
+            lib.tcc_io_free(io_a)
+            lib.tcc_io_free(io_b)
+
+    def test_main_io_does_not_disturb_state_io(self):
+        lib = self.lib
+        io_a = lib.tcc_io_buffer()
+        io_main = lib.tcc_io_buffer()
+        a = self.make_state(io_a)
+        try:
+            self.assertEqual(lib.tcc_get_io(a), io_a)
+            code = lib.tinyc_main_io(
+                2, argv_of(["tinyc", "--version"]), io_main)
+            self.assertEqual(code, 0)
+            self.assertIn(b"tcc version", self.buffer_bytes(io_main, 0))
+            # The CLI call installed nothing on the API state and
+            # captured nothing into its IO.
+            self.assertEqual(lib.tcc_get_io(a), io_a)
+            self.assertEqual(self.buffer_bytes(io_a, 0), b"")
+            self.assertEqual(self.buffer_bytes(io_a, 1), b"")
+            # And the state still routes to its own IO afterwards.
+            self.assertNotEqual(
+                lib.tcc_compile_string(a, b"int fz( { broken_z }"), 0)
+            self.assertIn(b"error", self.buffer_bytes(io_a, 1))
+            self.assertEqual(self.buffer_bytes(io_main, 1), b"")
+        finally:
+            lib.tcc_delete(ctypes.c_void_p(a))
+            lib.tcc_io_free(io_a)
+            lib.tcc_io_free(io_main)
 
 
 class RunRedirectTests(unittest.TestCase):

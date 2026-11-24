@@ -14,7 +14,13 @@
        fd_write import, then run the product through the package's
        shim layer (runWasmModule) and assert the captured output and
        the return value.
-    2. x86_64-linux-gnu: cross-compile an object file and verify the
+    2. wasm32-wasi, fine-grained state API against the real module:
+       createState, compileString and compileFile, then invoke the
+       compiled function and assert its return value. Creating a
+       state registers a JS error callback in the module's function
+       table, so this also covers the shipped build keeping that
+       table growable.
+    3. x86_64-linux-gnu: cross-compile an object file and verify the
        ELF header and e_machine (format check only; the product is
        not runnable in a browser).
 -->
@@ -62,6 +68,20 @@ try {
   check('wasm32 hello returns the byte count it wrote (18)', ret === 18);
   check('wasm32 hello output arrives through the fd_write shim',
     text === 'hello from wasm32\n');
+
+  const st = t.createState();
+  check('state compileString returns 0',
+    st.compileString('int answer() { return 42; }') === 0);
+  check('state-compiled answer() returns 42',
+    st.run([], { entry: 'answer' }) === 42);
+  st.delete();
+
+  t.addFile('/answer.c', 'int answer2() { return 42; }\n');
+  const st2 = t.createState();
+  check('state compileFile returns 0', st2.compileFile('/answer.c') === 0);
+  check('file-compiled answer2() returns 42',
+    st2.run([], { entry: 'answer2' }) === 42);
+  st2.delete();
 
   const t2 = await loadTinyc({ target: 'x86_64-linux-gnu' });
   log.push('INFO: x86_64-linux-gnu fsBackend=' + t2.fsBackend);

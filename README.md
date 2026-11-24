@@ -57,18 +57,20 @@ Every package exposes the same two entry styles over the one file:
 
 Compiler-owned output goes through the `TCCIO` interface
 (`core/tinyc_io.h`): `write_out` / `write_err` / `read_in` / `flush`
-plus a context pointer. The default implementation writes directly
-to the process's real stdio. Ready-made implementations:
+plus a context pointer. Each TCCState carries its own IO, installed
+with `tcc_set_io`; there is no process-wide current IO, and a state
+with none installed uses the default implementation, which writes
+directly to the process's real stdio. Ready-made implementations:
 `tcc_io_stdio`, `tcc_io_buffer` (separate or merged channels),
 `tcc_io_file`, `tcc_io_fd`, `tcc_io_FILE`, `tcc_io_callback`,
 `tcc_io_null`, `tcc_io_tee`. The compiler's error path, help,
 version, search-path output and `-E` preprocessor output are routed
-through the current IO; the host process's fd 0/1/2 are never
+through the owning state's IO; the host process's fd 0/1/2 are never
 replaced. While a compiled program runs in-process (see the run
-rule below), its stdin/stdout/stderr are connected to the current
-IO for the duration of that run. Each package lets you pass your
-own callbacks, streams, or file objects instead — see the package
-sections.
+rule below), its stdin/stdout/stderr are connected to the running
+state's IO for the duration of that run. Each package lets you pass
+your own callbacks, streams, or file objects instead — see the
+package sections.
 
 ## Hosts and targets
 

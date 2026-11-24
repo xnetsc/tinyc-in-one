@@ -17,15 +17,57 @@ def patch(fname, old, new, count=1):
     p.write_text(text.replace(old, new))
     print(f"patched {fname}: {old.splitlines()[0][:60]}")
 
-# ---- tcc.h: pull in the IO API, add the opt-exit flag field ---------
+# ---- tcc.h: pull in the IO API, add the opt-exit flag + IO fields ---
 patch("tcc.h",
       '#include "config.h"\n',
       '#include "config.h"\n#include "tinyc_io.h"\n')
 patch("tcc.h",
       "    int output_type;\n",
-      "    int output_type;\n    int opt_exit_requested; /* tinyc: -dumpmachine/-dumpversion set this instead of calling exit(0) */\n")
+      "    int output_type;\n    int opt_exit_requested; /* tinyc: -dumpmachine/-dumpversion set this instead of calling exit(0) */\n    TCCIO *io; /* tinyc: per-state IO for compiler output; NULL = stdio */\n")
 
-# ---- libtcc.c: default error output goes through the current IO -----
+# ---- libtcc.h: declare the per-state IO accessors --------------------
+patch("libtcc.h",
+      "typedef struct TCCState TCCState;\n",
+      "typedef struct TCCState TCCState;\ntypedef struct TCCIO TCCIO;\n")
+patch("libtcc.h",
+      "LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc *error_func);\n",
+      """LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc *error_func);
+
+/* tinyc: install a TCCIO (tinyc_io.h) on a state; NULL restores the
+ * stdio default. All of the state's compiler output - diagnostics
+ * without an error callback, -E output, run stdio - goes through it. */
+LIBTCCAPI void tcc_set_io(TCCState *s, TCCIO *io);
+/* tinyc: the state's IO, or the stdio singleton when none (or a NULL
+ * state) is given. Never returns NULL. */
+LIBTCCAPI TCCIO *tcc_get_io(TCCState *s);
+""")
+
+# ---- libtcc.c: implement the per-state IO accessors ------------------
+patch("libtcc.c",
+      """LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc *error_func)
+{
+    s->error_opaque = error_opaque;
+    s->error_func = error_func;
+}
+""",
+      """LIBTCCAPI void tcc_set_error_func(TCCState *s, void *error_opaque, TCCErrorFunc *error_func)
+{
+    s->error_opaque = error_opaque;
+    s->error_func = error_func;
+}
+
+LIBTCCAPI void tcc_set_io(TCCState *s, TCCIO *io)
+{
+    s->io = io;
+}
+
+LIBTCCAPI TCCIO *tcc_get_io(TCCState *s)
+{
+    return (s && s->io) ? s->io : tcc_io_stdio();
+}
+""")
+
+# ---- libtcc.c: default error output goes through the state's IO ----
 patch("libtcc.c",
       """        /* default case: stderr */
         if (s1 && s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout)
@@ -33,26 +75,62 @@ patch("libtcc.c",
         fflush(stdout); /* flush -v output */
         fprintf(stderr, "%s\\n", (char*)cs.data);
         fflush(stderr); /* print error/warning now (win32) */""",
-      """        /* default case: current IO err channel (real stderr by default) */
+      """        /* default case: the state's IO err channel (real stderr by default) */
         if (s1 && s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout)
-            tinyc_io_out_str("\\n"); /* print a newline during tcc -E */
-        tinyc_io_flush_all(); /* flush -v output */
-        tinyc_io_err_line((char*)cs.data);
-        tinyc_io_flush_all(); /* print error/warning now */""")
+            tinyc_io_out_str(tcc_get_io(s1), "\\n"); /* print a newline during tcc -E */
+        tinyc_io_flush(tcc_get_io(s1)); /* flush -v output */
+        tinyc_io_err_line(tcc_get_io(s1), (char*)cs.data);
+        tinyc_io_flush(tcc_get_io(s1)); /* print error/warning now */""")
 
 # ---- libtcc.c: -dumpmachine/-dumpversion must not exit the host -----
 patch("libtcc.c",
       """            printf("%s\\n", dumpmachine_str);
             exit(0);""",
-      """            tinyc_io_out_fmt("%s\\n", dumpmachine_str);
+      """            tinyc_io_out_fmt(tcc_get_io(s), "%s\\n", dumpmachine_str);
             s->opt_exit_requested = 1;
             return 0;""")
 patch("libtcc.c",
       """            printf ("%s\\n", TCC_VERSION);
             exit(0);""",
-      """            tinyc_io_out_fmt("%s\\n", TCC_VERSION);
+      """            tinyc_io_out_fmt(tcc_get_io(s), "%s\\n", TCC_VERSION);
             s->opt_exit_requested = 1;
             return 0;""")
+
+# ---- libtcc.c: verbose file-open trace goes through the state's IO --
+patch("libtcc.c",
+      """    if ((s1->verbose == 2 && fd >= 0) || s1->verbose == 3)
+        printf("%s %*s%s\\n", fd < 0 ? "nf":"->",
+               (int)(s1->include_stack_ptr - s1->include_stack), "", filename);""",
+      """    if ((s1->verbose == 2 && fd >= 0) || s1->verbose == 3)
+        tinyc_io_out_fmt(tcc_get_io(s1), "%s %*s%s\\n", fd < 0 ? "nf":"->",
+               (int)(s1->include_stack_ptr - s1->include_stack), "", filename);""")
+
+# ---- libtcc.c: -bench stats go through the state's IO ---------------
+patch("libtcc.c",
+      """    fprintf(stderr, "# %d idents, %d lines, %u bytes\\n"
+                    "# %0.3f s, %u lines/s, %0.1f MB/s\\n",
+           total_idents, total_lines, total_bytes,
+           (double)total_time/1000,
+           (unsigned)total_lines*1000/total_time,
+           (double)total_bytes/1000/total_time);
+    fprintf(stderr, "# text %u, data.rw %u, data.ro %u, bss %u bytes\\n",
+           s1->total_output[0],
+           s1->total_output[1],
+           s1->total_output[2],
+           s1->total_output[3]
+           );""",
+      """    tinyc_io_err_fmt(tcc_get_io(s1), "# %d idents, %d lines, %u bytes\\n"
+                    "# %0.3f s, %u lines/s, %0.1f MB/s\\n",
+           total_idents, total_lines, total_bytes,
+           (double)total_time/1000,
+           (unsigned)total_lines*1000/total_time,
+           (double)total_bytes/1000/total_time);
+    tinyc_io_err_fmt(tcc_get_io(s1), "# text %u, data.rw %u, data.ro %u, bss %u bytes\\n",
+           s1->total_output[0],
+           s1->total_output[1],
+           s1->total_output[2],
+           s1->total_output[3]
+           );""")
 
 # ---- libtcc.c: tccdir is this image's directory, not the host's ----
 # config_tccdir_w32 asks GetModuleFileNameA(tcc_module). Upstream
@@ -106,15 +184,20 @@ patch("arm64-link.c",
       "        case R_AARCH64_RELATIVE:\n#ifdef TCC_TARGET_PE",
       "        case R_AARCH64_NONE:\n            /* no relocation */\n            return;\n        case R_AARCH64_RELATIVE:\n#ifdef TCC_TARGET_PE")
 
-# ---- tcc.c: main becomes the exported tinyc_main ---------------------
+# ---- tcc.c: main becomes a static impl behind the exported entries --
+# The impl takes the IO tinyc_main_with_io installs on every state it
+# creates (one per pass through the redo loop); tinyc_main passes
+# NULL. See the appended entry wrappers at the bottom of this file.
 patch("tcc.c",
       "int main(int argc, char **argv)",
-      "int tinyc_main(int argc, char **argv)")
+      "static int tinyc_main_impl(int argc, char **argv, TCCIO *main_io)")
 patch("tcc.c",
       """    s = s1 = tcc_new();
     opt = tcc_parse_args(s, &argc, &argv);
 """,
       """    s = s1 = tcc_new();
+    if (main_io)
+        tcc_set_io(s, main_io);
     opt = tcc_parse_args(s, &argc, &argv);
     if (s->opt_exit_requested) {
         tcc_delete(s);
@@ -122,37 +205,60 @@ patch("tcc.c",
     }
 """)
 
-# ---- tcc.c: help/version/search-dirs go through the current IO ------
-patch("tcc.c", "fputs(help, stdout);", "tinyc_io_out_str(help);")
-patch("tcc.c", "help2: fputs(help2, stdout);", "help2: tinyc_io_out_str(help2);")
-patch("tcc.c", 'printf("%s", version);', "tinyc_io_out_str(version);")
+# ---- tcc.c: help/version/search-dirs go through the state's IO ------
+patch("tcc.c", "fputs(help, stdout);", "tinyc_io_out_str(tcc_get_io(s), help);")
+patch("tcc.c", "help2: fputs(help2, stdout);", "help2: tinyc_io_out_str(tcc_get_io(s), help2);")
+patch("tcc.c", 'printf("%s", version);', "tinyc_io_out_str(tcc_get_io(s), version);")
+patch("tcc.c",
+      "static void print_dirs(const char *msg, char **paths, int nb_paths)",
+      "static void print_dirs(TCCIO *io, const char *msg, char **paths, int nb_paths)")
 patch("tcc.c",
       'printf("%s:\\n%s", msg, nb_paths ? "" : "  -\\n");',
-      'tinyc_io_out_fmt("%s:\\n%s", msg, nb_paths ? "" : "  -\\n");')
+      'tinyc_io_out_fmt(io, "%s:\\n%s", msg, nb_paths ? "" : "  -\\n");')
 patch("tcc.c",
       'printf("  %s\\n", paths[i]);',
-      'tinyc_io_out_fmt("  %s\\n", paths[i]);')
+      'tinyc_io_out_fmt(io, "  %s\\n", paths[i]);')
+patch("tcc.c",
+      'print_dirs("include", s->sysinclude_paths, s->nb_sysinclude_paths);',
+      'print_dirs(tcc_get_io(s), "include", s->sysinclude_paths, s->nb_sysinclude_paths);')
+patch("tcc.c",
+      'print_dirs("libraries", s->library_paths, s->nb_library_paths);',
+      'print_dirs(tcc_get_io(s), "libraries", s->library_paths, s->nb_library_paths);')
+patch("tcc.c",
+      'print_dirs("crt", s->crt_paths, s->nb_crt_paths);',
+      'print_dirs(tcc_get_io(s), "crt", s->crt_paths, s->nb_crt_paths);')
 patch("tcc.c",
       'printf("install: %s\\n", s->tcc_lib_path);',
-      'tinyc_io_out_fmt("install: %s\\n", s->tcc_lib_path);')
+      'tinyc_io_out_fmt(tcc_get_io(s), "install: %s\\n", s->tcc_lib_path);')
 patch("tcc.c",
       'printf("libtcc1:\\n  %s/%s\\n", s->library_paths[0], CONFIG_TCC_CROSSPREFIX TCC_LIBTCC1);',
-      'tinyc_io_out_fmt("libtcc1:\\n  %s/%s\\n", s->library_paths[0], CONFIG_TCC_CROSSPREFIX TCC_LIBTCC1);')
+      'tinyc_io_out_fmt(tcc_get_io(s), "libtcc1:\\n  %s/%s\\n", s->library_paths[0], CONFIG_TCC_CROSSPREFIX TCC_LIBTCC1);')
 patch("tcc.c",
       'printf("elfinterp:\\n  %s\\n",  s->elfint);',
-      'tinyc_io_out_fmt("elfinterp:\\n  %s\\n",  s->elfint);')
+      'tinyc_io_out_fmt(tcc_get_io(s), "elfinterp:\\n  %s\\n",  s->elfint);')
 patch("tcc.c",
       'printf("-> %s\\n", f->name);',
-      'tinyc_io_out_fmt("-> %s\\n", f->name);')
+      'tinyc_io_out_fmt(tcc_get_io(s), "-> %s\\n", f->name);')
 
-# ---- libtcc.c: API-form -E output goes through the current IO ------
+# ---- tcc.c: the -ar/-impdef/-m tools run under main's state IO -------
+patch("tcc.c",
+      "ret = tcc_tool_ar(argc, argv);",
+      "ret = tcc_tool_ar(argc, argv, tcc_get_io(s));")
+patch("tcc.c",
+      "ret = tcc_tool_impdef(argc, argv);",
+      "ret = tcc_tool_impdef(argc, argv, tcc_get_io(s));")
+patch("tcc.c",
+      "ret = tcc_tool_cross(argv, opt);",
+      "ret = tcc_tool_cross(argv, opt, tcc_get_io(s));")
+
+# ---- libtcc.c: API-form -E output goes through the state's IO ------
 # The tcc.c patch below routes -E output for the CLI form, which sets
 # s->ppfp itself. In API form nothing replaces the ppfp that tcc_new
-# sets to stdout, so preprocessed output bypassed the installed IO
+# sets to stdout, so preprocessed output bypassed the state's IO
 # entirely (and tinyc_io_open_out_stream was never called). Route it
 # for the duration of tcc_compile when ppfp still points at stdout:
-# the stream writes synchronously into the current IO (the Windows
-# temp-file stream is drained by tinyc_io_flush_all on the way out).
+# the stream writes synchronously into the state's IO (the Windows
+# temp-file stream is drained by tinyc_io_flush on the way out).
 # The local is assigned before setjmp and never modified inside the
 # protected block, so it survives an error longjmp; the tail runs on
 # both paths.
@@ -163,10 +269,10 @@ patch("libtcc.c",
       """    tcc_enter_state(s1);
     s1->error_set_jmp_enabled = 1;
 
-    /* tinyc: route API-form -E output through the current IO */
+    /* tinyc: route API-form -E output through the state's IO */
     FILE *tinyc_pp_stream = NULL;
     if (s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout) {
-        tinyc_pp_stream = tinyc_io_open_out_stream();
+        tinyc_pp_stream = tinyc_io_open_out_stream(tcc_get_io(s1));
         if (tinyc_pp_stream)
             s1->ppfp = tinyc_pp_stream;
     }
@@ -185,12 +291,12 @@ patch("libtcc.c",
     if (tinyc_pp_stream) {
         fclose(tinyc_pp_stream);
         s1->ppfp = stdout;
-        tinyc_io_flush_all();
+        tinyc_io_flush(tcc_get_io(s1));
     }
     return s1->nb_errors != 0 ? -1 : 0;
 """)
 
-# ---- tcc.c: -E output goes through the current IO when one is set ---
+# ---- tcc.c: -E output goes through the state's IO when one is set ---
 patch("tcc.c",
       """            if (s->outfile && 0!=strcmp("-",s->outfile)) {
                 ppfp = tcc_fopen(s->outfile, "wb");
@@ -202,9 +308,9 @@ patch("tcc.c",
                 if (!ppfp)
                     tcc_error_noabort("could not write '%s'", s->outfile);
             } else {
-                /* tinyc: route -E output through the current IO when
+                /* tinyc: route -E output through the state's IO when
                  * one is installed (NULL stream keeps stdout). */
-                ppfp = tinyc_io_open_out_stream();
+                ppfp = tinyc_io_open_out_stream(tcc_get_io(s));
             }""")
 
 # ---- tccrun.c: no host kill / crash on a relocated state -----------
@@ -257,23 +363,136 @@ patch("tccrun.c",
     if (tcc_add_support(s1, "runmain.o"))
         return -1;""")
 
-# ---- tccrun.c: -run program stdio goes through the current IO -------
+# ---- tccrun.c: -run program stdio goes through the state's IO -------
 # The wrapper calls bracket the program's entry point; tcc_run's own
 # semantics (arguments, return value, exit handling) are unchanged.
-# With no IO or the stdio IO installed both calls are no-ops.
+# With no IO or the stdio IO on the state both calls are no-ops.
 patch("tccrun.c",
       """    errno = 0; /* clean errno value */
     fflush(stdout);
     fflush(stderr);""",
-      """    /* tinyc: with a non-stdio IO installed, redirect the run
+      """    /* tinyc: with a non-stdio IO on the state, redirect the run
      * program's process stdio through it for the duration of the
      * run (no-op for the stdio IO). run_stdin means tcc_run has
      * already reopened stdin from a file: leave fd 0 alone. */
-    tinyc_run_redirect_begin(s1->run_stdin != NULL);
+    tinyc_run_redirect_begin(tcc_get_io(s1), s1->run_stdin != NULL);
 
     errno = 0; /* clean errno value */
     fflush(stdout);
     fflush(stderr);""")
+
+# ---- tccrun.c: relocate verbose trace goes through the state's IO ---
+patch("tccrun.c",
+      '        printf(&"-----------------------------------------------------\\n"[PTR_SIZE*2 - 8]);',
+      '        tinyc_io_out_str(tcc_get_io(s1), &"-----------------------------------------------------\\n"[PTR_SIZE*2 - 8]);')
+patch("tccrun.c",
+      """                    printf("%d: %-16s %p  len %05x  align %04x\\n",
+                        k, s->name, (void*)s->sh_addr, length, s->sh_addralign);""",
+      """                    tinyc_io_out_fmt(tcc_get_io(s1), "%d: %-16s %p  len %05x  align %04x\\n",
+                        k, s->name, (void*)s->sh_addr, length, s->sh_addralign);""")
+patch("tccrun.c",
+      """                printf("protect         %3s %p  len %05x\\n",
+                    &"rx\\0ro\\0rw\\0rwx"[f*3], (void*)addr, (unsigned)n);""",
+      """                tinyc_io_out_fmt(tcc_get_io(s1), "protect         %3s %p  len %05x\\n",
+                    &"rx\\0ro\\0rw\\0rwx"[f*3], (void*)addr, (unsigned)n);""")
+
+# ---- tcctools.c: gen_makedeps verbose note goes through the IO ------
+patch("tcctools.c",
+      """    if (s1->verbose)
+        printf("<- %s\\n", filename);""",
+      """    if (s1->verbose)
+        tinyc_io_out_fmt(tcc_get_io(s1), "<- %s\\n", filename);""")
+
+# ---- tcctools.c: the -ar/-impdef/-m tools take main's state IO ------
+# tcctools.c is included into tcc.c, whose tinyc_main_impl passes the
+# IO of the state it created. The tools' diagnostics and listings go
+# through that IO; file outputs (the archive itself, the .def file,
+# the deps file) are data channels and stay direct.
+patch("tcctools.c",
+      """static int ar_usage(int ret) {
+    fprintf(stderr, "usage: tcc -ar [crstvx] lib [files]\\n");
+    fprintf(stderr, "create library ([abdiopN] not supported).\\n");
+    return ret;
+}""",
+      """static int ar_usage(int ret, TCCIO *io) {
+    tinyc_io_err_fmt(io, "usage: tcc -ar [crstvx] lib [files]\\n");
+    tinyc_io_err_fmt(io, "create library ([abdiopN] not supported).\\n");
+    return ret;
+}""")
+patch("tcctools.c",
+      "ST_FUNC int tcc_tool_ar(int argc, char **argv)",
+      "ST_FUNC int tcc_tool_ar(int argc, char **argv, TCCIO *io)")
+patch("tcctools.c",
+      "        return ar_usage(ret);",
+      "        return ar_usage(ret, io);")
+patch("tcctools.c",
+      '            fprintf(stderr, "tcc: ar: can\'t open file %s\\n", argv[i_lib]);',
+      '            tinyc_io_err_fmt(io, "tcc: ar: can\'t open file %s\\n", argv[i_lib]);')
+patch("tcctools.c",
+      '            fprintf(stderr, "tcc: ar: not an ar archive %s\\n", argv[i_lib]);',
+      '            tinyc_io_err_fmt(io, "tcc: ar: not an ar archive %s\\n", argv[i_lib]);')
+patch("tcctools.c",
+      '\t\t    printf("%s%s\\n", extract ? "x - " : "", arhdr.ar_name);',
+      '\t\t    tinyc_io_out_fmt(io, "%s%s\\n", extract ? "x - " : "", arhdr.ar_name);')
+patch("tcctools.c",
+      "\t\t\tfprintf(stderr, \"tcc: ar: can't create file %s\\n\",\n\t\t\t\tarhdr.ar_name);",
+      "\t\t\ttinyc_io_err_fmt(io, \"tcc: ar: can't create file %s\\n\",\n\t\t\t\tarhdr.ar_name);")
+patch("tcctools.c",
+      '        fprintf(stderr, "tcc: ar: can\'t create file %s\\n", argv[i_lib]);',
+      '        tinyc_io_err_fmt(io, "tcc: ar: can\'t create file %s\\n", argv[i_lib]);')
+patch("tcctools.c",
+      '        fprintf(stderr, "tcc: ar: can\'t create temporary file %s\\n", tfile);',
+      '        tinyc_io_err_fmt(io, "tcc: ar: can\'t create temporary file %s\\n", tfile);')
+patch("tcctools.c",
+      '            fprintf(stderr, "tcc: ar: can\'t open file %s \\n", argv[i_obj]);',
+      '            tinyc_io_err_fmt(io, "tcc: ar: can\'t open file %s \\n", argv[i_obj]);')
+patch("tcctools.c",
+      '            printf("a - %s\\n", argv[i_obj]);',
+      '            tinyc_io_out_fmt(io, "a - %s\\n", argv[i_obj]);')
+patch("tcctools.c",
+      '            fprintf(stderr, "tcc: ar: Unsupported Elf Class: %s\\n", argv[i_obj]);',
+      '            tinyc_io_err_fmt(io, "tcc: ar: Unsupported Elf Class: %s\\n", argv[i_obj]);')
+patch("tcctools.c",
+      "ST_FUNC int tcc_tool_impdef(int argc, char **argv)",
+      "ST_FUNC int tcc_tool_impdef(int argc, char **argv, TCCIO *io)")
+patch("tcctools.c",
+      """        fprintf(stderr,
+            "usage: tcc -impdef library.dll [-v] [-o outputfile]\\n"
+            "create export definition file (.def) from dll\\n"
+            );""",
+      """        tinyc_io_err_fmt(io,
+            "usage: tcc -impdef library.dll [-v] [-o outputfile]\\n"
+            "create export definition file (.def) from dll\\n"
+            );""")
+patch("tcctools.c",
+      """        fprintf(stderr, "tcc: impdef: %s '%s'\\n",""",
+      """        tinyc_io_err_fmt(io, "tcc: impdef: %s '%s'\\n",""")
+patch("tcctools.c",
+      '        printf("-> %s\\n", file);',
+      '        tinyc_io_out_fmt(io, "-> %s\\n", file);')
+patch("tcctools.c",
+      '        fprintf(stderr, "tcc: impdef: could not create output file: %s\\n", outfile);',
+      '        tinyc_io_err_fmt(io, "tcc: impdef: could not create output file: %s\\n", outfile);')
+patch("tcctools.c",
+      '        printf("<- %s (%d symbol%s)\\n", outfile, i, &"s"[i<2]);',
+      '        tinyc_io_out_fmt(io, "<- %s (%d symbol%s)\\n", outfile, i, &"s"[i<2]);')
+patch("tcctools.c",
+      """ST_FUNC int tcc_tool_cross(char **argv, int option)
+{
+    fprintf(stderr, "tcc -m%d not implemented\\n", option);
+    return 1;
+}""",
+      """ST_FUNC int tcc_tool_cross(char **argv, int option, TCCIO *io)
+{
+    tinyc_io_err_fmt(io, "tcc -m%d not implemented\\n", option);
+    return 1;
+}""")
+patch("tcctools.c",
+      "ST_FUNC int tcc_tool_cross(char **argv, int target)",
+      "ST_FUNC int tcc_tool_cross(char **argv, int target, TCCIO *io)")
+patch("tcctools.c",
+      '    fprintf(stderr, "tcc: could not run \'%s\'\\n", program);',
+      '    tinyc_io_err_fmt(io, "tcc: could not run \'%s\'\\n", program);')
 patch("tccrun.c",
       """    if (0 == ret) {
         ret = prog_main(argc, argv, envp);
@@ -347,15 +566,19 @@ patch("tccpe.c",
         tinyc_diag_mark("imports:done");
 }""")
 
-# ---- tcc.c: real process entry forwards to tinyc_main ----------------
+# ---- tcc.c: exported entries + real process entry --------------------
 p = SRC / "tcc.c"
 text = p.read_text()
 text += """
-/* tinyc dual-form entry: executing the file runs this main, which
+/* tinyc dual-form entries: executing the file runs main, which
  * forwards to the exported tinyc_main; loading the file as a library
- * lets hosts call tinyc_main (or the tcc_* API) directly. */
+ * lets hosts call tinyc_main (or the tcc_* API) directly. The
+ * _with_io form installs its IO on every state the impl creates;
+ * states created through the tcc_* API keep their own IO. */
+int tinyc_main(int argc, char **argv) { return tinyc_main_impl(argc, argv, NULL); }
+int tinyc_main_with_io(int argc, char **argv, TCCIO *io) { return tinyc_main_impl(argc, argv, io); }
 int main(int argc, char **argv) { return tinyc_main(argc, argv); }
 """
 p.write_text(text)
-print("patched tcc.c: appended dual-form main wrapper")
+print("patched tcc.c: appended dual-form entry wrappers")
 print("all patches applied")

@@ -205,6 +205,12 @@ EXPORTED_RUNTIME_METHODS='["HEAPU8","ccall","cwrap","FS","UTF8ToString","stringT
 #                             FS through it (FS.mkdirTree, FS.writeFile
 #                             and FS.unlink)
 #   ALLOW_MEMORY_GROWTH       compiled inputs are unbounded
+#   ALLOW_TABLE_GROWTH        the glue layer registers JS callbacks
+#                             in the module's function table through
+#                             addFunction (the per-state error
+#                             callback); a fixed-size table has no
+#                             free slot for the first registration
+#                             and it throws
 #   ENVIRONMENT=web,worker    same build serves page and worker
 emcc $CORE_SRC \
     -I"$UPSTREAM" \
@@ -219,6 +225,7 @@ emcc $CORE_SRC \
     -sWASMFS=1 \
     -sFORCE_FILESYSTEM=1 \
     -sALLOW_MEMORY_GROWTH=1 \
+    -sALLOW_TABLE_GROWTH=1 \
     -sEXPORTED_FUNCTIONS="$EXPORTED_FUNCTIONS" \
     -sEXPORTED_RUNTIME_METHODS="$EXPORTED_RUNTIME_METHODS" \
     -o "tcc-$TARGET.mjs"

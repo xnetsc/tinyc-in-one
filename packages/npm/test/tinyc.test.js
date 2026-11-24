@@ -114,6 +114,34 @@ test('io: JS callback receives compiler output', () => {
   io.close();
 });
 
+test('io: per-state IOs stay separate when states interleave', () => {
+  // -E output does not go through the error callback, so it is the
+  // channel that proves each state routes through its own IO.
+  const a = new tcc.State(tcc.TCC_OUTPUT_PREPROCESS);
+  const b = new tcc.State(tcc.TCC_OUTPUT_PREPROCESS);
+  const ioA = tcc.IO.buffer();
+  const ioB = tcc.IO.buffer();
+  try {
+    a.setIO(ioA);
+    b.setIO(ioB);
+    a.compileString('#define VA 111\nint xa = VA;\n');
+    assert.match(ioA.out.toString(), /int xa = 111;/);
+    assert.strictEqual(ioB.out.length, 0);
+    b.compileString('#define VB 222\nint xb = VB;\n');
+    assert.match(ioB.out.toString(), /int xb = 222;/);
+    assert.doesNotMatch(ioA.out.toString(), /xb/);
+    // A CLI capture in between installs nothing on either state.
+    const [code, out] = tcc.runCliCapture(['--version']);
+    assert.strictEqual(code, 0);
+    assert.match(out.toString(), /tcc version/);
+    a.compileString('#define VA2 333\nint xa2 = VA2;\n');
+    assert.match(ioA.out.toString(), /int xa2 = 333;/);
+    assert.doesNotMatch(ioB.out.toString(), /xa2/);
+  } finally {
+    a.close(); b.close(); ioA.close(); ioB.close();
+  }
+});
+
 /* ------------------------------------------- host / target resolution
  * Host simulation runs in child processes: TINYC_HOST_TRIPLE overrides
  * detection, and each child gets a fresh module registry. */

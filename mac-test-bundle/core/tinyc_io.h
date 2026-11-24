@@ -1,9 +1,13 @@
 /* tinyc_io.h - IO abstraction for the TinyC dual-form kernel.
  *
- * All compiler-owned input/output goes through a TCCIO object.
- * A NULL TCCIO everywhere in this API means the stdio implementation:
- * output goes directly to the process's real stdout/stderr and input
- * comes from the real stdin.
+ * All compiler-owned input/output goes through a TCCIO object owned
+ * by a TCCState: tcc_set_io (libtcc.h) installs one on a state, and
+ * every compiler output path of that state - diagnostics, help,
+ * version, -E output, the -run stdio redirect - goes through it.
+ * There is no process-wide current IO. A state with no IO installed,
+ * and a NULL TCCIO everywhere in this API, mean the stdio
+ * implementation: output goes directly to the process's real
+ * stdout/stderr and input comes from the real stdin.
  */
 #ifndef TINYC_IO_H
 #define TINYC_IO_H
@@ -63,32 +67,62 @@ void tcc_io_free(TCCIO *io);
 const char *tcc_io_buffer_data(TCCIO *io, int channel, size_t *len);
 void tcc_io_buffer_clear(TCCIO *io);
 
-/* ---- current IO (used by the compiler's own output paths) ---------- */
+/* ---- write helpers (used by the compiler's own output paths) ------- */
 
-/* Install io as the current IO for subsequent compiler output.
- * NULL restores the stdio default. */
-void tinyc_set_io(TCCIO *io);
-TCCIO *tinyc_get_io(void);
+/* Each helper takes the IO to write to - a state's IO as returned by
+ * tcc_get_io (libtcc.h), or any TCCIO directly. A NULL IO, like a
+ * state with nothing installed, resolves to the stdio singleton. */
+int tinyc_io_write_out(TCCIO *io, const char *buf, size_t len);
+int tinyc_io_write_err(TCCIO *io, const char *buf, size_t len);
+void tinyc_io_out_str(TCCIO *io, const char *s);
+void tinyc_io_err_str(TCCIO *io, const char *s);
+void tinyc_io_out_fmt(TCCIO *io, const char *fmt, ...);
+void tinyc_io_err_fmt(TCCIO *io, const char *fmt, ...);
+void tinyc_io_err_line(TCCIO *io, const char *s); /* writes s + "\n" to err */
+/* Flush io; on Windows also delivers any of io's -E stream output
+ * still sitting in its temp file (see tinyc_io_open_out_stream). */
+void tinyc_io_flush(TCCIO *io);
 
-/* Write helpers honoring the current IO (stdio when none is set). */
-int tinyc_io_write_out(const char *buf, size_t len);
-int tinyc_io_write_err(const char *buf, size_t len);
-void tinyc_io_out_str(const char *s);
-void tinyc_io_err_str(const char *s);
-void tinyc_io_out_fmt(const char *fmt, ...);
-void tinyc_io_err_line(const char *s); /* writes s + "\n" to err */
-void tinyc_io_flush_all(void);
+/* A FILE* whose writes forward to io's out channel, or NULL when io
+ * resolves to the stdio default (callers then keep using stdout). */
+FILE *tinyc_io_open_out_stream(TCCIO *io);
 
-/* On Linux: a FILE* whose writes forward to the current IO's out
- * channel, or NULL when the current IO is the stdio default. */
-FILE *tinyc_io_open_out_stream(void);
+/* ---- -run stdio redirection ----------------------------------------- */
+
+/* Called by tcc_run around the run program's entry point, with the
+ * running state's IO. When that IO is a non-stdio TCCIO, the
+ * process's fd 0/1/2 are redirected through it for the duration of
+ * the run: fd 0 is fed the bytes read_in returns (then EOF), and
+ * what the program writes to fd 1/2 is delivered to write_out /
+ * write_err, per channel, when the run ends. The host's fds are
+ * restored by tinyc_run_redirect_end. With the stdio IO both
+ * functions are no-ops and the run program uses the process's real
+ * stdio. keep_stdin != 0 leaves fd 0 alone (tcc_run has already
+ * reopened stdin from a file for the program). Nested calls are
+ * counted: only the outermost pair redirects. */
+void tinyc_run_redirect_begin(TCCIO *io, int keep_stdin);
+void tinyc_run_redirect_end(void);
+
+/* ---- run-path diagnostic markers ------------------------------------ */
+
+/* Append one line to the platform diagnostic markers file
+ * (tinyc_init.markers on Windows). The run path calls these at its
+ * internal stage boundaries so that a crash inside tcc_run leaves
+ * the last completed stage on record. Only the Windows image has
+ * a markers file; everywhere else these are no-ops. */
+void tinyc_diag_mark(const char *line);
+void tinyc_diag_mark_ptr(const char *label, const void *p);
 
 /* ---- dual-form entry points ----------------------------------------- */
 
 /* The compiler's real main, exported from the dual-form file. */
 int tinyc_main(int argc, char **argv);
-/* tinyc_main with an IO installed for the duration of the call.
- * The previous IO is restored before returning. */
+/* tinyc_main with io installed on every state main creates during
+ * the call (main builds a fresh state per pass). States created
+ * through the tcc_* API are unaffected. */
+int tinyc_main_with_io(int argc, char **argv, TCCIO *io);
+/* tinyc_main_with_io, plus a flush of io once main has returned:
+ * the form the packages' CLI capture calls bind. */
 int tinyc_main_io(int argc, char **argv, TCCIO *io);
 
 #ifdef __cplusplus

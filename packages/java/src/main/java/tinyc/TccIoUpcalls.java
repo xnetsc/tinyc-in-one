@@ -30,8 +30,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>接入点有二：错误回调跳板（{@link #errorFuncStub}）经
  * {@code tcc_set_error_func} 注册到 libtcc，供会话式 API 的诊断使用；
  * 写/读跳板（{@link #writeStub}、{@link #readStub}）由 {@link #mainIoStubs}
- * 组成三通道集合，经内核 {@code tcc_io_callback} 组成回调型 TCCIO 后
- * 传给 {@code tinyc_main_io}，供 {@link TinyC#runCli(TccIO, String...)} 使用。
+ * 组成三通道集合，经内核 {@code tcc_io_callback} 组成回调型 TCCIO：
+ * 传给 {@code tinyc_main_io} 供 {@link TinyC#runCli(TccIO, String...)}，
+ * 或经 {@code tcc_set_io} 装到会话的 state 上供 {@link TccSession#setIO}。
  */
 public final class TccIoUpcalls {
 

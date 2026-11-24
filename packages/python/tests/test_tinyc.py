@@ -188,6 +188,51 @@ class IoTests(unittest.TestCase):
         self.assertEqual(b"".join(out_chunks), feed)
         self.assertEqual(b"".join(err_chunks), b"run-marker\n")
 
+    def test_per_state_ios_stay_separate_when_interleaved(self):
+        # -E output does not go through the error callback, so it is
+        # the channel that proves each state routes through its own
+        # IO. A run_cli capture in between must disturb neither.
+        io_a, io_b = tinyc.IO.buffer(), tinyc.IO.buffer()
+        try:
+            with tinyc.State(output_type=tinyc.TCC_OUTPUT_PREPROCESS,
+                             io=io_a) as a, \
+                 tinyc.State(output_type=tinyc.TCC_OUTPUT_PREPROCESS,
+                             io=io_b) as b:
+                a.compile_string("#define VA 111\nint xa = VA;\n")
+                self.assertIn(b"int xa = 111;", io_a.out)
+                self.assertEqual(io_b.out, b"")
+                b.compile_string("#define VB 222\nint xb = VB;\n")
+                self.assertIn(b"int xb = 222;", io_b.out)
+                self.assertNotIn(b"xb", io_a.out)
+                code, out = tinyc.run_cli_capture(["--version"])
+                self.assertEqual(code, 0)
+                self.assertIn(b"tcc version", out)
+                a.compile_string("#define VA2 333\nint xa2 = VA2;\n")
+                self.assertIn(b"int xa2 = 333;", io_a.out)
+                self.assertNotIn(b"xa2", io_b.out)
+        finally:
+            io_a.close()
+            io_b.close()
+
+    def test_state_run_stdio_goes_through_own_io(self):
+        # tcc_run redirects the program's stdio through the running
+        # state's IO: two states, each with its own buffer, run the
+        # same shape of program and keep the outputs separate.
+        io_a, io_b = tinyc.IO.buffer(), tinyc.IO.buffer()
+        try:
+            for io, marker in ((io_a, "run-a"), (io_b, "run-b")):
+                with tinyc.State(io=io) as s:
+                    s.compile_string(
+                        '#include <stdio.h>\n'
+                        f'int main(){{ printf("{marker}\\n"); return 0; }}\n')
+                    self.assertEqual(s.run(), 0)
+                self.assertIn((marker + "\n").encode(), io.out)
+            self.assertNotIn(b"run-b", io_a.out)
+            self.assertNotIn(b"run-a", io_b.out)
+        finally:
+            io_a.close()
+            io_b.close()
+
     def test_io_null_swallows(self):
         code, out = tinyc.run_cli_capture(["--version"])
         self.assertIn(b"tcc version", out)  # sanity: capture works

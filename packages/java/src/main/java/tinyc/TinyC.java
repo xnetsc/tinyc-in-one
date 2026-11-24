@@ -106,7 +106,7 @@ public final class TinyC {
      * 带 IO 的命令行式运行：{@code io} 的三个通道经 Panama upcall 跳板
      * （{@link TccIoUpcalls#mainIoStubs}）组成回调型 TCCIO，经
      * {@code tcc_io_callback} 建好后传给原生入口 {@code tinyc_main_io}，
-     * 在本次调用期间作为编译器的当前 IO：编译器自身的输出走
+     * 装在本次 main 所建的 state 上（仅该次调用）：编译器自身的输出走
      * {@code writeOut}、诊断走 {@code writeErr}、{@code readIn} 随 TCCIO
      * 一并传给内核。{@code io} 为 null 时与 {@link #runCli(String...)}
      * 完全一致，走 {@code tinyc_main}、输出走进程真实 stdio。

@@ -1,4 +1,7 @@
-/* tcc_io.c - TCCIO implementations and the current-IO registry. */
+/* tcc_io.c - TCCIO implementations and the per-state write helpers.
+ * IO selection lives on the TCCState (tcc_set_io in libtcc.c); this
+ * file holds the implementations and the helpers the compiler's
+ * output paths call with a state's IO. */
 #if defined(__ANDROID__) && !defined(_BSD_SOURCE)
 /* bionic declares funopen (used by tinyc_io_open_out_stream below)
  * only under __USE_BSD, which _BSD_SOURCE enables. */
@@ -15,79 +18,97 @@
 #endif
 
 /* ------------------------------------------------------------------ */
-/* registry                                                            */
+/* write helpers                                                       */
 
-static TCCIO *g_current_io;
-
-void tinyc_set_io(TCCIO *io) { g_current_io = io; }
-TCCIO *tinyc_get_io(void) { return g_current_io; }
-
-static TCCIO *eff_io(void)
+/* A NULL IO resolves to the stdio singleton: a state with no IO
+ * installed, and every helper call made without one, write to the
+ * process's real stdio. The singleton is immutable and shared
+ * read-only; there is no mutable process-wide IO anywhere. */
+static TCCIO *eff_io(TCCIO *io)
 {
-    return g_current_io ? g_current_io : tcc_io_stdio();
+    return io ? io : tcc_io_stdio();
 }
 
-int tinyc_io_write_out(const char *buf, size_t len)
+int tinyc_io_write_out(TCCIO *io, const char *buf, size_t len)
 {
-    TCCIO *io = eff_io();
+    io = eff_io(io);
     return io->write_out ? io->write_out(io->ctx, buf, len) : (int)len;
 }
 
-int tinyc_io_write_err(const char *buf, size_t len)
+int tinyc_io_write_err(TCCIO *io, const char *buf, size_t len)
 {
-    TCCIO *io = eff_io();
+    io = eff_io(io);
     return io->write_err ? io->write_err(io->ctx, buf, len) : (int)len;
 }
 
-void tinyc_io_out_str(const char *s)
+void tinyc_io_out_str(TCCIO *io, const char *s)
 {
-    if (s) tinyc_io_write_out(s, strlen(s));
+    if (s) tinyc_io_write_out(io, s, strlen(s));
 }
 
-void tinyc_io_err_str(const char *s)
+void tinyc_io_err_str(TCCIO *io, const char *s)
 {
-    if (s) tinyc_io_write_err(s, strlen(s));
+    if (s) tinyc_io_write_err(io, s, strlen(s));
 }
 
-void tinyc_io_err_line(const char *s)
+void tinyc_io_err_line(TCCIO *io, const char *s)
 {
-    if (s) tinyc_io_write_err(s, strlen(s));
-    tinyc_io_write_err("\n", 1);
+    if (s) tinyc_io_write_err(io, s, strlen(s));
+    tinyc_io_write_err(io, "\n", 1);
 }
 
-void tinyc_io_out_fmt(const char *fmt, ...)
+static void io_vfmt(TCCIO *io, int err, const char *fmt, va_list ap0)
 {
     char buf[4096];
     va_list ap;
-    va_start(ap, fmt);
+    va_copy(ap, ap0);
     int n = vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
     if (n < 0) return;
     if ((size_t)n < sizeof buf) {
-        tinyc_io_write_out(buf, (size_t)n);
+        if (err) tinyc_io_write_err(io, buf, (size_t)n);
+        else tinyc_io_write_out(io, buf, (size_t)n);
         return;
     }
     char *big = malloc((size_t)n + 1);
     if (!big) return;
-    va_start(ap, fmt);
+    va_copy(ap, ap0);
     vsnprintf(big, (size_t)n + 1, fmt, ap);
     va_end(ap);
-    tinyc_io_write_out(big, (size_t)n);
+    if (err) tinyc_io_write_err(io, big, (size_t)n);
+    else tinyc_io_write_out(io, big, (size_t)n);
     free(big);
+}
+
+void tinyc_io_out_fmt(TCCIO *io, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    io_vfmt(io, 0, fmt, ap);
+    va_end(ap);
+}
+
+void tinyc_io_err_fmt(TCCIO *io, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    io_vfmt(io, 1, fmt, ap);
+    va_end(ap);
 }
 
 #ifdef _WIN32
 /* Defined with the Windows tinyc_io_open_out_stream below: delivers
- * any captured -E output that is still sitting in its temp file. */
-static void tinyc_io_win_drain_out_streams(void);
+ * any of the given IO's captured -E output that is still sitting in
+ * its temp file. */
+static void tinyc_io_win_drain_out_streams(TCCIO *io);
 #endif
 
-void tinyc_io_flush_all(void)
+void tinyc_io_flush(TCCIO *io)
 {
+    io = eff_io(io);
 #ifdef _WIN32
-    tinyc_io_win_drain_out_streams();
+    tinyc_io_win_drain_out_streams(io);
 #endif
-    TCCIO *io = eff_io();
     if (io->flush) io->flush(io->ctx);
     else { fflush(stdout); fflush(stderr); }
 }
@@ -390,32 +411,32 @@ TCCIO *tcc_io_tee(TCCIO *a, TCCIO *b)
 #if defined(__GLIBC__)
 static ssize_t cookie_write(void *c, const char *b, size_t n)
 {
-    (void)c;
-    int r = tinyc_io_write_out(b, n);
+    int r = tinyc_io_write_out((TCCIO *)c, b, n);
     return r < 0 ? -1 : r;
 }
 
-FILE *tinyc_io_open_out_stream(void)
+FILE *tinyc_io_open_out_stream(TCCIO *io)
 {
-    if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
+    io = eff_io(io);
+    if (io == &g_stdio_io) return NULL;
     cookie_io_functions_t fns = { .read = NULL, .write = cookie_write,
                                   .seek = NULL, .close = NULL };
-    return fopencookie(NULL, "w", fns);
+    return fopencookie(io, "w", fns);
 }
 #elif defined(__APPLE__) || defined(__ANDROID__)
 /* macOS and Android (bionic, API 24+) both provide BSD funopen with
  * this callback shape; bionic has no fopencookie. */
 static int funopen_write(void *c, const char *b, int n)
 {
-    (void)c;
-    int r = tinyc_io_write_out(b, (size_t)n);
+    int r = tinyc_io_write_out((TCCIO *)c, b, (size_t)n);
     return r < 0 ? -1 : r;
 }
 
-FILE *tinyc_io_open_out_stream(void)
+FILE *tinyc_io_open_out_stream(TCCIO *io)
 {
-    if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
-    return funopen(NULL, NULL, funopen_write, NULL, NULL);
+    io = eff_io(io);
+    if (io == &g_stdio_io) return NULL;
+    return funopen(io, NULL, funopen_write, NULL, NULL);
 }
 #elif defined(_WIN32)
 /* MSVCRT/MinGW has neither fopencookie nor funopen, and a plain FILE*
@@ -424,20 +445,22 @@ FILE *tinyc_io_open_out_stream(void)
  * writes to a temporary file: the preprocessor's writes reach the
  * file as its stdio buffer flushes, and in full at the caller's
  * fclose (the only close the caller performs, in tinyc_main after
- * tcc_delete). tinyc_io_flush_all drains the file to the current
- * IO's out channel, and tinyc_main_io calls tinyc_io_flush_all after
+ * tcc_delete). tinyc_io_flush drains the file to the owning IO's
+ * out channel, and tinyc_main_io calls tinyc_io_flush after
  * tinyc_main returns - after that fclose - so by the time a -E call
  * returns, the captured output has been delivered in full, the same
  * observable state the synchronous branches leave behind.
  * The writer handle shares read access, so a drain while the stream
- * is still open (tinyc_io_flush_all is also called from the error
+ * is still open (tinyc_io_flush is also called from the error
  * path mid-compile) delivers the bytes flushed so far, in order, and
  * keeps the entry. A drain finds the stream finished when an
  * exclusive open succeeds, which the writer's share mode refuses
  * while its FILE* is still open; that drain delivers the rest,
  * deletes the file and drops the entry. Delivery is plain file IO
  * in the caller's thread - no reader thread, no pipe - so a drain
- * never waits on the writer at any output size. */
+ * never waits on the writer at any output size. Each entry records
+ * the IO its stream forwards to; a drain only touches that IO's
+ * entries. */
 #include <fcntl.h>
 #include <io.h>
 #include <stdint.h>
@@ -445,15 +468,17 @@ FILE *tinyc_io_open_out_stream(void)
 
 typedef struct WinOutStream {
     struct WinOutStream *next;
+    TCCIO *io;           /* the IO this stream forwards to */
     char path[MAX_PATH];
     long long delivered; /* bytes already passed to tinyc_io_write_out */
 } WinOutStream;
 
 static WinOutStream *g_win_out_streams;
 
-FILE *tinyc_io_open_out_stream(void)
+FILE *tinyc_io_open_out_stream(TCCIO *io)
 {
-    if (!g_current_io || g_current_io == &g_stdio_io) return NULL;
+    io = eff_io(io);
+    if (io == &g_stdio_io) return NULL;
 
     char dir[MAX_PATH], path[MAX_PATH];
     DWORD n = GetTempPathA(MAX_PATH, dir);
@@ -470,6 +495,7 @@ FILE *tinyc_io_open_out_stream(void)
 
     WinOutStream *e = malloc(sizeof *e);
     if (!e) { fclose(fp); DeleteFileA(path); return NULL; }
+    e->io = io;
     strcpy(e->path, path);
     e->delivered = 0;
     e->next = g_win_out_streams;
@@ -477,11 +503,12 @@ FILE *tinyc_io_open_out_stream(void)
     return fp;
 }
 
-static void tinyc_io_win_drain_out_streams(void)
+static void tinyc_io_win_drain_out_streams(TCCIO *io)
 {
     WinOutStream **link = &g_win_out_streams;
     while (*link) {
         WinOutStream *e = *link;
+        if (e->io != io) { link = &e->next; continue; }
         int closed = 0;
         HANDLE probe = CreateFileA(e->path, GENERIC_READ, 0, NULL,
                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
@@ -503,7 +530,7 @@ static void tinyc_io_win_drain_out_streams(void)
                     DWORD got = 0;
                     if (!ReadFile(hr, buf, sizeof buf, &got, NULL) || got == 0)
                         break;
-                    int w = tinyc_io_write_out(buf, got);
+                    int w = tinyc_io_write_out(e->io, buf, got);
                     if (w < 0)
                         break;
                     e->delivered += w;
@@ -523,7 +550,7 @@ static void tinyc_io_win_drain_out_streams(void)
     }
 }
 #else
-FILE *tinyc_io_open_out_stream(void) { return NULL; }
+FILE *tinyc_io_open_out_stream(TCCIO *io) { (void)io; return NULL; }
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -585,7 +612,7 @@ void tinyc_diag_mark_ptr(const char *label, const void *p)
 /*                                                                     */
 /* The host's global stdio is never replaced; for the duration of one  */
 /* run the process's fd 0/1/2 are pointed at temporary files. fd 0's   */
-/* file is pre-filled from the current IO's read_in, fd 1/2's files    */
+/* file is pre-filled from the running state's read_in, fd 1/2's files */
 /* are drained into write_out/write_err after the run, and the real    */
 /* fds are restored. Temporary files (not pipes) are what make this    */
 /* deadlock-free at any output size: the program can write without a   */
@@ -656,16 +683,16 @@ static void win_redir_install(WinRunRedir *r, int fd, FILE *tmp)
     _setmode(fd, _O_BINARY);
 }
 
-void tinyc_run_redirect_begin(int keep_stdin)
+void tinyc_run_redirect_begin(TCCIO *io, int keep_stdin)
 {
     WinRunRedir *r = &g_win_run_redir;
     if (r->depth > 0) { r->depth++; return; }
-    TCCIO *io = g_current_io;
-    if (!io || io == &g_stdio_io) return;
+    io = eff_io(io);
+    if (io == &g_stdio_io) return;
 
     /* Output buffered so far belongs to the real fds / the IO itself,
      * not to the run program's channels. */
-    tinyc_io_flush_all();
+    tinyc_io_flush(io);
     fflush(stdout);
     fflush(stderr);
 
@@ -797,16 +824,16 @@ static void redir_install(RunRedir *r, int fd, FILE *tmp)
     }
 }
 
-void tinyc_run_redirect_begin(int keep_stdin)
+void tinyc_run_redirect_begin(TCCIO *io, int keep_stdin)
 {
     RunRedir *r = &g_run_redir;
     if (r->depth > 0) { r->depth++; return; }
-    TCCIO *io = g_current_io;
-    if (!io || io == &g_stdio_io) return;
+    io = eff_io(io);
+    if (io == &g_stdio_io) return;
 
     /* Output buffered so far belongs to the real fds / the IO itself,
      * not to the run program's channels. */
-    tinyc_io_flush_all();
+    tinyc_io_flush(io);
     fflush(stdout);
     fflush(stderr);
 
@@ -913,12 +940,15 @@ void tinyc_run_redirect_end(void)
 /* ------------------------------------------------------------------ */
 /* main entry with IO                                                  */
 
+/* The IO is installed by tinyc_main_with_io on every state main
+ * creates for this call; nothing process-wide is installed or
+ * restored here, and states other code created keep their own IO.
+ * The flush after main returns delivers whatever the call left
+ * buffered in io - on Windows including any -E temp-file stream
+ * main closed on its way out. */
 int tinyc_main_io(int argc, char **argv, TCCIO *io)
 {
-    TCCIO *prev = g_current_io;
-    g_current_io = io;
-    int ret = tinyc_main(argc, argv);
-    tinyc_io_flush_all();
-    g_current_io = prev;
+    int ret = tinyc_main_with_io(argc, argv, io);
+    tinyc_io_flush(io);
     return ret;
 }

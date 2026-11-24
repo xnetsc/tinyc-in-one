@@ -1,6 +1,7 @@
 /* Unit tests for the TCCIO implementations (core/tcc_io.c).
  * Build: gcc -I core tests/test_io.c core/tcc_io.c -o test_io
- * tcc_io.c's tinyc_main_io references tinyc_main; a stub stands in. */
+ * tcc_io.c's tinyc_main_io references tinyc_main_with_io; a stub
+ * stands in and records the IO it was handed. */
 #include "tinyc_io.h"
 #include <assert.h>
 #include <string.h>
@@ -8,7 +9,13 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-int tinyc_main(int argc, char **argv) { (void)argc; (void)argv; return 5; }
+static TCCIO *stub_seen_io;
+int tinyc_main_with_io(int argc, char **argv, TCCIO *io)
+{
+    (void)argc; (void)argv;
+    stub_seen_io = io;
+    return 5;
+}
 
 static char acc[128];
 static size_t acc_len;
@@ -114,17 +121,25 @@ int main(void)
     d = tcc_io_buffer_data(b2, 0, &n); CHECK(n == 8 && memcmp(d, "tee-data", 8) == 0);
     tcc_io_free(tee); tcc_io_free(b1); tcc_io_free(b2);
 
-    /* current IO registry + helpers + tinyc_main_io */
+    /* write helpers take the IO explicitly; two IOs stay separate */
     TCCIO *cap = tcc_io_buffer();
-    tinyc_set_io(cap);
-    tinyc_io_out_str("registry-out");
-    tinyc_io_err_line("registry-err");
-    tinyc_set_io(NULL);
-    d = tcc_io_buffer_data(cap, 0, &n); CHECK(n == 12 && memcmp(d, "registry-out", 12) == 0);
-    d = tcc_io_buffer_data(cap, 1, &n); CHECK(n == 13 && memcmp(d, "registry-err\n", 13) == 0);
+    TCCIO *cap2 = tcc_io_buffer();
+    tinyc_io_out_str(cap, "helper-out");
+    tinyc_io_err_line(cap, "helper-err");
+    tinyc_io_out_str(cap2, "other-out");
+    d = tcc_io_buffer_data(cap, 0, &n); CHECK(n == 10 && memcmp(d, "helper-out", 10) == 0);
+    d = tcc_io_buffer_data(cap, 1, &n); CHECK(n == 11 && memcmp(d, "helper-err\n", 11) == 0);
+    d = tcc_io_buffer_data(cap2, 0, &n); CHECK(n == 9 && memcmp(d, "other-out", 9) == 0);
+    d = tcc_io_buffer_data(cap2, 1, &n); CHECK(n == 0);
+    /* a NULL IO resolves to stdio: a zero-length write is a no-op
+     * that still reports success */
+    CHECK(tinyc_io_write_out(NULL, "", 0) == 0);
+    /* tinyc_main_io hands its IO to tinyc_main_with_io verbatim */
     int rc = tinyc_main_io(1, (char *[]){"tinyc", NULL}, cap);
-    CHECK(rc == 5); /* stub main ran under the installed IO */
+    CHECK(rc == 5);
+    CHECK(stub_seen_io == cap);
     tcc_io_free(cap);
+    tcc_io_free(cap2);
 
     if (failures == 0) printf("test_io: ALL PASS\n");
     return failures ? 1 : 0;

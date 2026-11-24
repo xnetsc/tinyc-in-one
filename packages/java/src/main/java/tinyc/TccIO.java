@@ -16,10 +16,11 @@ import java.nio.charset.StandardCharsets;
  * 重新抛给调用方。
  *
  * <p>接法有二：会话式 API 的诊断经 {@code tcc_set_error_func} 交给 writeErr，
+ * 三通道另经 {@code tcc_set_io} 装到会话的 state 上，
  * 见 {@link TccSession#setIO(TccIO)}；命令行式入口
  * {@link TinyC#runCli(TccIO, String...)} 把三个通道的 upcall 跳板
  * （{@link TccIoUpcalls}）经内核 {@code tcc_io_callback} 组成回调型 TCCIO，
- * 传给 {@code tinyc_main_io}，在该次调用期间作为编译器的当前 IO：
+ * 传给 {@code tinyc_main_io}，装在该次 main 所建的 state 上：
  * 编译器自身的输出走 writeOut、诊断走 writeErr、readIn 随 TCCIO 一并
  * 传给内核。不带 IO 的 {@code runCli} 走进程真实 stdio，与命令行一致。
  * 带 IO 跑 {@code -run} 时，目标程序在运行期间的 stdin 由 readIn

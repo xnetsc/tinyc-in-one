@@ -52,13 +52,15 @@ Python、Java、安卓与浏览器各做一个生态包。
 
 编译器自身的输出走 `TCCIO` 接口（`core/tinyc_io.h`）：
 `write_out` / `write_err` / `read_in` / `flush` 加一个上下文指针。
-默认实现直接写进程的真实 stdio。现成实现：`tcc_io_stdio`、
-`tcc_io_buffer`（分开或合并两种存法）、`tcc_io_file`、`tcc_io_fd`、
-`tcc_io_FILE`、`tcc_io_callback`、`tcc_io_null`、`tcc_io_tee`。
-编译器的报错、帮助、版本、搜索路径输出与 `-E` 预处理输出都经当前
-IO；宿主进程的 fd 0/1/2 从不被替换。编译出的程序在进程内运行期间
-（见下面的 run 规则），它的 stdin/stdout/stderr 在该次运行内接到
-当前 IO 上。各包还可以传入自己的回调、流或文件对象，见各包小节。
+IO 按 TCCState 逐个安装（`tcc_set_io`），没有进程级当前 IO；
+未装 IO 的 state 用默认实现，直接写进程的真实 stdio。现成实现：
+`tcc_io_stdio`、`tcc_io_buffer`（分开或合并两种存法）、`tcc_io_file`、
+`tcc_io_fd`、`tcc_io_FILE`、`tcc_io_callback`、`tcc_io_null`、
+`tcc_io_tee`。编译器的报错、帮助、版本、搜索路径输出与 `-E`
+预处理输出都经所属 state 的 IO；宿主进程的 fd 0/1/2 从不被替换。
+编译出的程序在进程内运行期间（见下面的 run 规则），它的
+stdin/stdout/stderr 在该次运行内接到运行中 state 的 IO 上。
+各包还可以传入自己的回调、流或文件对象，见各包小节。
 
 ## 宿主与目标
 
