@@ -636,7 +636,12 @@ ST_FUNC void load(int r, SValue *sv)
             else
                 o(ARM64_FMOV_SCALAR | fltr(r) | fltr(svr) << 5); // fmov d(r),d(svr)
         else if (!IS_FREG(r) && !IS_FREG(svr))
-            o(ARM64_MOV_REG | ARM64_SF(1) | intr(r) | intr(svr) << 16); // mov x(r),x(svr)
+            /* copy a 32-bit integer value with a w move, which zeroes
+               the upper half of the destination just like a 32-bit
+               load does; the unsigned 32-to-64-bit cast emits no code
+               and relies on that zeroed upper half */
+            o(ARM64_MOV_REG | ARM64_SF((svtt & VT_BTYPE) != VT_INT) |
+              intr(r) | intr(svr) << 16); // mov x/w(r),x/w(svr)
         else
             assert(0);
       return;
