@@ -161,9 +161,317 @@ static inline int64_t expr_const64(void);
 static void vpush64(int ty, unsigned long long v);
 static void vpush(CType *type);
 static int gvtst(int inv, int t);
+/* ------------------------------------------------------------------------- */
+/* Parse-level restricted inlining of single-return-expression
+   static inline wrappers.  A wrapper whose captured body is exactly
+   "{ return <expr> ; }" is registered as a template when its
+   definition is seen.  At a call site, once the arguments have been
+   evaluated and converted exactly as for a real call, they are
+   bound to the parameter names -- a pure constant by value,
+   anything else copied into a fresh frame slot -- and the return
+   expression is re-parsed in place of the call, so a constant
+   argument keeps its constant identity all the way into a
+   builtin's immediate operand.  Call sites that do not match take
+   the ordinary call path, and the entity function is still emitted
+   for them by gen_inline_functions. */
+
+typedef struct InlineTemplateParam {
+    int v;                      /* parameter token */
+    CType type;                 /* declared type (after decay) */
+    unsigned char assigned;     /* the body writes through the name */
+    unsigned char addrtaken;    /* the body takes the name's address */
+} InlineTemplateParam;
+
+typedef struct InlineTemplateHyg {
+    int v;                      /* identifier token */
+    Sym *sym;                   /* what it resolved to at the definition */
+} InlineTemplateHyg;
+
+typedef struct InlineTemplate {
+    Sym *func;                  /* the wrapper's symbol */
+    TokenString *expr;          /* owned: the return expression */
+    char *filename;             /* definition file (tcc_strdup'ed) */
+    CType ret_type;
+    InlineTemplateParam *params;
+    int nb_params;
+    InlineTemplateHyg *hyg;
+    int nb_hyg;
+    int active;                 /* expansions of this template running */
+    struct InlineTemplate *next;
+} InlineTemplate;
+
+static InlineTemplate *inline_templates;
+
+/* one marker symbol pushed for a replay, and what it stands for */
+typedef struct InlineBinding {
+    Sym *marker;                /* the pushed symbol */
+    Sym *target;                /* hygiene: definition-point symbol;
+                                   NULL for a parameter binding */
+    SValue val;                 /* parameter: the bound argument */
+} InlineBinding;
+
+typedef struct InlineFrame {
+    InlineBinding *binds;
+    int nb_binds;
+    struct InlineFrame *prev;
+} InlineFrame;
+
+static InlineFrame *inline_frames;
+
+/* words of payload following a token in a captured token stream;
+   mirrors the table in tok_str_add2 (tccpp.c) */
+static int tok_payload_words(int t, const int *p)
+{
+    switch (t) {
+    case TOK_CINT: case TOK_CUINT: case TOK_CCHAR: case TOK_LCHAR:
+    case TOK_CFLOAT: case TOK_LINENUM:
+#if LONG_SIZE == 4
+    case TOK_CLONG: case TOK_CULONG:
+#endif
+        return 1;
+    case TOK_PPNUM: case TOK_PPSTR: case TOK_STR: case TOK_LSTR:
+        return 1 + (p[0] + (int)sizeof(int) - 1) / (int)sizeof(int);
+    case TOK_CDOUBLE: case TOK_CLLONG: case TOK_CULLONG:
+#if LONG_SIZE == 8
+    case TOK_CLONG: case TOK_CULONG:
+#endif
+        return 2;
+    case TOK_CLDOUBLE:
+        return LDOUBLE_WORDS;
+    default:
+        return 0;
+    }
+}
+
+/* a significant (non-TOK_LINENUM) token of a captured stream, with
+   the raw word range it occupies */
+typedef struct SigTok {
+    int tok;
+    int start;                  /* word index of the token */
+    int end;                    /* word index just past its payload */
+    int line_idx;               /* word index of the last TOK_LINENUM
+                                   entry before it, or -1 */
+} SigTok;
+
+/* Register a just-captured inline definition as an expansion
+   template if it has the restricted shape; otherwise do nothing
+   (the definition keeps the stock entity-only treatment).  Called
+   from decl() with the definition point's file scope live, so
+   sym_find resolves names exactly as the body would see them. */
+static void inline_template_register(Sym *sym, InlineFunc *fn)
+{
+    CType *ft = &sym->type;
+    Sym *ref = ft->ref, *sa;
+    InlineTemplate *tmpl;
+    InlineTemplateParam *params = NULL;
+    InlineTemplateHyg *hyg = NULL;
+    SigTok *sig = NULL;
+    const int *str = fn->func_str->str;
+    int len = fn->func_str->len;
+    int nb_params = 0, nb_hyg = 0, cap_hyg = 0;
+    int nb_sig = 0, cap_sig = 0;
+    int expr_first, expr_last, i, j, k;
+
+    /* linkage and function type gates */
+    if (!(ft->t & VT_STATIC) || sym->a.addrtaken)
+        return;
+    if (ref->f.func_type != FUNC_NEW || ref->f.func_noreturn)
+        return;
+    if ((ref->type.t & VT_BTYPE) == VT_STRUCT
+        || (ref->type.t & VT_BTYPE) == VT_VOID)
+        return;
+    for (sa = ref->next; sa; sa = sa->next) {
+        if ((sa->type.t & VT_BTYPE) == VT_STRUCT)
+            return;
+        nb_params++;
+    }
+    if (nb_params) {
+        params = tcc_malloc(nb_params * sizeof *params);
+        for (sa = ref->next, i = 0; sa; sa = sa->next, i++) {
+            params[i].v = sa->v;
+            params[i].type = sa->type;
+            params[i].assigned = params[i].addrtaken = 0;
+        }
+    }
+
+    /* collect the significant tokens of the captured body */
+    j = -1;
+    for (i = 0; i < len;) {
+        int t = str[i], adv = 1 + tok_payload_words(t, str + i + 1);
+        if (t == TOK_LINENUM) {
+            j = i;
+        } else {
+            if (nb_sig == cap_sig) {
+                cap_sig = cap_sig ? 2 * cap_sig : 32;
+                sig = tcc_realloc(sig, cap_sig * sizeof *sig);
+            }
+            sig[nb_sig].tok = t;
+            sig[nb_sig].start = i;
+            sig[nb_sig].end = i + adv;
+            sig[nb_sig].line_idx = j;
+            nb_sig++;
+        }
+        i += adv;
+    }
+
+    /* the body must be exactly { return <expr> ; } */
+    if (nb_sig < 5 || sig[0].tok != '{' || sig[1].tok != TOK_RETURN
+        || sig[nb_sig - 1].tok != TOK_EOF || sig[nb_sig - 2].tok != '}'
+        || sig[nb_sig - 3].tok != ';')
+        goto fail;
+    expr_first = 2;
+    expr_last = nb_sig - 4;     /* inclusive */
+    if (expr_last < expr_first)
+        goto fail;
+
+    for (i = expr_first; i <= expr_last; i++) {
+        int t = sig[i].tok;
+        if (t == TOK___FUNC__ || t == TOK___FUNCTION__
+            || t == TOK_builtin_frame_address
+            || t == TOK_builtin_return_address)
+            goto fail;
+        if (t == '{' && i > expr_first && sig[i - 1].tok == '(')
+            goto fail;          /* statement expression */
+        if (t == TOK_STRUCT || t == TOK_UNION || t == TOK_ENUM) {
+            /* a tag definition would push symbols during the
+               replay that the result type could outlive */
+            j = i + 1;
+            if (j <= expr_last && sig[j].tok >= TOK_UIDENT)
+                j++;
+            if (j <= expr_last && sig[j].tok == '{')
+                goto fail;
+        }
+        if (t == TOK_LAND && i + 1 <= expr_last
+            && sig[i + 1].tok >= TOK_UIDENT) {
+            /* &&name is a label address unless the name is a
+               parameter or visible here; a logical-and operand
+               always is one of the two */
+            int v = sig[i + 1].tok;
+            for (k = 0; k < nb_params && params[k].v != v; k++)
+                ;
+            if (k == nb_params && !sym_find(v))
+                goto fail;
+        }
+    }
+
+    /* per-parameter write/address flags, and hygiene bindings for
+       every other identifier the body uses */
+    for (i = expr_first; i <= expr_last; i++) {
+        int t = sig[i].tok;
+        if (t < TOK_UIDENT)
+            continue;
+        for (k = 0; k < nb_params && params[k].v != t; k++)
+            ;
+        if (k < nb_params) {
+            InlineTemplateParam *pr = &params[k];
+            /* forward, skipping ')': assignment or postfix ++/-- */
+            for (j = i + 1; j <= expr_last && sig[j].tok == ')'; j++)
+                ;
+            if (j <= expr_last && (sig[j].tok == '='
+                                   || TOK_ASSIGN(sig[j].tok)
+                                   || sig[j].tok == TOK_INC
+                                   || sig[j].tok == TOK_DEC))
+                pr->assigned = 1;
+            /* backward, skipping '(': prefix ++/--, or a unary '&'
+               (unary unless the token before it could end an
+               operand, which would make it binary) */
+            for (j = i - 1; j >= expr_first && sig[j].tok == '('; j--)
+                ;
+            if (j >= expr_first && (sig[j].tok == TOK_INC
+                                    || sig[j].tok == TOK_DEC))
+                pr->assigned = 1;
+            else if (j >= expr_first && sig[j].tok == '&') {
+                int u = j - 1;
+                if (u < expr_first
+                    || !(sig[u].tok >= TOK_UIDENT
+                         || (sig[u].tok >= TOK_CCHAR
+                             && sig[u].tok <= TOK_CLDOUBLE)
+                         || sig[u].tok == ')' || sig[u].tok == ']'
+                         || sig[u].tok == TOK_INC
+                         || sig[u].tok == TOK_DEC))
+                    pr->addrtaken = 1;
+            }
+            continue;
+        }
+        for (k = 0; k < nb_hyg && hyg[k].v != t; k++)
+            ;
+        if (k == nb_hyg) {
+            Sym *hs = sym_find(t);
+            if (hs) {
+                if (nb_hyg == cap_hyg) {
+                    cap_hyg = cap_hyg ? 2 * cap_hyg : 16;
+                    hyg = tcc_realloc(hyg, cap_hyg * sizeof *hyg);
+                }
+                hyg[nb_hyg].v = t;
+                hyg[nb_hyg].sym = hs;
+                nb_hyg++;
+            }
+        }
+    }
+
+    tmpl = tcc_mallocz(sizeof *tmpl);
+    tmpl->func = sym;
+    tmpl->ret_type = ref->type;
+    tmpl->filename = tcc_strdup(fn->filename);
+    tmpl->params = params;
+    tmpl->nb_params = nb_params;
+    tmpl->hyg = hyg;
+    tmpl->nb_hyg = nb_hyg;
+    tmpl->expr = tok_str_alloc();
+    /* lead with the return statement's line info, so diagnostics
+       during a replay name the definition's line */
+    if (sig[expr_first].line_idx >= 0) {
+        tok_str_add(tmpl->expr, TOK_LINENUM);
+        tok_str_add(tmpl->expr, str[sig[expr_first].line_idx + 1]);
+    }
+    for (i = sig[expr_first].start; i < sig[expr_last].end; i++)
+        tok_str_add(tmpl->expr, str[i]);
+    tok_str_add(tmpl->expr, TOK_EOF);
+    tmpl->next = inline_templates;
+    inline_templates = tmpl;
+    tcc_free(sig);
+    return;
+fail:
+    tcc_free(params);
+    tcc_free(hyg);
+    tcc_free(sig);
+}
+
+static InlineTemplate *inline_template_find(Sym *func)
+{
+    InlineTemplate *t;
+    for (t = inline_templates; t; t = t->next)
+        if (t->func == func)
+            return t;
+    return NULL;
+}
+
+/* tok_identifier hook: 0 = not bound, 1 = parameter (*val filled),
+   2 = hygiene (*target filled) */
+static int inline_bind_lookup(Sym *s, SValue *val, Sym **target)
+{
+    InlineFrame *f;
+    int i;
+    for (f = inline_frames; f; f = f->prev)
+        for (i = 0; i < f->nb_binds; i++)
+            if (f->binds[i].marker == s) {
+                if (f->binds[i].target) {
+                    *target = f->binds[i].target;
+                    return 2;
+                }
+                *val = f->binds[i].val;
+                return 1;
+            }
+    return 0;
+}
+
 static void gen_inline_functions(TCCState *s);
 static void free_inline_functions(TCCState *s);
 static void skip_or_save_block(TokenString **str);
+static void inline_template_register(Sym *sym, InlineFunc *fn);
+static int inline_expand_call(int nb_args, int ret_nregs);
+static int inline_bind_lookup(Sym *s, SValue *val, Sym **target);
+static int inline_replay_depth;
 static void gv_dup(void);
 ST_FUNC int get_temp_local_var(int size,int align,int *r2);
 static void cast_error(CType *st, CType *dt);
@@ -7414,6 +7722,22 @@ special_math_val:
             s = external_global_sym(t, &func_old_type);
         }
 
+        if (inline_replay_depth) {
+            /* an identifier inside a template replay: substitute a
+               bound parameter's value, or resolve the name to the
+               symbol it denoted at the definition point */
+            SValue bval;
+            Sym *target = NULL;
+            int bk = inline_bind_lookup(s, &bval, &target);
+            if (bk == 1) {
+                vcheck_cmp();
+                vpushv(&bval);
+                vtop->sym = NULL;
+                break;
+            } else if (bk == 2) {
+                s = target;
+            }
+        }
         r = s->r;
         /* A symbol that has a register is a local register variable,
            which starts out as VT_LOCAL value.  */
@@ -7622,6 +7946,7 @@ special_math_val:
                     regcache_disable();
             }
 #endif
+            if (!inline_expand_call(nb_args, ret_nregs)) {
             gfunc_call(nb_args);
 
             if (ret_nregs < 0) {
@@ -7691,6 +8016,7 @@ special_math_val:
 	            tcc_tcov_block_end(tcc_state, -1);
                 CODE_OFF();
 	    }
+            }
         } else {
             break;
         }
@@ -10059,6 +10385,170 @@ static void gen_function(Sym *sym)
     next();
 }
 
+/* Try to expand a call to a registered wrapper in place.  On entry
+   the callee designator and the nb_args already-converted arguments
+   are on the value stack, exactly as gfunc_call would consume them;
+   on success they are replaced by the expansion's value and 1 is
+   returned.  On any mismatch 0 is returned with the stack untouched
+   and the caller takes the ordinary call path. */
+static int inline_expand_call(int nb_args, int ret_nregs)
+{
+    SValue *designator = vtop - nb_args;
+    InlineTemplate *tmpl;
+    InlineFrame frame;
+    SValue *bound = NULL;
+    Sym *csym, *saved_lstk;
+    TokenString *copy;
+    char saved_filename[1024];
+    CValue saved_tokc;
+    int saved_tok, i, nb_binds;
+    int nreal = nb_args, staged_loc = 0;
+
+    /* ret_nregs == 1: register return.  ret_nregs == 0 with a
+       vector return: postfix() has staged a result slot and pushed
+       its address as an implicit first argument; the expansion
+       reproduces that shape below.  Anything else (a true sret
+       return, a multi-register struct return) cannot be registered
+       in the first place and is rejected here defensively. */
+    if (ret_nregs != 1 && ret_nregs != 0)
+        return 0;
+    if (!(designator->r & VT_SYM) || !designator->sym)
+        return 0;
+    csym = designator->sym;
+    tmpl = inline_template_find(csym);
+    if (!tmpl || tmpl->active || csym->a.addrtaken)
+        return 0;
+    if (ret_nregs == 0) {
+        if (!(tmpl->ret_type.t & VT_VECTOR))
+            return 0;
+        staged_loc = (designator + 1)->c.i;
+        nreal = nb_args - 1;
+    }
+    if (tmpl->nb_params != nreal)
+        return 0;
+
+    /* Bind the arguments, last first (vtop is the last argument).
+       A parameter the body neither writes nor takes the address of
+       may bind a pure constant by value; anything else is copied
+       into a fresh frame slot and bound as that slot's lvalue.  The
+       slot comes straight off the loc frontier, like the sret
+       staging in postfix(): a get_temp_local_var slot is only known
+       free while a referencing value stays on the stack, and a
+       binding lives in the frame instead, where a nested use could
+       recycle it. */
+    if (nreal)
+        bound = tcc_malloc(nreal * sizeof *bound);
+    for (i = nreal - 1; i >= 0; i--) {
+        InlineTemplateParam *pr = &tmpl->params[i];
+        if (!pr->assigned && !pr->addrtaken
+            && (vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM
+                           | VT_NONCONST)) == VT_CONST) {
+            bound[i] = *vtop;
+            vtop--;
+        } else {
+            int size, align, slot;
+            size = type_size(&pr->type, &align);
+            loc = (loc - size) & -align;
+            slot = loc;
+            if ((vtop->r & VT_VALMASK) == VT_CMP
+                || (vtop->r & VT_VALMASK) == VT_JMP)
+                gv(RC_INT);
+            vset(&pr->type, VT_LOCAL | VT_LVAL, slot);
+            vswap();
+            vstore();
+            vtop--;
+            bound[i].type = pr->type;
+            bound[i].r = VT_LOCAL | VT_LVAL;
+            bound[i].r2 = VT_CONST;
+            bound[i].c.i = slot;
+            bound[i].sym = NULL;
+            bound[i].nulls = 0;
+        }
+    }
+    vtop--;                     /* the designator -- for a staged
+                                   vector return, the implicit slot
+                                   argument sits just above it and is
+                                   dropped first */
+    if (ret_nregs == 0)
+        vtop--;
+
+    /* Push the binding scope: parameter markers carry the bound
+       values, hygiene markers the definition-point symbols. */
+    nb_binds = nreal + tmpl->nb_hyg;
+    frame.binds = tcc_malloc((nb_binds ? nb_binds : 1)
+                             * sizeof *frame.binds);
+    frame.nb_binds = 0;
+    frame.prev = inline_frames;
+    saved_lstk = local_stack;
+    ++local_scope;
+    for (i = 0; i < nreal; i++) {
+        InlineBinding *b = &frame.binds[frame.nb_binds++];
+        b->marker = sym_push(tmpl->params[i].v, &tmpl->params[i].type,
+                             VT_LOCAL, 0);
+        b->target = NULL;
+        b->val = bound[i];
+    }
+    for (i = 0; i < tmpl->nb_hyg; i++) {
+        InlineBinding *b = &frame.binds[frame.nb_binds++];
+        Sym *hs = tmpl->hyg[i].sym;
+        b->marker = sym_push(tmpl->hyg[i].v, &hs->type, hs->r, hs->c);
+        b->target = hs;
+    }
+    inline_frames = &frame;
+
+    /* Replay the return expression from a fresh copy of the
+       template stream.  tok/tokc and the file name are saved and
+       restored by hand; next() is never called to resynchronize. */
+    copy = tok_str_alloc();
+    for (i = 0; i < tmpl->expr->len; i++)
+        tok_str_add(copy, tmpl->expr->str[i]);
+    saved_tok = tok;
+    saved_tokc = tokc;
+    pstrcpy(saved_filename, sizeof saved_filename, file->filename);
+    tccpp_putfile(tmpl->filename);
+    tmpl->active++;
+    inline_replay_depth++;
+    begin_macro(copy, 1);
+    next();
+    gexpr();
+    end_macro();
+    inline_replay_depth--;
+    tmpl->active--;
+    pstrcpy(file->filename, sizeof file->filename, saved_filename);
+    tok = saved_tok;
+    tokc = saved_tokc;
+
+    inline_frames = frame.prev;
+    sym_pop(&local_stack, saved_lstk, 0);
+    --local_scope;
+
+    /* Post-process the value exactly as for a real call's result:
+       the return statement's assignment conversion to the return
+       type, then postfix()'s sub-word return adjustment. */
+    gen_assign_cast(&tmpl->ret_type);
+    if (ret_nregs == 0) {
+        /* staged vector return: the result is the slot lvalue,
+           with the value stored into it, as after a real call */
+        vset(&tmpl->ret_type, VT_LOCAL | VT_LVAL, staged_loc);
+        vswap();
+        vstore();
+    }
+    {
+        int t = tmpl->ret_type.t & VT_BTYPE;
+        if (!(tmpl->ret_type.t & VT_VECTOR)
+            && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {
+#ifdef PROMOTE_RET
+            vtop->r |= BFVAL(VT_MUSTCAST, 1);
+#else
+            vtop->type.t = VT_INT;
+#endif
+        }
+    }
+    tcc_free(bound);
+    tcc_free(frame.binds);
+    return 1;
+}
+
 static void gen_inline_functions(TCCState *s)
 {
     Sym *sym;
@@ -10100,6 +10590,19 @@ static void free_inline_functions(TCCState *s)
             tok_str_free(fn->func_str);
     }
     dynarray_reset(&s->inline_fns, &s->nb_inline_fns);
+    /* reset the expansion templates, and any state an aborted
+       expansion may have left behind */
+    while (inline_templates) {
+        InlineTemplate *tmpl = inline_templates;
+        inline_templates = tmpl->next;
+        tok_str_free(tmpl->expr);
+        tcc_free(tmpl->filename);
+        tcc_free(tmpl->params);
+        tcc_free(tmpl->hyg);
+        tcc_free(tmpl);
+    }
+    inline_frames = NULL;
+    inline_replay_depth = 0;
 }
 
 static void do_Static_assert(void)
@@ -10287,6 +10790,7 @@ static int decl(int l)
                     dynarray_add(&tcc_state->inline_fns,
 				 &tcc_state->nb_inline_fns, fn);
                     skip_or_save_block(&fn->func_str);
+                    inline_template_register(sym, fn);
                 } else {
                     /* compute text section */
                     cur_text_section = text_section;
