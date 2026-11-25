@@ -64,27 +64,6 @@ PATCHES = [
      "\n"
      "/* ------------ tcccoff.c ------------ */",
      1),
-    # 7. tcc.h: AttributeDef gains the vector_size byte count.
-    ("tcc.h",
-     "    char attr_mode; /* __attribute__((__mode__(...))) */",
-     "    char attr_mode; /* __attribute__((__mode__(...))) */\n"
-     "    int vector_size; /* __attribute__((vector_size(N))): total bytes, 0 = none */",
-     1),
-    # 8. tcc.h: VT_VECTOR flag (bit 19: outside VT_STORAGE,
-    #    VT_STRUCT_MASK and VT_TYPE's stripped set).
-    ("tcc.h",
-     "#define VT_LONG        0x2000  /* long type (also has VT_INT rsp. VT_LLONG) */",
-     "#define VT_LONG        0x2000  /* long type (also has VT_INT rsp. VT_LLONG) */\n"
-     "#define VT_VECTOR      0x00080000  /* vector type: element type in ref->type,\n"
-     "                                    element count in ref->c (array convention) */",
-     1),
-    # 9. tcctok.h: vector_size attribute tokens.
-    ("tcctok.h",
-     "     DEF(TOK_ALIGNED2, \"__aligned__\")",
-     "     DEF(TOK_ALIGNED2, \"__aligned__\")\n"
-     "     DEF(TOK_VECTOR_SIZE1, \"vector_size\")\n"
-     "     DEF(TOK_VECTOR_SIZE2, \"__vector_size__\")",
-     1),
     # 10. tcctok.h: wasm vector builtin tokens (wasm builds only,
     #     same conditional-DEF pattern as __builtin_va_start).
     ("tcctok.h",
@@ -102,85 +81,27 @@ PATCHES = [
      "     DEF(TOK_wasm_shuffle, \"__builtin_wasm_shuffle\")\n"
      "#endif",
      1),
-    # 11. tccgen.c: parse the vector_size attribute.
-    ("tccgen.c",
-     "        case TOK_PACKED1:\n"
-     "        case TOK_PACKED2:\n"
-     "            ad->a.packed = 1;\n"
-     "            break;",
-     "        case TOK_VECTOR_SIZE1:\n"
-     "        case TOK_VECTOR_SIZE2:\n"
-     "            skip('(');\n"
-     "            n = expr_const();\n"
-     "            if (n <= 0)\n"
-     "                tcc_error(\"vector_size must be a positive number of bytes\");\n"
-     "            ad->vector_size = n;\n"
-     "            skip(')');\n"
-     "            break;\n"
-     "        case TOK_PACKED1:\n"
-     "        case TOK_PACKED2:\n"
-     "            ad->a.packed = 1;\n"
-     "            break;",
-     1),
-    # 12. tccgen.c: type_size handles vector types.
-    ("tccgen.c",
-     "ST_FUNC int type_size(CType *type, int *a)\n"
-     "{\n"
-     "    Sym *s;\n"
-     "    int bt;\n"
-     "\n"
-     "    bt = type->t & VT_BTYPE;",
-     "ST_FUNC int type_size(CType *type, int *a)\n"
-     "{\n"
-     "    Sym *s;\n"
-     "    int bt;\n"
-     "\n"
-     "    if (type->t & VT_VECTOR) {\n"
-     "        /* vector type: ref->type is the element type, ref->c the\n"
-     "           number of elements (the array convention) */\n"
-     "        int ts = type_size(&type->ref->type, a);\n"
-     "        int n = ts * type->ref->c;\n"
-     "        *a = n < 16 ? n : 16;\n"
-     "        return n;\n"
-     "    }\n"
-     "    bt = type->t & VT_BTYPE;",
-     1),
-    # 13. tccgen.c: make_vector_type helper, before vpush_type_size.
-    ("tccgen.c",
-     "/* push type size as known at runtime time on top of value stack. Put\n"
-     "   alignment at 'a' */",
-     "/* Transform the scalar type in 'type' into a vector type of\n"
-     "   'nbytes' total size (GCC __attribute__((vector_size(N)))).\n"
-     "   The element type is kept in type->ref->type and the element\n"
-     "   count in type->ref->c, the same convention arrays use. */\n"
-     "static void make_vector_type(CType *type, int nbytes)\n"
-     "{\n"
-     "    CType elem;\n"
-     "    int esize, align, bt;\n"
-     "    bt = type->t & VT_BTYPE;\n"
-     "    if (bt == VT_PTR || bt == VT_FUNC || bt == VT_STRUCT ||\n"
-     "        bt == VT_VOID || (type->t & VT_ARRAY) || (type->t & VT_VECTOR))\n"
-     "        tcc_error(\"vector_size applied to a non-scalar type\");\n"
-     "    elem = *type;\n"
-     "    elem.t &= ~(VT_STORAGE | VT_ARRAY | VT_VLA);\n"
-     "    esize = type_size(&elem, &align);\n"
-     "    if (esize <= 0 || nbytes % esize != 0 ||\n"
-     "        (nbytes & (nbytes - 1)) != 0)\n"
-     "        tcc_error(\"vector_size(%d) is not a power-of-two multiple of the element size\", nbytes);\n"
-     "    type->ref = sym_push(SYM_FIELD, &elem, 0, nbytes / esize);\n"
-     "    type->t = (type->t & ~VT_STRUCT_MASK) | VT_VECTOR;\n"
-     "}\n"
-     "\n"
-     "/* push type size as known at runtime time on top of value stack. Put\n"
-     "   alignment at 'a' */",
-     1),
     # 14. tccgen.c: R_RET / R2_RET know about vector values.
     ("tccgen.c",
      "static int R_RET(int t)\n"
      "{\n"
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_X86_64\n"
+     "    /* a vector returns in the first FP/SIMD register whatever its\n"
+     "       element type (the AAPCS64 FP/SIMD class on arm64, the SSE\n"
+     "       class on x86-64) */\n"
+     "    if (t & VT_VECTOR)\n"
+     "        return REG_FRET;\n"
+     "#endif\n"
      "    if (!is_float(t))",
      "static int R_RET(int t)\n"
      "{\n"
+     "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_X86_64\n"
+     "    /* a vector returns in the first FP/SIMD register whatever its\n"
+     "       element type (the AAPCS64 FP/SIMD class on arm64, the SSE\n"
+     "       class on x86-64) */\n"
+     "    if (t & VT_VECTOR)\n"
+     "        return REG_FRET;\n"
+     "#endif\n"
      "#ifdef TCC_TARGET_WASM32\n"
      "    if (t & VT_VECTOR)\n"
      "        return WREG_VEC; /* vector values return in vector slot 0 */\n"
@@ -215,168 +136,6 @@ PATCHES = [
      "#endif\n"
      "    if (nocode_wanted)\n"
      "        return;",
-     1),
-    # 16. tccgen.c: gen_cast handles vector types (same-size cast is
-    #     a bitcast, as in GCC; element conversions are the headers'
-    #     job via the wasm vop1 builtin).
-    ("tccgen.c",
-     "    /* bitfields first get cast to ints */\n"
-     "    if (vtop->type.t & VT_BITFIELD)\n"
-     "        gv(RC_INT);\n",
-     "    /* bitfields first get cast to ints */\n"
-     "    if (vtop->type.t & VT_BITFIELD)\n"
-     "        gv(RC_INT);\n"
-     "\n"
-     "    if ((type->t & VT_VECTOR) || (vtop->type.t & VT_VECTOR)) {\n"
-     "        int a1, a2;\n"
-     "        if ((type->t & VT_BTYPE) == VT_VOID) {\n"
-     "            vpop(), vpushi(0);\n"
-     "            goto done;\n"
-     "        }\n"
-     "        if (!(type->t & VT_VECTOR) || !(vtop->type.t & VT_VECTOR) ||\n"
-     "            type_size(type, &a1) != type_size(&vtop->type, &a2))\n"
-     "            cast_error(&vtop->type, type);\n"
-     "        /* a cast between vector types of the same total size is a\n"
-     "           bitcast (GCC semantics) */\n"
-     "        goto done;\n"
-     "    }\n",
-     1),
-    # 17. tccgen.c: vstore handles vector destinations.
-    ("tccgen.c",
-     "ST_FUNC void vstore(void)\n"
-     "{\n"
-     "    int sbt, dbt, ft, r, size, align, bit_size, bit_pos, delayed_cast;\n"
-     "\n"
-     "    ft = vtop[-1].type.t;",
-     "ST_FUNC void vstore(void)\n"
-     "{\n"
-     "    int sbt, dbt, ft, r, size, align, bit_size, bit_pos, delayed_cast;\n"
-     "\n"
-     "    if (vtop[-1].type.t & VT_VECTOR) {\n"
-     "        /* vector assignment: bitcast-convert the value, load it\n"
-     "           into a vector slot and store it */\n"
-     "        gen_cast(&vtop[-1].type);\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "        gen_vec_gv();\n"
-     "#else\n"
-     "        tcc_error(\"vector assignment is not supported for this target\");\n"
-     "#endif\n"
-     "        if ((vtop[-1].r & VT_VALMASK) == VT_LLOCAL) {\n"
-     "            SValue sv;\n"
-     "            r = get_reg(RC_INT);\n"
-     "            sv.type.t = VT_PTRDIFF_T;\n"
-     "            sv.r = VT_LOCAL | VT_LVAL;\n"
-     "            sv.c.i = vtop[-1].c.i;\n"
-     "            sv.sym = NULL;\n"
-     "            load(r, &sv);\n"
-     "            vtop[-1].r = r | VT_LVAL;\n"
-     "        }\n"
-     "        r = vtop->r & VT_VALMASK;\n"
-     "        store(r, vtop - 1);\n"
-     "        vswap();\n"
-     "        vtop--; /* NOT vpop() because on x86 it would flush the fp stack */\n"
-     "        return;\n"
-     "    }\n"
-     "\n"
-     "    ft = vtop[-1].type.t;",
-     1),
-    # 18. tccgen.c: gfunc_return handles vector return values.
-    ("tccgen.c",
-     "static void gfunc_return(CType *func_type)\n"
-     "{\n"
-     "    if ((func_type->t & VT_BTYPE) == VT_STRUCT) {",
-     "static void gfunc_return(CType *func_type)\n"
-     "{\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "    if (func_type->t & VT_VECTOR) {\n"
-     "        /* vector return value: move it into vector slot 0, the\n"
-     "           wasm return slot (see wasm-gen.c gfunc_epilog) */\n"
-     "        gen_vec_ret();\n"
-     "        vtop--; /* NOT vpop() because on x86 it would flush the fp stack */\n"
-     "        return;\n"
-     "    }\n"
-     "#endif\n"
-     "    if ((func_type->t & VT_BTYPE) == VT_STRUCT) {",
-     1),
-    # 19. tccgen.c: gen_op_vector + its dispatch in gen_op.
-    ("tccgen.c",
-     "/* generic gen_op: handles types problems */\n"
-     "ST_FUNC void gen_op(int op)",
-     "/* check that two vector types have the same layout (total size,\n"
-     "   lane count, lane floatness) */\n"
-     "static int vec_same_layout(CType *a, CType *b)\n"
-     "{\n"
-     "    int a1, a2;\n"
-     "    if (type_size(a, &a1) != type_size(b, &a2))\n"
-     "        return 0;\n"
-     "    if (a->ref->c != b->ref->c)\n"
-     "        return 0;\n"
-     "    return is_float(a->ref->type.t) == is_float(b->ref->type.t);\n"
-     "}\n"
-     "\n"
-     "/* binary operation on vector operands (vtop[-1], vtop[0]).\n"
-     "   Shape rules follow GCC: both operands vectors of the same\n"
-     "   layout, except shifts, whose right operand may be a scalar\n"
-     "   count.  The backend hook gen_opv consumes both operands and\n"
-     "   leaves the result in vtop[-1]'s slot. */\n"
-     "static void gen_op_vector(int op, int op_class)\n"
-     "{\n"
-     "    CType *lt = &vtop[-1].type, *rt = &vtop[0].type;\n"
-     "    int lvec = (lt->t & VT_VECTOR) != 0;\n"
-     "    int rvec = (rt->t & VT_VECTOR) != 0;\n"
-     "    CType res;\n"
-     "    if (op_class == SHIFT_OP) {\n"
-     "        if (!lvec)\n"
-     "            tcc_error(\"vector shift needs a vector left operand\");\n"
-     "        if (rvec && !vec_same_layout(lt, rt))\n"
-     "            tcc_error(\"vector operands have different shapes\");\n"
-     "        if (!rvec && !is_integer_btype(rt->t & VT_BTYPE))\n"
-     "            tcc_error(\"vector shift count must be an integer\");\n"
-     "    } else {\n"
-     "        if (!lvec || !rvec)\n"
-     "            tcc_error(\"binary operation between vector and scalar is not supported\");\n"
-     "        if (!vec_same_layout(lt, rt))\n"
-     "            tcc_error(\"vector operands have different shapes\");\n"
-     "    }\n"
-     "    /* unsigned variants, mirroring gen_op's rewriting */\n"
-     "    if ((lt->t | (rvec ? rt->t : 0)) & VT_UNSIGNED) {\n"
-     "        if (op == '/') op = TOK_UDIV;\n"
-     "        else if (op == '%') op = TOK_UMOD;\n"
-     "        else if (op == TOK_SAR) op = TOK_SHR;\n"
-     "        else if (op == TOK_LT) op = TOK_ULT;\n"
-     "        else if (op == TOK_GT) op = TOK_UGT;\n"
-     "        else if (op == TOK_LE) op = TOK_ULE;\n"
-     "        else if (op == TOK_GE) op = TOK_UGE;\n"
-     "    }\n"
-     "    res = *lt;\n"
-     "    if (op_class == CMP_OP) {\n"
-     "        /* the result is a vector of signed integers with the same\n"
-     "           lane size and count as the operands */\n"
-     "        CType elem = lt->ref->type;\n"
-     "        int esize, align;\n"
-     "        esize = type_size(&elem, &align);\n"
-     "        elem.t = esize == 8 ? VT_LLONG : esize == 2 ? VT_SHORT :\n"
-     "                 esize == 1 ? VT_BYTE : VT_INT;\n"
-     "        elem.ref = NULL;\n"
-     "        res.ref = sym_push(SYM_FIELD, &elem, 0, lt->ref->c);\n"
-     "        res.t = (lt->t & ~(VT_BTYPE | VT_UNSIGNED)) | (elem.t & VT_BTYPE);\n"
-     "    }\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "    gen_opv(op);\n"
-     "#else\n"
-     "    tcc_error(\"vector operations are not supported for this target\");\n"
-     "#endif\n"
-     "    vtop->type = res;\n"
-     "}\n"
-     "\n"
-     "/* generic gen_op: handles types problems */\n"
-     "ST_FUNC void gen_op(int op)",
-     1),
-    ("tccgen.c",
-     "    } else if (!combine_types(&combtype, vtop - 1, vtop, op_class)) {",
-     "    } else if ((t1 & VT_VECTOR) || (t2 & VT_VECTOR)) {\n"
-     "        gen_op_vector(op, op_class);\n"
-     "    } else if (!combine_types(&combtype, vtop - 1, vtop, op_class)) {",
      1),
     # 20. tccgen.c: the wasm vector builtins, parsed in unary_expr
     #     next to the other __builtin cases.
@@ -490,161 +249,6 @@ PATCHES = [
      "#endif\n"
      "    case TOK_builtin_expect:",
      1),
-    # 21. tccgen.c: unary operators on vectors.
-    ("tccgen.c",
-     "    case '-':\n"
-     "        next();\n"
-     "        unary();\n"
-     "\tif (is_float(vtop->type.t)) {",
-     "    case '-':\n"
-     "        next();\n"
-     "        unary();\n"
-     "        if (vtop->type.t & VT_VECTOR) {\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "            gen_vec_neg();\n"
-     "#else\n"
-     "            tcc_error(\"unary '-' on a vector is not supported for this target\");\n"
-     "#endif\n"
-     "            break;\n"
-     "        }\n"
-     "\tif (is_float(vtop->type.t)) {",
-     1),
-    ("tccgen.c",
-     "    case '~':\n"
-     "        next();\n"
-     "        unary();\n"
-     "        vpushi(-1);\n"
-     "        gen_op('^');\n"
-     "        break;",
-     "    case '~':\n"
-     "        next();\n"
-     "        unary();\n"
-     "        if (vtop->type.t & VT_VECTOR) {\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "            gen_vec_not();\n"
-     "#else\n"
-     "            tcc_error(\"unary '~' on a vector is not supported for this target\");\n"
-     "#endif\n"
-     "        } else {\n"
-     "            vpushi(-1);\n"
-     "            gen_op('^');\n"
-     "        }\n"
-     "        break;",
-     1),
-    ("tccgen.c",
-     "    case '!':\n"
-     "        next();\n"
-     "        unary();\n"
-     "        gen_test_zero(TOK_EQ);\n"
-     "        break;",
-     "    case '!':\n"
-     "        next();\n"
-     "        unary();\n"
-     "        if (vtop->type.t & VT_VECTOR)\n"
-     "            tcc_error(\"unary '!' on a vector is not supported\");\n"
-     "        gen_test_zero(TOK_EQ);\n"
-     "        break;",
-     1),
-    # 22. tccgen.c: vector subscript in postfix_expr.  The element
-    #     lvalue lives in the vector's memory home, so the vector
-    #     operand must be an lvalue; the rest is the array path
-    #     (address + scaled index + indir) unchanged.
-    ("tccgen.c",
-     "        } else if (tok == '[') {\n"
-     "            next();\n"
-     "            gexpr();\n"
-     "            gen_op('+');\n"
-     "            indir();\n"
-     "            skip(']');",
-     "        } else if (tok == '[') {\n"
-     "            next();\n"
-     "            if (vtop->type.t & VT_VECTOR) {\n"
-     "                CType etype;\n"
-     "                if (!(vtop->r & VT_LVAL)) {\n"
-     "#ifdef TCC_TARGET_WASM32\n"
-     "                    /* an rvalue vector (call result, operation\n"
-     "                       result) has no memory home yet: the\n"
-     "                       backend spills it to a frame slot, after\n"
-     "                       which the array path below applies */\n"
-     "                    gen_vec_home();\n"
-     "#else\n"
-     "                    tcc_error(\"subscript of a vector rvalue is not supported\");\n"
-     "#endif\n"
-     "                }\n"
-     "                etype = vtop->type.ref->type;\n"
-     "                vtop->type = etype;\n"
-     "                mk_pointer(&vtop->type);\n"
-     "                gaddrof();\n"
-     "            }\n"
-     "            gexpr();\n"
-     "            gen_op('+');\n"
-     "            indir();\n"
-     "            skip(']');",
-     1),
-    # 23. tccgen.c: apply vector_size at the end of decl()'s
-    #     declarator processing (covers typedefs, variables and
-    #     function declarations; make_vector_type rejects the rest).
-    ("tccgen.c",
-     "#ifdef TCC_TARGET_PE\n"
-     "            pe_check_linkage(&type, &ad);\n"
-     "#endif\n"
-     "            if (tok == '{') {",
-     "#ifdef TCC_TARGET_PE\n"
-     "            pe_check_linkage(&type, &ad);\n"
-     "#endif\n"
-     "            if (ad.vector_size)\n"
-     "                make_vector_type(&type, ad.vector_size);\n"
-     "            if (tok == '{') {",
-     1),
-    # 24. tccgen.c: vector_size on structure fields.
-    ("tccgen.c",
-     "                    type1 = btype;\n"
-     "                    if (tok != ':') {\n"
-     "\t\t\tif (tok != ';')\n"
-     "                            type_decl(&type1, &ad1, &v, TYPE_DIRECT);",
-     "                    type1 = btype;\n"
-     "                    if (tok != ':') {\n"
-     "\t\t\tif (tok != ';')\n"
-     "                            type_decl(&type1, &ad1, &v, TYPE_DIRECT);\n"
-     "                        if (ad1.vector_size)\n"
-     "                            make_vector_type(&type1, ad1.vector_size);",
-     1),
-    # 25. tccgen.c: brace initializers for vectors take the array
-    #     path (same ref convention); a whole-value initializer of
-    #     the same vector type goes to one_elem instead.
-    ("tccgen.c",
-     "    if (type->t & VT_ARRAY) {\n"
-     "        no_oblock = 1;",
-     "    if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {\n"
-     "        if ((type->t & VT_VECTOR) && (flags & DIF_HAVE_ELEM)\n"
-     "            && (is_compatible_unqualified_types(type, &vtop->type)\n"
-     "                /* a vector value of the same total size also\n"
-     "                   initializes the whole vector (bitcast, the\n"
-     "                   gen_cast rule): element signedness alone -\n"
-     "                   e.g. a comparison result assigned to an\n"
-     "                   unsigned-element vector - must not force the\n"
-     "                   brace path */\n"
-     "                || ((vtop->type.t & VT_VECTOR)\n"
-     "                    && type_size(type, &align1)\n"
-     "                       == type_size(&vtop->type, &align1))))\n"
-     "            goto one_elem;\n"
-     "        no_oblock = 1;",
-     1),
-    ("tccgen.c",
-     "\t\tif (type->t & VT_ARRAY) {\n"
-     "\t\t    ++indexsym.c;",
-     "\t\tif ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {\n"
-     "\t\t    ++indexsym.c;",
-     1),
-    # 26. tccgen.c: decl_designator's element addressing must take
-    #     the array path for vectors too (otherwise it walks the
-    #     index symbol as if it were a struct field list).
-    ("tccgen.c",
-     "    no_designator:\n"
-     "        if (type->t & VT_ARRAY) {",
-     "    no_designator:\n"
-     "        if ((type->t & VT_ARRAY) || (type->t & VT_VECTOR)) {",
-     1),
     # 4. libtcc.c: ONE_SOURCE include chain (libtcc.c:52-55).
     ("libtcc.c",
      "#elif defined(TCC_TARGET_RISCV64)\n"
@@ -716,40 +320,6 @@ PATCHES = [
      "riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c\n"
      "wasm32_FILES = $(CORE_FILES) wasm-gen.c wasm-link.c",
      1),
-
-    # 27. Vector values are not subject to the scalar char/short
-    #     delayed cast (VT_MUSTCAST): a vector type carries its element
-    #     type in VT_BTYPE, so a char/short-element vector value (a
-    #     function-call result, a variable load) picked up VT_MUSTCAST
-    #     and force_charshort_cast then rewrote its type to VT_INT and
-    #     failed with "cannot convert 'int' to 'short'".  Never set the
-    #     flag on vector values, and clear it defensively in gen_cast.
-    ("tccgen.c",
-     "    /* special delayed cast for char/short */\n"
-     "    if (vtop->r & VT_MUSTCAST)\n"
-     "        force_charshort_cast();",
-     "    /* vector values are not subject to the scalar char/short\n"
-     "       delayed cast: the element type only rides in VT_BTYPE */\n"
-     "    if ((type->t & VT_VECTOR) || (vtop->type.t & VT_VECTOR))\n"
-     "        vtop->r &= ~VT_MUSTCAST;\n"
-     "    /* special delayed cast for char/short */\n"
-     "    if (vtop->r & VT_MUSTCAST)\n"
-     "        force_charshort_cast();",
-     1),
-    ("tccgen.c",
-     "    t = ct.t & VT_BTYPE;\n"
-     "    if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {",
-     "    t = ct.t & VT_BTYPE;\n"
-     "    if (!(ct.t & VT_VECTOR)\n"
-     "        && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {",
-     1),
-    ("tccgen.c",
-     "                t = s->type.t & VT_BTYPE;\n"
-     "                if (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL) {",
-     "                t = s->type.t & VT_BTYPE;\n"
-     "                if (!(s->type.t & VT_VECTOR)\n"
-     "                    && (t == VT_BYTE || t == VT_SHORT || t == VT_BOOL)) {",
-     1),
     # 28. tccgen.c: the wasm backend converts to/from unsigned
     #     long long natively (i64 scratch local), like ARM64/RISCV64;
     #     route gen_cvt_itof1/gen_cvt_ftoi1 straight to the backend
@@ -766,36 +336,6 @@ PATCHES = [
      "#define gen_cvt_ftoi1 gen_cvt_ftoi",
      "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_WASM32\n"
      "#define gen_cvt_ftoi1 gen_cvt_ftoi",
-     1),
-    # 29. tcc.h/tccgen.c: publish the value-stack base the way vtop
-    #     is published - an ST_DATA declaration in tcc.h next to
-    #     vtop's, with the definition in tccgen.c.  Upstream keeps
-    #     vstack as a tccgen.c-local macro over a static array; that
-    #     is visible to a backend only while libtcc.c #includes
-    #     tccgen.c and the backend into one translation unit (the
-    #     Makefile build).  A build that compiles the backend as its
-    #     own translation unit (the browser package's emcc build)
-    #     cannot see it, and wasm-gen.c iterates the live stack from
-    #     its base (wasm_vec_alloc, gfunc_call).  In ONE_SOURCE mode
-    #     the header declaration is a tentative static declaration
-    #     completed by the tccgen.c definition, exactly as before;
-    #     in multi-TU mode it is the extern declaration and the
-    #     definition is tccgen.c's tentative one, the same arrangement
-    #     vtop uses.
-    ("tcc.h",
-     "ST_DATA SValue *vtop;\n"
-     "ST_DATA int rsym, anon_sym, ind, loc;",
-     "ST_DATA SValue *vtop;\n"
-     "ST_DATA SValue _vstack[];\n"
-     "#define vstack (_vstack + 1)\n"
-     "ST_DATA int rsym, anon_sym, ind, loc;",
-     1),
-    ("tccgen.c",
-     "ST_DATA SValue *vtop;\n"
-     "static SValue _vstack[1 + VSTACK_SIZE];\n"
-     "#define vstack (_vstack + 1)",
-     "ST_DATA SValue *vtop;\n"
-     "ST_DATA SValue _vstack[1 + VSTACK_SIZE];",
      1),
 ]
 

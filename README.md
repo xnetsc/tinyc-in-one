@@ -132,6 +132,131 @@ takes effect on the next compile without restarting the process.
 files enter its virtual filesystem by content instead — see its
 section below.)
 
+## SIMD intrinsics
+
+SIMD intrinsic headers ship as part of the compiler's bundled
+header set: they sit in `lib/tcc/include/` of every target
+sysroot — the compiler's default include path — in every package.
+There is nothing extra to download and no `-I` to add; which
+header to include depends only on the target being compiled for.
+
+Every intrinsic name in these headers is a macro over a compiler
+builtin that emits the real instruction. (The compiler has no
+inliner, so a function form would cost a call per operation.)
+The surface follows one rule: an intrinsic is provided only when
+the target hardware has the instruction — nothing is emulated
+by splitting a wider operation into narrower ones, and nothing
+is substituted with scalar code.
+
+### AArch64 — `arm_neon.h`
+
+Targets: `aarch64-linux-gnu`, `aarch64-linux-android`,
+`arm64-apple-darwin`.
+
+```c
+#include <arm_neon.h>
+```
+
+The ACLE NEON surface — 3,356 intrinsics over the standard
+vector types (`int8x16_t`, `float32x4_t`, …): loads and stores
+(plain, lane, and interleaving), arithmetic, logic, compare,
+shifts, multiply-accumulate, widening and narrowing, conversion,
+lane extract/insert and dup, table lookup, and reductions. NEON
+is part of the AArch64 baseline, so the surface is available at
+the default `-march`. The dot-product family (`vdotq_s32`,
+`vusdotq_u8`, …) additionally requires DOTPROD, enabled with
+`-march=armv8.2-a+dotprod` or a later baseline; using one
+without the feature is a compile-time error naming the missing
+feature.
+
+Not provided — separate optional extensions outside this
+surface: FP16 and BF16 arithmetic, the crypto extensions (AES,
+SHA1, SHA256, PMULL), i8mm matrix multiply, FCMA complex
+arithmetic, and the multi-register table-lookup forms.
+
+### x86-64 — `immintrin.h`
+
+Targets: `x86_64-linux-gnu`, `x86_64-w64-mingw32`,
+`x86_64-linux-android`, `x86_64-apple-darwin`.
+
+```c
+#include <immintrin.h>
+```
+
+`immintrin.h` includes the per-extension headers below; each
+can also be included on its own. 4,241 intrinsics in total.
+
+| Header | Extension |
+|---|---|
+| `xmmintrin.h` | SSE |
+| `emmintrin.h` | SSE2 |
+| `tmmintrin.h` | SSSE3 |
+| `smmintrin.h` | SSE4.1, SSE4.2 |
+| `avxintrin.h` | AVX |
+| `avx2intrin.h` | AVX2 |
+| `fmaintrin.h` | FMA |
+| `f16cintrin.h` | F16C |
+| `avx512fintrin.h` | AVX-512F |
+| `avx512bwintrin.h` | AVX-512BW |
+| `avx512cdintrin.h` | AVX-512CD |
+| `avx512dqintrin.h` | AVX-512DQ |
+| `avx512vlintrin.h` | AVX-512VL |
+| `avx512vbmiintrin.h` | AVX-512VBMI |
+| `avx512vnniintrin.h` | AVX-512VNNI |
+
+Which headers are usable follows the target feature level, set
+with `-march` and reported by the predefined macros (`__SSE2__`,
+`__AVX2__`, `__AVX512F__`, …): the default baseline exposes SSE
+and SSE2; `-march=x86-64-v3` adds SSSE3, SSE4.1/4.2, AVX, AVX2,
+FMA and F16C; `-march=x86-64-v4` adds the AVX-512 subsets.
+Using an intrinsic whose extension is not enabled is a
+compile-time error.
+
+Not provided: MMX, AVX512BF16, AES-NI / PCLMUL / SHA, and later
+extensions such as AVX512FP16, AVX-VNNI and AMX — an extension
+that is not in the table has no intrinsics in these headers.
+
+### RISC-V — `riscv_vector.h`
+
+Target: `riscv64-linux-gnu`.
+
+```c
+#include <riscv_vector.h>
+```
+
+The RVV 1.0 intrinsic API in fixed-length form: 12,237
+intrinsics. The header requires the V extension in `-march`,
+for example
+`-march=rv64gcv_zvl256b`. The vector types are fixed-size,
+sized by the target's minimum vector length
+(`__riscv_v_min_vlen`, from the `zvl<N>b` component of
+`-march`; 128 when no `zvl` component is given), and the `vl`
+argument of the standard API is the type's lane count — each
+operation always covers the whole type. The surface spans the
+type/LMUL matrix (mf8 through m8, integer and floating point):
+unit-stride, strided and indexed loads and stores, arithmetic
+and logic, multiply-accumulate, widening and narrowing,
+floating-point operations and conversions, reductions, slides
+and gathers, and mask operations. The variable-length
+programming model of the standard API (polymorphic types whose
+length is set at run time) is not provided; this is the
+fixed-length form of the same API.
+
+### WebAssembly — `wasm_simd128.h`
+
+Target: `wasm32-wasi` (browser package).
+
+```c
+#include <wasm_simd128.h>
+```
+
+The WebAssembly SIMD128 intrinsic set over `v128_t`. The same
+sysroot also carries wasm forms of `arm_neon.h`, `xmmintrin.h`
+and `emmintrin.h`: subsets of the NEON and SSE/SSE2 surfaces
+mapped onto v128 operations. The browser package's other
+targets carry the native headers above in their sysroots,
+unchanged.
+
 ## Packages
 
 The npm, Python, and Java packages share one internal layout:

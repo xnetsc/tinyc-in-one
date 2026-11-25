@@ -112,6 +112,24 @@ src/main/
    └─ sysroot/<triple>/     the bionic system headers and libraries (include/, lib/)
 ```
 
+## SIMD intrinsics
+
+The bundled headers include SIMD intrinsic headers for both
+Android targets, in the sysroot's `lib/tcc/include/` — the
+compiler's default include path, so there is nothing extra to
+install and no `-I` to add:
+
+- `aarch64-linux-android`: `#include <arm_neon.h>` — the ACLE
+  NEON surface; the dot-product family needs
+  `-march=armv8.2-a+dotprod` or a later baseline.
+- `x86_64-linux-android`: `#include <immintrin.h>` — SSE
+  through the AVX-512 subsets, gated by `-march` (`x86-64-v3`
+  for AVX2 level, `x86-64-v4` for AVX-512).
+
+The root README's "SIMD intrinsics" section lists, per header,
+which instructions are covered and which extensions are not
+provided.
+
 ## Building
 
 The `libtinyc.so` in `jniLibs` and the actual contents of

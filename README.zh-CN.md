@@ -113,6 +113,113 @@ WebAssembly 及文件扩展名）记录在该目标 `manifest.json` 的
 进程。（浏览器包没有可指向的真实文件系统，文件以内容进入它的
 虚拟文件系统，见其小节。）
 
+## SIMD 内建函数
+
+SIMD 内建头文件是编译器自带头文件集的一部分：在每个包、每个
+目标的 sysroot 里都位于 `lib/tcc/include/`，即编译器的默认头
+文件搜索路径。不需要另外下载，也不需要加 `-I`；用哪个头只取
+决于编译的目标。
+
+这些头里的每个内建名都是宏，展开为发射真实指令的编译器内建
+（本编译器没有内联器，函数形态会变成每次操作一次调用）。收录
+规则只有一条：目标硬件有这条指令才提供——不把宽操作拆成窄操
+作模拟，也不拿标量代码冒充。
+
+### AArch64 —— `arm_neon.h`
+
+目标：`aarch64-linux-gnu`、`aarch64-linux-android`、
+`arm64-apple-darwin`。
+
+```c
+#include <arm_neon.h>
+```
+
+ACLE NEON 表面，共 3356 个内建，覆盖标准向量类型
+（`int8x16_t`、`float32x4_t` 等）上的加载存储（普通、按
+lane、交错）、算术、逻辑、比较、移位、乘加、宽化与窄化、转
+换、lane 提取/插入与复制、查表、归约。NEON 是 AArch64 的基
+线组成部分，默认 `-march` 即可用。点积家族（`vdotq_s32`、
+`vusdotq_u8` 等）另需 DOTPROD，用 `-march=armv8.2-a+dotprod`
+或更高的基线开启；未开启时用它会在编译期报错并点名缺失的
+特性。
+
+不提供（属独立可选扩展、不在本表面内）：FP16 与 BF16 算术、
+加密扩展（AES、SHA1、SHA256、PMULL）、i8mm 矩阵乘、FCMA
+复数运算、多寄存器查表形式。
+
+### x86-64 —— `immintrin.h`
+
+目标：`x86_64-linux-gnu`、`x86_64-w64-mingw32`、
+`x86_64-linux-android`、`x86_64-apple-darwin`。
+
+```c
+#include <immintrin.h>
+```
+
+`immintrin.h` 包含下表全部按扩展分的头，每个分头也可单独
+include。共 4241 个内建。
+
+| 头文件 | 扩展 |
+|---|---|
+| `xmmintrin.h` | SSE |
+| `emmintrin.h` | SSE2 |
+| `tmmintrin.h` | SSSE3 |
+| `smmintrin.h` | SSE4.1、SSE4.2 |
+| `avxintrin.h` | AVX |
+| `avx2intrin.h` | AVX2 |
+| `fmaintrin.h` | FMA |
+| `f16cintrin.h` | F16C |
+| `avx512fintrin.h` | AVX-512F |
+| `avx512bwintrin.h` | AVX-512BW |
+| `avx512cdintrin.h` | AVX-512CD |
+| `avx512dqintrin.h` | AVX-512DQ |
+| `avx512vlintrin.h` | AVX-512VL |
+| `avx512vbmiintrin.h` | AVX-512VBMI |
+| `avx512vnniintrin.h` | AVX-512VNNI |
+
+哪些头可用取决于目标特性等级，由 `-march` 设定、由预定义宏
+（`__SSE2__`、`__AVX2__`、`__AVX512F__` 等）反映：默认基线开
+SSE 与 SSE2；`-march=x86-64-v3` 增加 SSSE3、SSE4.1/4.2、AVX、
+AVX2、FMA、F16C；`-march=x86-64-v4` 增加上表 AVX-512 子集。
+用了未开启扩展的内建会在编译期报错。
+
+不提供：MMX、AVX512BF16、AES-NI / PCLMUL / SHA，以及
+AVX512FP16、AVX-VNNI、AMX 等后续扩展——不在表里的扩展，其
+内建就不在头里。
+
+### RISC-V —— `riscv_vector.h`
+
+目标：`riscv64-linux-gnu`。
+
+```c
+#include <riscv_vector.h>
+```
+
+RVV 1.0 内建 API 的定长形式，共 12237 个内建。此头要求
+`-march` 带 V 扩展，
+如 `-march=rv64gcv_zvl256b`。向量类型是定长的，大小由目标的
+最小向量长度决定（`__riscv_v_min_vlen`，来自 `-march` 的
+`zvl<N>b` 分量；未给 `zvl` 时为 128）；标准 API 的 `vl` 参数
+就是类型的 lane 数——每个操作恒覆盖整个类型。表面覆盖完整
+的类型/LMUL 矩阵（mf8 到 m8，整数与浮点）：单位步长、跨步与
+索引加载存储，算术与逻辑，乘加，宽化与窄化，浮点运算与转
+换，归约，滑移与聚集，掩码操作。标准 API 的变长编程模型
+（运行时设长度的多态类型）不提供；这里是同一套 API 的定长
+形式。
+
+### WebAssembly —— `wasm_simd128.h`
+
+目标：`wasm32-wasi`（浏览器包）。
+
+```c
+#include <wasm_simd128.h>
+```
+
+WebAssembly SIMD128 内建集，基于 `v128_t`。同一 sysroot 还
+带 wasm 形态的 `arm_neon.h`、`xmmintrin.h`、`emmintrin.h`：
+NEON 与 SSE/SSE2 表面中映射到 v128 操作的子集。浏览器包的
+其它目标，其 sysroot 里带的是上面原生形态的头，原样不变。
+
 ## 各生态包
 
 npm、Python、Java 三个包内部用同一套布局：

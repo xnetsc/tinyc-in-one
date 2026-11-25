@@ -1058,11 +1058,12 @@ static int tcc_parse_march(TCCState *s, const char *arg)
                     "unknown -march component '%s' for target x86-64", tok);
         }
         /* extension implications, so the word always describes a
-           level a real processor could have */
-        if (f & (TFEAT_AVX512VBMI | TFEAT_AVX512VNNI))
+           level a real processor could have: every AVX-512 group
+           is an extension of AVX-512F */
+        if (f & (TFEAT_AVX512BW | TFEAT_AVX512DQ | TFEAT_AVX512VL |
+                 TFEAT_AVX512CD | TFEAT_AVX512VBMI | TFEAT_AVX512VNNI))
             f |= TFEAT_AVX512F;
-        if (f & (TFEAT_AVX512F | TFEAT_AVX512BW | TFEAT_AVX512DQ |
-                 TFEAT_AVX512VL | TFEAT_AVX512CD))
+        if (f & TFEAT_AVX512F)
             f |= TFEAT_AVX2;
         if (f & (TFEAT_AVX2 | TFEAT_FMA | TFEAT_F16C))
             f |= TFEAT_AVX;

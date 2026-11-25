@@ -46,8 +46,7 @@ static int local_scope;
 ST_DATA char debug_modes;
 
 ST_DATA SValue *vtop;
-static SValue _vstack[1 + VSTACK_SIZE];
-#define vstack (_vstack + 1)
+ST_DATA SValue _vstack[1 + VSTACK_SIZE];
 
 ST_DATA int nocode_wanted; /* no code generation wanted */
 #define NODATA_WANTED (nocode_wanted > 0) /* no static data output wanted either */
@@ -138,7 +137,7 @@ static void block(int flags);
 #define STMT_EXPR 1
 #define STMT_COMPOUND 2
 
-static void gen_cast(CType *type);
+ST_FUNC void gen_cast(CType *type);
 static void gen_cast_s(int t);
 static inline CType *pointed_type(CType *type);
 static void check_restrict_type(CType *type);
@@ -166,7 +165,7 @@ static void gen_inline_functions(TCCState *s);
 static void free_inline_functions(TCCState *s);
 static void skip_or_save_block(TokenString **str);
 static void gv_dup(void);
-static int get_temp_local_var(int size,int align,int *r2);
+ST_FUNC int get_temp_local_var(int size,int align,int *r2);
 static void cast_error(CType *st, CType *dt);
 static void end_switch(void);
 static void do_Static_assert(void);
@@ -421,9 +420,10 @@ static int btype_size(int bt)
 /* returns function return register from type */
 static int R_RET(int t)
 {
-#if defined TCC_TARGET_ARM64
+#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_X86_64
     /* a vector returns in the first FP/SIMD register whatever its
-       element type (the AAPCS64 FP/SIMD class) */
+       element type (the AAPCS64 FP/SIMD class on arm64, the SSE
+       class on x86-64) */
     if (t & VT_VECTOR)
         return REG_FRET;
 #endif
@@ -471,7 +471,7 @@ static void PUT_R_RET(SValue *sv, int t)
 static int RC_RET(int t)
 {
     return reg_classes[R_RET(t)] & ~(RC_FLOAT | RC_INT
-#ifdef TCC_TARGET_ARM64
+#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_X86_64
         | RC_VEC /* a return value belongs to the one return register */
 #endif
         );
@@ -480,7 +480,7 @@ static int RC_RET(int t)
 /* returns generic register class for type t */
 static int RC_TYPE(int t)
 {
-#if defined TCC_TARGET_ARM64
+#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_X86_64
     if (t & VT_VECTOR)
         return RC_VEC;
 #endif
@@ -1732,7 +1732,7 @@ ST_FUNC int get_reg(int rc)
 
 /* find a free temporary local variable (return the offset on stack) match
    size and align. If none, add new temporary stack variable */
-static int get_temp_local_var(int size,int align, int *r2)
+ST_FUNC int get_temp_local_var(int size,int align, int *r2)
 {
     int i;
     struct temp_local_variable *temp_var;
@@ -3705,7 +3705,7 @@ static void gen_cast_s(int t)
 }
 
 /* cast 'vtop' to 'type'. Casting to bitfields is forbidden. */
-static void gen_cast(CType *type)
+ST_FUNC void gen_cast(CType *type)
 {
     int sbt, dbt, sf, df, c;
     int dbt_bt, sbt_bt, ds, ss, bits, trunc;
@@ -6015,7 +6015,8 @@ static void gfunc_param_typed(Sym *func, Sym *arg)
     if (func_type == FUNC_OLD ||
         (func_type == FUNC_ELLIPSIS && arg == NULL)) {
         /* default casting : only need to convert float to double */
-        if ((vtop->type.t & VT_BTYPE) == VT_FLOAT) {
+        if ((vtop->type.t & VT_BTYPE) == VT_FLOAT &&
+            !(vtop->type.t & VT_VECTOR)) {
             gen_cast_s(VT_DOUBLE);
         } else if ((vtop->type.t & VT_BTYPE) == VT_STRUCT) {
             /* Pass the unqualified aggregate value. */
@@ -6608,6 +6609,485 @@ ST_FUNC void unary(void)
         break;
     }
 #endif
+#ifdef TCC_TARGET_X86_64
+    case TOK_ia32_vop1:
+    case TOK_ia32_vop1i:
+    case TOK_ia32_vop1m:
+    case TOK_ia32_vop1m2:
+    case TOK_ia32_vop1mi:
+    case TOK_ia32_vop1mi2:
+    case TOK_ia32_vop2:
+    case TOK_ia32_vop2i:
+    case TOK_ia32_vop3:
+    case TOK_ia32_vop3i:
+    case TOK_ia32_vop3m:
+    case TOK_ia32_vop3m2:
+    case TOK_ia32_vop3mi:
+    case TOK_ia32_vop3mi2:
+    case TOK_ia32_vopm:
+    case TOK_ia32_vopm2:
+    case TOK_ia32_vopmi:
+    case TOK_ia32_vopmi2:
+    case TOK_ia32_splat:
+    case TOK_ia32_extract:
+    case TOK_ia32_replace: {
+        /* the generic x86 SIMD builtins, in the same parse shapes
+           as the aarch64 generics: the opcode and the lane/scale
+           arguments are integer constants, the value operands are
+           expressions and the result type is named explicitly */
+        int which = tok, opc, lane = 0;
+        CType restype;
+        next();
+        skip('(');
+        opc = expr_const();
+        skip(',');
+        if (which == TOK_ia32_vop1) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1(opc, &restype);
+        } else if (which == TOK_ia32_vop1i) {
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1i(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop1m) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1m(opc, &restype);
+        } else if (which == TOK_ia32_vop1m2) {
+            /* (opc, mask, passthrough, a, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1m2(opc, &restype);
+        } else if (which == TOK_ia32_vop1mi) {
+            /* (opc, mask, a, imm, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1mi(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop1mi2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1mi2(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2(opc, &restype);
+        } else if (which == TOK_ia32_vop2i) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2i(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop3) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3(opc, &restype);
+        } else if (which == TOK_ia32_vop3i) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3i(opc, lane, &restype);
+        } else if (which == TOK_ia32_vopm) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_opm(opc, &restype);
+        } else if (which == TOK_ia32_vopm2) {
+            /* (opc, mask, passthrough, a, b, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_opm2(opc, &restype);
+        } else if (which == TOK_ia32_vopmi) {
+            /* (opc, mask, a, b, imm, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_opmi(opc, lane, &restype);
+        } else if (which == TOK_ia32_vopmi2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_opmi2(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop3m) {
+            /* (opc, mask, a, b, c, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3m(opc, &restype);
+        } else if (which == TOK_ia32_vop3m2) {
+            /* (opc, mask, passthrough, a, b, c, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3m2(opc, &restype);
+        } else if (which == TOK_ia32_vop3mi) {
+            /* (opc, mask, a, b, c, imm, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3mi(opc, lane, &restype);
+        } else if (which == TOK_ia32_vop3mi2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op3mi2(opc, lane, &restype);
+        } else if (which == TOK_ia32_splat) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_splat(opc, &restype);
+        } else if (which == TOK_ia32_extract) {
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_extract(opc, lane, &restype);
+        } else { /* TOK_ia32_replace */
+            expr_eq();
+            skip(',');
+            lane = expr_const();
+            skip(',');
+            expr_eq();
+            skip(')');
+            gen_vec_replace(opc, lane);
+        }
+        break;
+    }
+    case TOK_ia32_gather:
+    case TOK_ia32_gatherm:
+    case TOK_ia32_scatter:
+    case TOK_ia32_scatterm:
+    case TOK_ia32_vloadm:
+    case TOK_ia32_vstorem:
+    case TOK_ia32_vntstore: {
+        /* the memory-vector generics: gathers and scatters take a
+           base pointer expression, an index vector and a constant
+           scale; masked loads and stores take a mask operand (an
+           integer for the AVX-512 forms, a vector for the AVX
+           forms) and a pointer expression */
+        int which = tok, opc, scale = 0;
+        CType restype;
+        next();
+        skip('(');
+        opc = expr_const();
+        skip(',');
+        if (which == TOK_ia32_gather) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            scale = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_gather(opc, scale, &restype);
+        } else if (which == TOK_ia32_gatherm) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            scale = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_gatherm(opc, scale, &restype);
+        } else if (which == TOK_ia32_scatter) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            scale = expr_const();
+            skip(')');
+            gen_vec_scatter(opc, scale);
+            vpushi(0);
+            vtop->type.t = VT_VOID;
+        } else if (which == TOK_ia32_scatterm) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            scale = expr_const();
+            skip(')');
+            gen_vec_scatterm(opc, scale);
+            vpushi(0);
+            vtop->type.t = VT_VOID;
+        } else if (which == TOK_ia32_vloadm) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_loadm(opc, &restype);
+        } else if (which == TOK_ia32_vstorem) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(')');
+            gen_vec_storem(opc);
+            vpushi(0);
+            vtop->type.t = VT_VOID;
+        } else { /* TOK_ia32_vntstore */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(')');
+            gen_vec_ntstore(opc);
+            vpushi(0);
+            vtop->type.t = VT_VOID;
+        }
+        break;
+    }
+#endif
+#ifdef TCC_TARGET_RISCV64
+    case TOK_rvv_vop1:
+    case TOK_rvv_vop1r:
+    case TOK_rvv_vop2:
+    case TOK_rvv_vop2i:
+    case TOK_rvv_vop3:
+    case TOK_rvv_splat:
+    case TOK_rvv_vop1m2:
+    case TOK_rvv_vopm:
+    case TOK_rvv_vopm2:
+    case TOK_rvv_vload:
+    case TOK_rvv_vstore: {
+        /* the generic RVV builtins, in the same parse shapes as
+           the aarch64 and x86 generics: the opcode is an integer
+           constant, the value operands are expressions and the
+           result type is named explicitly.  Masked forms take the
+           mask operand first and the passthrough (maskedoff)
+           operand next for the m2 forms, as the x86 masked
+           generics do. */
+        int which = tok, opc, imm = 0;
+        CType restype;
+        next();
+        skip('(');
+        opc = expr_const();
+        skip(',');
+        if (which == TOK_rvv_vop1 || which == TOK_rvv_vop1r) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            if (which == TOK_rvv_vop1)
+                gen_vec_op1(opc, &restype);
+            else
+                gen_vec_op1r(opc, &restype);
+        } else if (which == TOK_rvv_vop2) {
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2(opc, &restype);
+        } else if (which == TOK_rvv_vop2i) {
+            expr_eq();
+            skip(',');
+            imm = expr_const();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op2i(opc, imm, &restype);
+        } else if (which == TOK_rvv_vop3 || which == TOK_rvv_vopm) {
+            /* vop3: (opc, a, b, c, restype);
+               vopm: (opc, mask, a, b, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            if (which == TOK_rvv_vop3)
+                gen_vec_op3(opc, &restype);
+            else
+                gen_vec_opm(opc, &restype);
+        } else if (which == TOK_rvv_splat) {
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_splat(opc, &restype);
+        } else if (which == TOK_rvv_vop1m2) {
+            /* (opc, mask, passthrough, a, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_op1m2(opc, &restype);
+        } else if (which == TOK_rvv_vopm2) {
+            /* (opc, mask, passthrough, a, b, restype) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_vec_opm2(opc, &restype);
+        } else if (which == TOK_rvv_vload) {
+            /* (opc, ptr, aux, restype): aux is the stride scalar
+               or the index vector, by opcode */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            parse_type(&restype);
+            skip(')');
+            gen_rvv_vload(opc, &restype);
+        } else { /* TOK_rvv_vstore: (opc, ptr, aux, vec) */
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(',');
+            expr_eq();
+            skip(')');
+            gen_rvv_vstore(opc);
+            vpushi(0);
+            vtop->type.t = VT_VOID;
+        }
+        break;
+    }
+#endif
     case TOK_builtin_choose_expr:
 	{
 	    int64_t c;
@@ -7046,7 +7526,8 @@ special_math_val:
             nb_args = regsize = 0;
             ret.r2 = VT_CONST;
             /* compute first implicit argument if a structure is returned */
-            if ((s->type.t & VT_BTYPE) == VT_STRUCT) {
+            if ((s->type.t & VT_BTYPE) == VT_STRUCT ||
+                (s->type.t & VT_VECTOR)) {
                 variadic = (s->f.func_type == FUNC_ELLIPSIS);
                 ret_nregs = gfunc_sret(&s->type, variadic, &ret.type,
                                        &ret_align, &regsize);

@@ -15,7 +15,15 @@ import sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 OURS = os.path.join(ROOT, "vendor-tinycc", "include", "arm_neon.h")
 GEN = os.path.join(ROOT, "vendor-tinycc", "arm64-gen.c")
-GCC_H = "/usr/lib/gcc-cross/aarch64-linux-gnu/13/include/arm_neon.h"
+# the reference header lives under gcc-cross/ on a foreign-arch
+# host and under gcc/ on a native aarch64 host; take whichever
+# is installed
+GCC_H_CANDIDATES = [
+    "/usr/lib/gcc-cross/aarch64-linux-gnu/13/include/arm_neon.h",
+    "/usr/lib/gcc/aarch64-linux-gnu/13/include/arm_neon.h",
+]
+GCC_H = next((p for p in GCC_H_CANDIDATES if os.path.exists(p)),
+             GCC_H_CANDIDATES[0])
 PROBES = os.path.join(ROOT, "tests", "neon", "probes")
 
 # residual classes, matched in order; anything unmatched is a

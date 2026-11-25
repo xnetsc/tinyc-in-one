@@ -80,6 +80,27 @@ tinyc.run_cli(args, io=tinyc.IO.callback(out=my_fn))   # my_fn(bytes)
 tinyc.run_cli(args, io=open("log", "wb"))              # any binary file object
 ```
 
+## SIMD intrinsics
+
+The bundled headers include SIMD intrinsic headers for every
+target, in the sysroot's `lib/tcc/include/` — the compiler's
+default include path, so there is nothing extra to install and
+no `-I` to add:
+
+- AArch64 targets: `#include <arm_neon.h>` — the ACLE NEON
+  surface; the dot-product family needs `-march=armv8.2-a+dotprod`
+  or a later baseline.
+- x86-64 targets: `#include <immintrin.h>` — SSE, SSE2, SSSE3,
+  SSE4, AVX, AVX2, FMA, F16C and the AVX-512 subsets, gated by
+  `-march` (`x86-64-v3` for AVX2 level, `x86-64-v4` for AVX-512).
+- riscv64 target: `#include <riscv_vector.h>` — the RVV 1.0 API
+  in fixed-length form; requires `-march` with the V extension,
+  e.g. `rv64gcv_zvl256b`.
+
+The root README's "SIMD intrinsics" section lists, per header,
+which instructions are covered and which extensions are not
+provided.
+
 ## Tests
 
 ```

@@ -249,6 +249,19 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 // my-shims.mjs:  export default { host_log: (ctx, ptr) => { ... } };
 ```
 
+## SIMD intrinsics
+
+Each target's sysroot carries that target's SIMD headers in its
+default include set. The native targets carry the same headers
+as the other packages (`arm_neon.h` for AArch64, the
+`immintrin.h` set for x86-64, `riscv_vector.h` for riscv64).
+The `wasm32-wasi` target carries `#include <wasm_simd128.h>` —
+the WebAssembly SIMD128 intrinsic set — plus wasm forms of
+`arm_neon.h`, `xmmintrin.h` and `emmintrin.h`: subsets of the
+NEON and SSE/SSE2 surfaces mapped onto v128 operations. See the
+root README's "SIMD intrinsics" section for the per-header
+breakdown.
+
 ## Tests
 
 ```

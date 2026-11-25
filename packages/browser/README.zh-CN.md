@@ -249,6 +249,17 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 // my-shims.mjs:  export default { host_log: (ctx, ptr) => { ... } };
 ```
 
+## SIMD 内建函数
+
+每个目标的 sysroot 在其默认头文件集里带该目标的 SIMD 头。
+原生目标带与其它包相同的头（AArch64 用 `arm_neon.h`、x86-64
+用 `immintrin.h` 一组、riscv64 用 `riscv_vector.h`）。
+`wasm32-wasi` 目标带 `#include <wasm_simd128.h>`——
+WebAssembly SIMD128 内建集——另带 wasm 形态的 `arm_neon.h`、
+`xmmintrin.h`、`emmintrin.h`：NEON 与 SSE/SSE2 表面中映射到
+v128 操作的子集。逐个头的覆盖明细见根 README 的「SIMD 内建
+函数」一节。
+
 ## 测试
 
 ```

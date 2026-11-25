@@ -100,6 +100,22 @@ src/main/
    └─ sysroot/<triple>/     bionic 系统头与库的目录（include/、lib/）
 ```
 
+## SIMD 内建函数
+
+自带头文件集包含两个安卓目标的 SIMD 内建头，位于 sysroot 的
+`lib/tcc/include/`——编译器的默认头文件搜索路径，不需要另外
+安装，也不需要加 `-I`：
+
+- `aarch64-linux-android`：`#include <arm_neon.h>`——ACLE
+  NEON 表面；点积家族需 `-march=armv8.2-a+dotprod` 或更高
+  基线。
+- `x86_64-linux-android`：`#include <immintrin.h>`——SSE 到
+  AVX-512 子集，由 `-march` 门控（`x86-64-v3` 为 AVX2 级别，
+  `x86-64-v4` 为 AVX-512）。
+
+每个头具体有哪些指令、哪些扩展不提供，见根 README 的
+「SIMD 内建函数」一节。
+
 ## 构建
 
 `jniLibs` 里的 `libtinyc.so` 与 `assets/toolchain` 的实际内容是构建

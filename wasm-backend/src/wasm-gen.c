@@ -49,6 +49,10 @@
    tccgen.c's R_RET refers to it in wasm builds. */
 #define WREG_VEC 32 /* SValue register base for the v128 slots */
 
+/* this backend implements the generic vector layer hooks
+   (gen_opv, gen_vec_*) used by tccgen.c */
+#define TCC_VEC_HOOKS
+
 /* tccrun.c / tccelf.c consult this for the size of the return type
    register class on some paths; wasm returns scalars in one register */
 #define PROMOTE_RET 1

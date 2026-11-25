@@ -132,6 +132,23 @@ null 回落 System 流）、`TccIO.capturing()`（内存攒积，out/err 分开�
 - 默认不设任何回调：libtcc 的报错走进程真实 stderr，与命令行一致。
 - 带 IO 跑 `-run` 时，目标程序在运行期间的 stdin 由 `readIn` 喂入、stdout 与 stderr 分别经 `writeOut` 与 `writeErr` 交付；不带 IO 时目标程序用进程真实 stdio。
 
+## SIMD 内建函数
+
+自带头文件集包含每个目标的 SIMD 内建头，位于 sysroot 的
+`lib/tcc/include/`——编译器的默认头文件搜索路径，不需要另外
+安装，也不需要加 `-I`：
+
+- AArch64 目标：`#include <arm_neon.h>`——ACLE NEON 表面；
+  点积家族需 `-march=armv8.2-a+dotprod` 或更高基线。
+- x86-64 目标：`#include <immintrin.h>`——SSE、SSE2、SSSE3、
+  SSE4、AVX、AVX2、FMA、F16C 与 AVX-512 子集，由 `-march`
+  门控（`x86-64-v3` 为 AVX2 级别，`x86-64-v4` 为 AVX-512）。
+- riscv64 目标：`#include <riscv_vector.h>`——RVV 1.0 API 的
+  定长形式；要求 `-march` 带 V 扩展，如 `rv64gcv_zvl256b`。
+
+每个头具体有哪些指令、哪些扩展不提供，见根 README 的
+「SIMD 内建函数」一节。
+
 ## 构建与测试
 
 ```sh

@@ -92,6 +92,23 @@ jobs:
           bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
           cp tests/host-test-output.txt test-outputs/
 
+      # The vendor suite and the SIMD differential suites test
+      # the compiler in the tree (the package steps below test
+      # the packages): what ships is what CI tested. The x86
+      # suite compiles every probe at x86-64-v4 on any host and
+      # runs the runtime legs only on an AVX-512 host (it prints
+      # and counts the skips otherwise).
+      - name: Vendor test suite (native form)
+        run: |
+          (cd vendor-tinycc && make test) > test-outputs/vendor-make-test.log 2>&1
+
+      - name: SIMD differential suites and coverage scans (x86_64, riscv64)
+        run: |
+          bash tests/x86/run_x86_tests.sh > test-outputs/x86-simd-tests.log 2>&1
+          python3 tests/x86/scan_surface.py > test-outputs/x86-simd-scan.log 2>&1
+          bash tests/riscv64/run_riscv_tests.sh > test-outputs/riscv64-simd-tests.log 2>&1
+          python3 tests/riscv64/scan_surface.py > test-outputs/riscv64-simd-scan.log 2>&1
+
       - name: npm package - bundle, pack, consumer test on the tarballs
         run: |
           cd packages/npm
@@ -262,6 +279,19 @@ jobs:
         run: |
           bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
           cp tests/host-test-output.txt test-outputs/
+
+      # The vendor suite in native form (arm64-gen.c compiled as
+      # its own translation unit, the form the cross builds mask)
+      # and the NEON differential suite: what ships is what CI
+      # tested.
+      - name: Vendor test suite (native form)
+        run: |
+          (cd vendor-tinycc && make test) > test-outputs/vendor-make-test.log 2>&1
+
+      - name: SIMD differential suite and coverage scan (aarch64 NEON)
+        run: |
+          bash tests/neon/run_neon_tests.sh > test-outputs/neon-simd-tests.log 2>&1
+          python3 tests/neon/scan_surface.py > test-outputs/neon-simd-scan.log 2>&1
 
       - name: npm package - bundle, pack, consumer test on the tarballs
         run: |
