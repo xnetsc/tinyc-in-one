@@ -1806,6 +1806,18 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret,
     int align, size = type_size(vt, &align);
     (void)variadic;
     *ret_align = 1;
+    if (vt->t & VT_VECTOR) {
+        /* a vector returns as a genuine v128 function result, which
+           gfunc_call lands in vector slot 0 (R_RET names WREG_VEC):
+           a register return, never the hidden-pointer struct path.
+           The generic call site consults this function for vector
+           returns; answering 0 here (the by-size rule below) makes
+           the caller pass a hidden pointer the callee ignores and
+           read the "result" from a frame buffer nobody wrote. */
+        *ret = *vt;
+        *regsize = size;
+        return 1;
+    }
     if (size <= 4) { *regsize = 4; ret->t = VT_INT; ret->ref = NULL; return 1; }
     if (size <= 8) { *regsize = 4; ret->t = VT_INT; ret->ref = NULL; return 2; }
     return 0; /* returned via hidden pointer; prolog rejects >8-byte

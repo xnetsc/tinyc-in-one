@@ -1135,7 +1135,8 @@ ST_FUNC void gfunc_call(int nb_args)
 #endif
 
     return_type = &vtop[-nb_args].type.ref->type;
-    if ((return_type->t & VT_BTYPE) == VT_STRUCT)
+    if ((return_type->t & VT_BTYPE) == VT_STRUCT ||
+        (return_type->t & VT_VECTOR))
         --nb_args;
 
     t = tcc_malloc((nb_args + 1) * sizeof(*t));
@@ -1257,7 +1258,8 @@ ST_FUNC void gfunc_call(int nb_args)
         }
     }
 
-    if ((return_type->t & VT_BTYPE) == VT_STRUCT) {
+    if ((return_type->t & VT_BTYPE) == VT_STRUCT ||
+        (return_type->t & VT_VECTOR)) {
         if (a[0] == 1) {
             // indirect return: set x8 and discard the stack value
             gv_addr(RC_R(8));
@@ -1300,6 +1302,13 @@ ST_FUNC void gfunc_call(int nb_args)
                       (fltr(REG_FRET) + j) |
                       j << 10); // str ([sdq])(j),[x8,#(j * sz)]
             }
+        }
+        else if ((rt & VT_VECTOR) && !(a[0] & 1)) {
+            // A vector was returned in the vector return register,
+            // so write it out to the return slot:
+            gv_addr(RC_R(8));
+            --vtop;
+            arm64_strv(arm64_ldst_sz(return_type), fltr(REG_FRET), 8, 0);
         }
     }
 
