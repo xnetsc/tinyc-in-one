@@ -217,21 +217,24 @@ int main(void)
     check_metadata("smallframe", small, 4, 1, lookup);
 
     /* 2. unwind from inside the __chkstk call (prolog offset 5):
-       no unwind code has executed yet, so the unwound state must be
-       the values on entry: Rsp is the fabricated stack top, Rip the
-       planted return address there. */
+       no unwind code has executed yet, so the unwound state is the
+       caller's state just before the call: Rip is the planted
+       return address at the stack top, and Rsp is the stack top
+       plus 8 -- RtlVirtualUnwind pops the return-address slot. */
     check_unwind("bigframe prolog", big, 5,
-                 (u64)(fakestack + 8192), PLANTED_RIP, (u64)-1,
+                 (u64)(fakestack + 8200), PLANTED_RIP, (u64)-1,
                  unwind, lookup);
     check_unwind("bigframe_plain prolog", big_plain, 5,
-                 (u64)(fakestack + 8192), PLANTED_RIP, (u64)-1,
+                 (u64)(fakestack + 8200), PLANTED_RIP, (u64)-1,
                  unwind, lookup);
 
     /* 3. unwind from inside the body (prolog offset 60): the frame
-       pointer is established, so Rsp comes back from Rbp, Rbp from
-       the slot it points at, Rip from 8 bytes above that slot. */
+       pointer is established, so Rbp comes back from the slot it
+       points at, Rip from the return-address slot 8 bytes above
+       it, and Rsp from Rbp + 16 -- past both the saved-RBP slot
+       and the return-address slot. */
     check_unwind("bigframe body", big, 60,
-                 (u64)(fakestack + 4104), PLANTED_RIP, PLANTED_RBP,
+                 (u64)(fakestack + 4112), PLANTED_RIP, PLANTED_RBP,
                  unwind, lookup);
 
     if (failures) {
