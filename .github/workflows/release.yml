@@ -428,6 +428,18 @@ jobs:
           echo "win_host_test exit code: $RC" >> "$LOG"
           exit $RC
 
+      # SIMD execution evidence on this platform: the script
+      # compiles the x86-64-v3 smoke probes (cases extracted
+      # from the differential suite's generated probes) with
+      # the built tinyc.exe and with MinGW gcc, runs both
+      # natively and diffs the outputs, plus a compile-only
+      # x86-64-v4 leg. It runs under Git Bash and locates the
+      # MinGW toolchain the msys2 steps above installed.
+      - name: SIMD native smoke (PE)
+        shell: bash
+        run: |
+          bash tests/windows/run_windows_simd_smoke.sh > test-outputs/win-simd-smoke.log 2>&1
+
       - name: Stage the packaging dist from the host build
         shell: msys2 {0}
         run: |
@@ -549,14 +561,6 @@ jobs:
           distribution: temurin
           java-version: '25'
 
-      # The bundle carries snapshot copies of the kernel IO unit
-      # and the patch set; the macOS kernel is built from the
-      # current ones in the main tree.
-      - name: Sync the kernel sources into the macOS bundle
-        run: |
-          cp core/tcc_io.c core/tinyc_io.h mac-test-bundle/core/
-          cp patches/apply_patches.py mac-test-bundle/patches/
-
       - name: Build the macOS dual-form kernel (mac-test-bundle)
         run: |
           mkdir -p test-outputs
@@ -578,6 +582,15 @@ jobs:
             echo "test failures:"; grep '^FAIL: ' test-outputs/mac-tests.log; exit 1
           fi
           grep -c '^PASS: ' test-outputs/mac-tests.log
+
+      # SIMD execution evidence on this platform: the script
+      # runs the shipped bundle kernel built above on the SIMD
+      # probes as Mach-O executables, diffed against clang:
+      # NEON probe files on arm64, the x86-64-v3 smoke source
+      # on x86_64.
+      - name: SIMD native smoke (Mach-O)
+        run: |
+          bash tests/macos/run_macos_simd_smoke.sh > test-outputs/mac-simd-smoke.log 2>&1
 
       - name: Stage the packaging dist from the bundle build
         run: |

@@ -1,13 +1,14 @@
 #!/bin/bash
 # build-mac.sh - build the macOS dual-form kernel on a Mac.
 #
-# Steps: copy the pristine tinycc sources, apply the project patches,
-# build upstream's native osx TCC with clang (gives libtcc1.a and the
-# builtin headers via make install), then assemble the dual-form
-# distribution file per the design: a Mach-O executable carrying the
-# library form of the same build as an embedded section
-# (__TINYC,__dylib), plus the small extractor the glue uses to pull
-# that section back out into a cache directory for dlopen.
+# Steps: copy the repo's vendor tinycc tree (the source every
+# platform builds from), apply the project patches, build the
+# native osx TCC with clang (gives libtcc1.a and the builtin
+# headers via make install), then assemble the dual-form
+# distribution file per the design: a Mach-O executable carrying
+# the library form of the same build as an embedded section
+# (__TINYC,__dylib), plus the small extractor the glue uses to
+# pull that section back out into a cache directory for dlopen.
 #
 # Defensive by design: no set -e. Every step logs what it did; a
 # failed step is recorded and the script carries on with whatever
@@ -16,6 +17,7 @@
 
 cd "$(dirname "$0")" || exit 99
 BUNDLE=$PWD
+ROOT=$(cd "$BUNDLE/.." && pwd)
 SRC_COPY=$BUNDLE/build/src
 DIST=$BUNDLE/dist
 WORK=$BUNDLE/build
@@ -40,12 +42,20 @@ fi
 step "prepare source copy"
 rm -rf "$BUNDLE/build" "$DIST"
 mkdir -p "$SRC_COPY" "$WORK"
-cp -a "$BUNDLE/src/." "$SRC_COPY/" || fail "copy pristine sources"
-cp "$BUNDLE/core/tcc_io.c" "$BUNDLE/core/tinyc_io.h" "$SRC_COPY/" \
+# The vendor tree, copied without its build artifacts exactly as
+# build.sh copies it for the other platforms' dists.
+tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+    --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+    --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+    --exclude='./c2str.exe' --exclude='./config.h' \
+    --exclude='./config.mak' --exclude='./tccdefs_.h' \
+    -C "$ROOT/vendor-tinycc" . | tar xf - -C "$SRC_COPY" \
+    || fail "copy vendor sources"
+cp "$ROOT/core/tcc_io.c" "$ROOT/core/tinyc_io.h" "$SRC_COPY/" \
     || fail "copy IO unit into sources"
 
 step "apply project patches"
-python3 "$BUNDLE/patches/apply_patches.py" "$SRC_COPY"
+python3 "$ROOT/patches/apply_patches.py" "$SRC_COPY"
 [ $? -eq 0 ] || fail "apply_patches.py"
 
 step "configure (upstream, native osx)"
