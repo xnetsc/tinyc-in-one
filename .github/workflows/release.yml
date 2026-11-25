@@ -100,7 +100,7 @@ jobs:
       # and counts the skips otherwise).
       - name: Vendor test suite (native form)
         run: |
-          (cd vendor-tinycc && make test) > test-outputs/vendor-make-test.log 2>&1
+          (cd vendor-tinycc && ./configure && make -j4 && make test) > test-outputs/vendor-make-test.log 2>&1
 
       - name: SIMD differential suites and coverage scans (x86_64, riscv64)
         run: |
@@ -286,7 +286,7 @@ jobs:
       # tested.
       - name: Vendor test suite (native form)
         run: |
-          (cd vendor-tinycc && make test) > test-outputs/vendor-make-test.log 2>&1
+          (cd vendor-tinycc && ./configure && make -j4 && make test) > test-outputs/vendor-make-test.log 2>&1
 
       - name: SIMD differential suite and coverage scan (aarch64 NEON)
         run: |
