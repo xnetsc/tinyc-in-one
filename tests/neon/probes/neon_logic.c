@@ -1146,7 +1146,7 @@ static void case_531(void) {
     union { uint32x2_t v; unsigned int e[2]; } ua;
     union { float32x2_t v; float e[2]; } ub;
     union { float32x2_t v; float e[2]; } uc;
-    for (i = 0; i < 2; i++) ua.e[i] = dtab[(i + 531) & 7];
+    fill_bytes(ua.e, sizeof ua.e, 531);
     for (i = 0; i < 2; i++) ub.e[i] = ftab[(i + 562) & 7];
     for (i = 0; i < 2; i++) uc.e[i] = ftab[(i + 588) & 7];
     union { float32x2_t v; float e[2]; } ur;
@@ -1158,7 +1158,7 @@ static void case_532(void) {
     union { uint32x4_t v; unsigned int e[4]; } ua;
     union { float32x4_t v; float e[4]; } ub;
     union { float32x4_t v; float e[4]; } uc;
-    for (i = 0; i < 4; i++) ua.e[i] = dtab[(i + 532) & 7];
+    fill_bytes(ua.e, sizeof ua.e, 532);
     for (i = 0; i < 4; i++) ub.e[i] = ftab[(i + 563) & 7];
     for (i = 0; i < 4; i++) uc.e[i] = ftab[(i + 589) & 7];
     union { float32x4_t v; float e[4]; } ur;
@@ -1170,7 +1170,7 @@ static void case_533(void) {
     union { uint64x1_t v; unsigned long long e[1]; } ua;
     union { float64x1_t v; double e[1]; } ub;
     union { float64x1_t v; double e[1]; } uc;
-    for (i = 0; i < 1; i++) ua.e[i] = dtab[(i + 533) & 7];
+    fill_bytes(ua.e, sizeof ua.e, 533);
     for (i = 0; i < 1; i++) ub.e[i] = dtab[(i + 564) & 7];
     for (i = 0; i < 1; i++) uc.e[i] = dtab[(i + 590) & 7];
     union { float64x1_t v; double e[1]; } ur;
@@ -1182,7 +1182,7 @@ static void case_534(void) {
     union { uint64x2_t v; unsigned long long e[2]; } ua;
     union { float64x2_t v; double e[2]; } ub;
     union { float64x2_t v; double e[2]; } uc;
-    for (i = 0; i < 2; i++) ua.e[i] = dtab[(i + 534) & 7];
+    fill_bytes(ua.e, sizeof ua.e, 534);
     for (i = 0; i < 2; i++) ub.e[i] = dtab[(i + 565) & 7];
     for (i = 0; i < 2; i++) uc.e[i] = dtab[(i + 591) & 7];
     union { float64x2_t v; double e[2]; } ur;

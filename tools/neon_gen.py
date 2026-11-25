@@ -763,7 +763,13 @@ def gen_case(row, name, call, extra_decls="", refname=""):
                      % (ct, cet, ctot // ces))
     if extra_decls:
         lines.append(extra_decls)
-    lines.append("    " + fill_code("ua", aet, an, idx, kl == "f"))
+    # the float tables may only fill an operand that is itself a
+    # float vector: assigning their negative entries to an unsigned
+    # element (the BSL mask in a float case) is an out-of-range
+    # conversion, which is undefined and constant-folders turn into
+    # poison, so such operands take the byte fill instead
+    lines.append("    " + fill_code("ua", aet, an, idx,
+                                    aet in ("float", "double")))
     if entry["fam"] in ("op2", "op3", "shuf"):
         lines.append("    " + fill_code("ub", ELEM_C[(entry.get("bkind", kl),
                                         row["bsh"][0])],
