@@ -9894,6 +9894,8 @@ static void case_434(void) {
         for (i = 0; i < 2; i++) e_[i] = (float)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_cvtepi64_ps"); }
@@ -9912,11 +9914,15 @@ static void case_435(void) {
         for (i = 0; i < 2; i++) e_[i] = (float)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       { float base_[4];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 4; i++)
             e_[i] = ((k_ >> i) & 1) ? base_[i] : (float)0;
       }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_maskz_cvtepi64_ps"); }
@@ -9939,11 +9945,15 @@ static void case_436(void) {
         for (i = 0; i < 2; i++) e_[i] = (float)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       { float base_[4];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 4; i++)
             e_[i] = ((k_ >> i) & 1) ? base_[i] : src_[i];
       }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_mask_cvtepi64_ps"); }
@@ -10279,6 +10289,8 @@ static void case_452(void) {
             e_[i] = (float)(unsigned long long)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_cvtepu64_ps"); }
@@ -10298,11 +10310,15 @@ static void case_453(void) {
             e_[i] = (float)(unsigned long long)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       { float base_[4];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 4; i++)
             e_[i] = ((k_ >> i) & 1) ? base_[i] : (float)0;
       }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_maskz_cvtepu64_ps"); }
@@ -10326,11 +10342,15 @@ static void case_454(void) {
             e_[i] = (float)(unsigned long long)av[i];
         for (j_ = 2; j_ < 16 * 8 / 32; j_++)
             e_[j_] = 0; }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       { float base_[4];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 4; i++)
             e_[i] = ((k_ >> i) & 1) ? base_[i] : src_[i];
       }
+      for (i = 2; i < 4; i++)
+          e_[i] = 0;
       for (i = 0; i < 4; i++)
           if (memcmp(&e_[i], &ur.e[i], sizeof e_[i]))
               mismatch("_mm_mask_cvtepu64_ps"); }

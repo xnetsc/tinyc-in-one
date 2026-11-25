@@ -878,8 +878,15 @@ def macro_for(e, idx, name, kind, es, tot, ei=None, midx=None,
             oes = es
         else:
             oes = e.get("oes", es)
-        rt = ELEM_C[("f", oes)] if "OFL" in e.get("flags", ()) \
-            else ELEM_C[("s", oes)]
+        if "OFL" in e.get("flags", ()):
+            rt = ELEM_C[("f", oes)]
+        elif name.endswith(("_u32", "_u64")):
+            # the _u32 / _u64 scalar converts return an
+            # unsigned integer; a signed result type would
+            # sign-extend the value whenever it is widened
+            rt = ELEM_C[("u", oes)]
+        else:
+            rt = ELEM_C[("s", oes)]
     if e.get("kind") in ("CVT", "CVT2"):
         rt = vec_type_name(kind, e.get("oes", es),
                            e.get("otot") or tot)
@@ -2493,6 +2500,7 @@ def gen_probes(shipped, shipped_m, midx, idx):
                         if e.get("refblock") in (
                                 "cvt_rint", "cvt_trunc",
                                 "cvt_rintu", "cvt_truncu",
+                                "cvtq2f", "cvtq2fu",
                                 "cvt_f2f", "cvtps2ph",
                                 "pmov", "pmovs", "pmovus") and rlanes > lanes:
                             # a narrowing convert leaves the
@@ -2535,6 +2543,7 @@ def gen_probes(shipped, shipped_m, midx, idx):
                         if masked and e.get("refblock") in (
                                 "cvt_rint", "cvt_trunc",
                                 "cvt_rintu", "cvt_truncu",
+                                "cvtq2f", "cvtq2fu",
                                 "cvt_f2f", "cvtps2ph",
                                 "pmov", "pmovs", "pmovus") and rlanes > lanes:
                             # the lanes past the converted
