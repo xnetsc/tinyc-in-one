@@ -789,7 +789,7 @@ for _op, _insn, _tp, _oes, _names in (
         ("CVTTSD2SI", "cvttsd2si", "f8", 8,
          ["_mm_cvttsd_si64", "_mm_cvttsd_si64x", "_mm_cvttsd_i64"])):
     _add("op1", _op, None, _tp, (16,),
-         ["%s {G}, {A}" % _insn],
+         ["%s {%s}, {A}" % (_insn, "Gd" if _oes == 4 else "G")],
          feat="SSE2" if _tp == "f8" else "SSE", kind="SCALAR",
          oes=_oes, style="op1", area="cvt",
          names=[(n, "f", int(_tp[1]), 16) for n in _names],
@@ -1866,6 +1866,7 @@ for _op, _mn, _rb in (("MIN", "min", "fminss"),
         _add("op2i", _op + "R", None, "f%d" % _es, (16,),
              ["v%s{sf} {D}, {A}, {B} {sae}" % _mn],
              feat="AVX512F", style="op2i", imm=(0, 15),
+             flags=("EVSAE",),
              area="float", refblock=_rb, m=True,
              ssmask=True,
              names=[("_mm_%s_round_%s" % (_mn, _sfx),
@@ -2578,7 +2579,7 @@ for _op, _tpl, _rb in (
     _add("op1i", _op, None, "f8", (64,), [_tpl],
          feat="AVX512DQ" if _op.endswith("QQ") else "AVX512F",
          kind="CVT", oes=_oes, style="op1i",
-         imm=(0, 15), evrnd=True, area="cvt", refblock=_rb,
+         imm=(0, 15), flags=("EVSAE",), area="cvt", refblock=_rb,
          m=True,
          names=[("_mm512_cvtt_roundpd_%s"
                  % ("epi64" if _op.endswith("QQ") and
@@ -2599,19 +2600,19 @@ for _op, _mn in (("OR", "vpor"), ("XOR", "vpxor")):
                 for _pre, _tot in (("_mm", 16), ("_mm256", 32))],
          ref="a[i] | b[i]" if _op == "OR" else "a[i] ^ b[i]")
 for _op, _tpl, _rb, _oes, _otot in (
-        ("CVTTRPS2DQ", "vcvtps2dq {D}, {A}", "cvt_trunc", 4,
+        ("CVTTRPS2DQ", "vcvttps2dq {D}, {A}", "cvt_trunc", 4,
          None),
-        ("CVTTRPS2UDQ", "vcvtps2udq {D}, {A}", "cvt_truncu", 4,
+        ("CVTTRPS2UDQ", "vcvttps2udq {D}, {A}", "cvt_truncu", 4,
          None),
-        ("CVTTRPS2QQ", "vcvtps2qq {D}, {A}", "cvt_truncw", 8,
+        ("CVTTRPS2QQ", "vcvttps2qq {D}, {A}", "cvt_truncw", 8,
          64),
-        ("CVTTRPS2UQQ", "vcvtps2uqq {D}, {A}", "cvt_truncuw", 8,
+        ("CVTTRPS2UQQ", "vcvttps2uqq {D}, {A}", "cvt_truncuw", 8,
          64)):
     _kw = dict(otot=_otot) if _otot is not None else {}
     _add("op1i", _op, None, "f4", (32 if _otot else 64,),
          [_tpl], feat="AVX512DQ" if _otot else "AVX512F",
          kind="CVT", oes=_oes, style="op1i", imm=(0, 15),
-         evrnd=True, area="cvt", refblock=_rb, m=True,
+         flags=("EVSAE",), area="cvt", refblock=_rb, m=True,
          names=[("_mm512_cvtt_roundps_%s"
                  % (("epu64" if "U" in _op else "epi64") if _otot
                     else ("epu32" if "U" in _op else "epi32")),
@@ -2824,16 +2825,19 @@ for _op, _insn, _tp, _nm in (
         ("CVTTSD2USI", "vcvttsd2usi", "f8", "cvttsd")):
     for _oes in (4, 8):
         _add("op1", _op, None, _tp, (16,),
-             ["%s {G}, {A}" % _insn],
+             ["%s {%s}, {A}" % (_insn, "Gd" if _oes == 4 else "G")],
              feat="AVX512F", kind="SCALAR", oes=_oes,
              style="op1", area="cvt", refblock="none",
              names=[("_mm_%s_u%d" % (_nm, _oes * 8),
                      "f", int(_tp[1]), 16)])
         _add("op1i", _op + "R", None, _tp, (16,),
-             ["%s {G}, {A} {sae}" % _insn]
+             ["%s {%s}, {A} {sae}"
+              % (_insn, "Gd" if _oes == 4 else "G")]
              if _insn.startswith("vcvtt") else
-             ["%s {G}, {A} {rn-sae}" % _insn],
+             ["%s {%s}, {A} {rn-sae}"
+              % (_insn, "Gd" if _oes == 4 else "G")],
              feat="AVX512F", kind="SCALAR", oes=_oes,
+             flags=("EVSAE",) if _insn.startswith("vcvtt") else (),
              style="op1i", imm=(0, 15),
              evrnd=not _insn.startswith("vcvtt"), area="cvt",
              refblock="none",
@@ -2852,9 +2856,12 @@ for _op, _insn, _tp, _nm in (
     _tt = _insn.startswith("vcvtt")
     for _oes in (4, 8):
         _add("op1i", _op, None, _tp, (16,),
-             ["%s {G}, {A} {sae}" % _insn] if _tt else
-             ["%s {G}, {A} {rn-sae}" % _insn],
+             ["%s {%s}, {A} {sae}"
+              % (_insn, "Gd" if _oes == 4 else "G")] if _tt else
+             ["%s {%s}, {A} {rn-sae}"
+              % (_insn, "Gd" if _oes == 4 else "G")],
              feat="AVX512F", kind="SCALAR", oes=_oes,
+             flags=("EVSAE",) if _tt else (),
              style="op1i", imm=(0, 15),
              evrnd=not _tt, area="cvt",
              refblock="none",

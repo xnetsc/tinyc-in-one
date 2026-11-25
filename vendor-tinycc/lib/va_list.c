@@ -7,7 +7,7 @@ extern void abort(void);
 
 /* This should be in sync with our include/stdarg.h */
 enum __va_arg_type {
-    __va_gen_reg, __va_float_reg, __va_stack
+    __va_gen_reg, __va_float_reg, __va_stack, __va_vec_reg
 };
 
 /* GCC compatible definition of va_list. */
@@ -50,6 +50,15 @@ void *__va_arg(__builtin_va_list ap,
                 ap->fp_offset += 16;
                 return ap->reg_save_area + ap->fp_offset - 32;
             }
+        }
+        goto use_overflow_area;
+
+    case __va_vec_reg:
+        /* a vector of up to 16 bytes sits in one full register
+           save area slot */
+        if (ap->fp_offset < 128 + 48) {
+            ap->fp_offset += 16;
+            return ap->reg_save_area + ap->fp_offset - 16;
         }
         goto use_overflow_area;
 

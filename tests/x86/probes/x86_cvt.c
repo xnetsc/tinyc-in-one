@@ -18259,11 +18259,8 @@ static void case_782(void) {
     print_hex(782, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epi32"); }
@@ -18277,11 +18274,8 @@ static void case_783(void) {
     print_hex(783, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epi32"); }
@@ -18296,11 +18290,8 @@ static void case_784(void) {
     print_hex(784, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18320,11 +18311,8 @@ static void case_785(void) {
     print_hex(785, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18348,11 +18336,8 @@ static void case_786(void) {
       memcpy(av, ua.e, sizeof av);
       int src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18376,11 +18361,8 @@ static void case_787(void) {
       memcpy(av, ua.e, sizeof av);
       int src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18399,11 +18381,8 @@ static void case_788(void) {
     print_hex(788, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epi64"); }
@@ -18417,11 +18396,8 @@ static void case_789(void) {
     print_hex(789, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epi64"); }
@@ -18436,11 +18412,8 @@ static void case_790(void) {
     print_hex(790, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18460,11 +18433,8 @@ static void case_791(void) {
     print_hex(791, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18488,11 +18458,8 @@ static void case_792(void) {
       memcpy(av, ua.e, sizeof av);
       long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18516,11 +18483,8 @@ static void case_793(void) {
       memcpy(av, ua.e, sizeof av);
       long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)av[i];
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18539,16 +18503,13 @@ static void case_794(void) {
     print_hex(794, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epu32"); }
@@ -18562,16 +18523,13 @@ static void case_795(void) {
     print_hex(795, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epu32"); }
@@ -18586,16 +18544,13 @@ static void case_796(void) {
     print_hex(796, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18615,16 +18570,13 @@ static void case_797(void) {
     print_hex(797, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned int e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18648,16 +18600,13 @@ static void case_798(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned int src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18681,16 +18630,13 @@ static void case_799(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned int src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18709,16 +18655,13 @@ static void case_800(void) {
     print_hex(800, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epu64"); }
@@ -18732,16 +18675,13 @@ static void case_801(void) {
     print_hex(801, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundpd_epu64"); }
@@ -18756,16 +18696,13 @@ static void case_802(void) {
     print_hex(802, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18785,16 +18722,13 @@ static void case_803(void) {
     print_hex(803, &ur, sizeof ur);
     { double av[8]; double bv[8]; double cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18818,16 +18752,13 @@ static void case_804(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18851,16 +18782,13 @@ static void case_805(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -18879,11 +18807,8 @@ static void case_806(void) {
     print_hex(806, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 16; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epi32"); }
@@ -18897,11 +18822,8 @@ static void case_807(void) {
     print_hex(807, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 16; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epi32"); }
@@ -18916,11 +18838,8 @@ static void case_808(void) {
     print_hex(808, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -18940,11 +18859,8 @@ static void case_809(void) {
     print_hex(809, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -18968,11 +18884,8 @@ static void case_810(void) {
       memcpy(av, ua.e, sizeof av);
       int src_[16];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -18996,11 +18909,8 @@ static void case_811(void) {
       memcpy(av, ua.e, sizeof av);
       int src_[16];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++)
+      for (i = 0; i < 64 * 8 / 32; i++)
           ((int *)e_)[i] = (int)av[i];
-        fesetround(FE_TONEAREST); }
       { int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -19019,16 +18929,13 @@ static void case_812(void) {
     print_hex(812, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; unsigned int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 16; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epu32"); }
@@ -19042,16 +18949,13 @@ static void case_813(void) {
     print_hex(813, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; unsigned int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 16; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epu32"); }
@@ -19066,16 +18970,13 @@ static void case_814(void) {
     print_hex(814, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; unsigned int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -19095,16 +18996,13 @@ static void case_815(void) {
     print_hex(815, &ur, sizeof ur);
     { float av[16]; float bv[16]; float cv[16]; unsigned int e_[16];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -19128,16 +19026,13 @@ static void case_816(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned int src_[16];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -19161,16 +19056,13 @@ static void case_817(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned int src_[16];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 32; i++) {
+      for (i = 0; i < 64 * 8 / 32; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned int *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (32 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned int)-1 : (unsigned int)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned int base_[16];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 16; i++)
@@ -19189,11 +19081,8 @@ static void case_818(void) {
     print_hex(818, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epi64"); }
@@ -19207,11 +19096,8 @@ static void case_819(void) {
     print_hex(819, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epi64"); }
@@ -19226,11 +19112,8 @@ static void case_820(void) {
     print_hex(820, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19250,11 +19133,8 @@ static void case_821(void) {
     print_hex(821, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19278,11 +19158,8 @@ static void case_822(void) {
       memcpy(av, ua.e, sizeof av);
       long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19306,11 +19183,8 @@ static void case_823(void) {
       memcpy(av, ua.e, sizeof av);
       long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++)
+      for (i = 0; i < 64 * 8 / 64; i++)
           ((long long *)e_)[i] = (long long)trunc((double)av[i]);
-        fesetround(FE_TONEAREST); }
       { long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19329,16 +19203,13 @@ static void case_824(void) {
     print_hex(824, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epu64"); }
@@ -19352,16 +19223,13 @@ static void case_825(void) {
     print_hex(825, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       for (i = 0; i < 8; i++)
           if (e_[i] != ur.e[i])
               mismatch("_mm512_cvtt_roundps_epu64"); }
@@ -19376,16 +19244,13 @@ static void case_826(void) {
     print_hex(826, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19405,16 +19270,13 @@ static void case_827(void) {
     print_hex(827, &ur, sizeof ur);
     { float av[8]; float bv[8]; float cv[8]; unsigned long long e_[8];
       memcpy(av, ua.e, sizeof av);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19438,16 +19300,13 @@ static void case_828(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(4 & 4)) fesetround(rm_[4 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)
@@ -19471,16 +19330,13 @@ static void case_829(void) {
       memcpy(av, ua.e, sizeof av);
       unsigned long long src_[8];
       memcpy(src_, us.e, sizeof src_);
-      { static const int rm_[4] = { FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO };
-        if (!(8 & 4)) fesetround(rm_[8 & 3]);
-        for (i = 0; i < 64 * 8 / 64; i++) {
+      for (i = 0; i < 64 * 8 / 64; i++) {
           double d_ = trunc((double)av[i]);
           ((unsigned long long *)e_)[i] = (d_ != d_ || d_ < 0 ||
               d_ >= (64 == 64 ?
               18446744073709551616.0 : 4294967296.0)) ?
               (unsigned long long)-1 : (unsigned long long)d_;
       }
-        fesetround(FE_TONEAREST); }
       { unsigned long long base_[8];
         memcpy(base_, e_, sizeof base_);
         for (i = 0; i < 8; i++)

@@ -51,7 +51,7 @@ FORM_C = {n: "XVF_" + n for n in
 FLAG_C = {"SCALAR2": "XVFL_SCALAR2", "EVRND": "XVFL_EVRND",
           "OFL": "XVFL_OFL", "KSEL": "XVFL_KSEL",
           "COUNT": "XVFL_COUNT", "SCALAR1": "XVFL_SCALAR1",
-          "PHSAE": "XVFL_PHSAE"}
+          "PHSAE": "XVFL_PHSAE", "EVSAE": "XVFL_EVSAE"}
 
 # every table family, in emission order; the masked families
 # carry the writemask forms: a trailing 2 is the merging
@@ -1116,13 +1116,22 @@ REFBLOCKS = {
         "}",
     "cmpp":
         "for (i = 0; i < LANES; i++) {\n"
-        "    int p_ = ({IMM} == 0) ? (av[i] == bv[i]) :\n"
-        "             ({IMM} == 1) ? (av[i] < bv[i]) :\n"
-        "             ({IMM} == 2) ? (av[i] <= bv[i]) :\n"
-        "             ({IMM} == 4) ? (av[i] != bv[i]) :\n"
-        "             ({IMM} == 5) ? !(av[i] < bv[i]) :\n"
-        "             ({IMM} == 6) ? !(av[i] <= bv[i]) :\n"
-        "             ({IMM} == 7) ? 1 : 0;\n"
+        "    int un_ = isnan(av[i]) || isnan(bv[i]);\n"
+        "    int p_ = ({IMM} == 0 || {IMM} == 16) ? (av[i] == bv[i]) :\n"
+        "             ({IMM} == 8 || {IMM} == 24) ? (un_ || av[i] == bv[i]) :\n"
+        "             ({IMM} == 1 || {IMM} == 17) ? (av[i] < bv[i]) :\n"
+        "             ({IMM} == 2 || {IMM} == 18) ? (av[i] <= bv[i]) :\n"
+        "             ({IMM} == 3 || {IMM} == 19) ? un_ :\n"
+        "             ({IMM} == 4 || {IMM} == 20) ? (av[i] != bv[i]) :\n"
+        "             ({IMM} == 12 || {IMM} == 28) ? (!un_ && av[i] != bv[i]) :\n"
+        "             ({IMM} == 5 || {IMM} == 21) ? !(av[i] < bv[i]) :\n"
+        "             ({IMM} == 6 || {IMM} == 22) ? !(av[i] <= bv[i]) :\n"
+        "             ({IMM} == 7 || {IMM} == 23) ? !un_ :\n"
+        "             ({IMM} == 9 || {IMM} == 25) ? !(av[i] >= bv[i]) :\n"
+        "             ({IMM} == 10 || {IMM} == 26) ? !(av[i] > bv[i]) :\n"
+        "             ({IMM} == 13 || {IMM} == 29) ? (av[i] >= bv[i]) :\n"
+        "             ({IMM} == 14 || {IMM} == 30) ? (av[i] > bv[i]) :\n"
+        "             ({IMM} == 15 || {IMM} == 31) ? 1 : 0;\n"
         "    ((UELEM *)e_)[i] = p_ ? (UELEM)-1 : (UELEM)0;\n"
         "}",
     "fsqrt":
@@ -1801,7 +1810,7 @@ REFBLOCKS = {
         "    int c_;\n"
         "    switch ({IMM}) {\n"
         "    case 0: case 16: case 8: case 24:\n"
-        "        c_ = un_ ? ({IMM} >= 8) : av[i] == bv[i]; break;\n"
+        "        c_ = un_ ? ({IMM} == 8 || {IMM} == 24) : av[i] == bv[i]; break;\n"
         "    case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;\n"
         "    case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;\n"
         "    case 3: case 19: c_ = un_; break;\n"
@@ -1840,13 +1849,22 @@ REFBLOCKS = {
         "    if ({IMM} & cl_) want_ |= 1ULL << i; }",
     "cmpss":
         "for (i = 0; i < LANES; i++) {\n"
-        "    int p_ = ({IMM} == 0) ? (av[0] == bv[0]) :\n"
-        "             ({IMM} == 1) ? (av[0] < bv[0]) :\n"
-        "             ({IMM} == 2) ? (av[0] <= bv[0]) :\n"
-        "             ({IMM} == 4) ? (av[0] != bv[0]) :\n"
-        "             ({IMM} == 5) ? !(av[0] < bv[0]) :\n"
-        "             ({IMM} == 6) ? !(av[0] <= bv[0]) :\n"
-        "             ({IMM} == 7) ? 1 : 0;\n"
+        "    int un_ = isnan(av[0]) || isnan(bv[0]);\n"
+        "    int p_ = ({IMM} == 0 || {IMM} == 16) ? (av[0] == bv[0]) :\n"
+        "             ({IMM} == 8 || {IMM} == 24) ? (un_ || av[0] == bv[0]) :\n"
+        "             ({IMM} == 1 || {IMM} == 17) ? (av[0] < bv[0]) :\n"
+        "             ({IMM} == 2 || {IMM} == 18) ? (av[0] <= bv[0]) :\n"
+        "             ({IMM} == 3 || {IMM} == 19) ? un_ :\n"
+        "             ({IMM} == 4 || {IMM} == 20) ? (av[0] != bv[0]) :\n"
+        "             ({IMM} == 12 || {IMM} == 28) ? (!un_ && av[0] != bv[0]) :\n"
+        "             ({IMM} == 5 || {IMM} == 21) ? !(av[0] < bv[0]) :\n"
+        "             ({IMM} == 6 || {IMM} == 22) ? !(av[0] <= bv[0]) :\n"
+        "             ({IMM} == 7 || {IMM} == 23) ? !un_ :\n"
+        "             ({IMM} == 9 || {IMM} == 25) ? !(av[0] >= bv[0]) :\n"
+        "             ({IMM} == 10 || {IMM} == 26) ? !(av[0] > bv[0]) :\n"
+        "             ({IMM} == 13 || {IMM} == 29) ? (av[0] >= bv[0]) :\n"
+        "             ({IMM} == 14 || {IMM} == 30) ? (av[0] > bv[0]) :\n"
+        "             ({IMM} == 15 || {IMM} == 31) ? 1 : 0;\n"
         "    if (i == 0) ((UELEM *)e_)[0] = p_ ? (UELEM)-1 : (UELEM)0;\n"
         "    else e_[i] = av[i]; }",
     "mkfcmp":
@@ -1856,7 +1874,7 @@ REFBLOCKS = {
         "    int c_;\n"
         "    switch ({IMM}) {\n"
         "    case 0: case 16: case 8: case 24:\n"
-        "        c_ = un_ ? ({IMM} >= 8) : av[i] == bv[i]; break;\n"
+        "        c_ = un_ ? ({IMM} == 8 || {IMM} == 24) : av[i] == bv[i]; break;\n"
         "    case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;\n"
         "    case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;\n"
         "    case 3: case 19: c_ = un_; break;\n"

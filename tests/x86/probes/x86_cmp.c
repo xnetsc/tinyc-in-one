@@ -302,13 +302,22 @@ static void case_16(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (0 == 0) ? (av[i] == bv[i]) :
-                   (0 == 1) ? (av[i] < bv[i]) :
-                   (0 == 2) ? (av[i] <= bv[i]) :
-                   (0 == 4) ? (av[i] != bv[i]) :
-                   (0 == 5) ? !(av[i] < bv[i]) :
-                   (0 == 6) ? !(av[i] <= bv[i]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[i] == bv[i]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[i] == bv[i]) :
+                   (0 == 1 || 0 == 17) ? (av[i] < bv[i]) :
+                   (0 == 2 || 0 == 18) ? (av[i] <= bv[i]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[i] != bv[i]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (0 == 5 || 0 == 21) ? !(av[i] < bv[i]) :
+                   (0 == 6 || 0 == 22) ? !(av[i] <= bv[i]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[i] >= bv[i]) :
+                   (0 == 10 || 0 == 26) ? !(av[i] > bv[i]) :
+                   (0 == 13 || 0 == 29) ? (av[i] >= bv[i]) :
+                   (0 == 14 || 0 == 30) ? (av[i] > bv[i]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -328,13 +337,22 @@ static void case_17(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (1 == 0) ? (av[i] == bv[i]) :
-                   (1 == 1) ? (av[i] < bv[i]) :
-                   (1 == 2) ? (av[i] <= bv[i]) :
-                   (1 == 4) ? (av[i] != bv[i]) :
-                   (1 == 5) ? !(av[i] < bv[i]) :
-                   (1 == 6) ? !(av[i] <= bv[i]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[i] == bv[i]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[i] == bv[i]) :
+                   (1 == 1 || 1 == 17) ? (av[i] < bv[i]) :
+                   (1 == 2 || 1 == 18) ? (av[i] <= bv[i]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[i] != bv[i]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (1 == 5 || 1 == 21) ? !(av[i] < bv[i]) :
+                   (1 == 6 || 1 == 22) ? !(av[i] <= bv[i]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[i] >= bv[i]) :
+                   (1 == 10 || 1 == 26) ? !(av[i] > bv[i]) :
+                   (1 == 13 || 1 == 29) ? (av[i] >= bv[i]) :
+                   (1 == 14 || 1 == 30) ? (av[i] > bv[i]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -354,13 +372,22 @@ static void case_18(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (2 == 0) ? (av[i] == bv[i]) :
-                   (2 == 1) ? (av[i] < bv[i]) :
-                   (2 == 2) ? (av[i] <= bv[i]) :
-                   (2 == 4) ? (av[i] != bv[i]) :
-                   (2 == 5) ? !(av[i] < bv[i]) :
-                   (2 == 6) ? !(av[i] <= bv[i]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[i] == bv[i]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[i] == bv[i]) :
+                   (2 == 1 || 2 == 17) ? (av[i] < bv[i]) :
+                   (2 == 2 || 2 == 18) ? (av[i] <= bv[i]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[i] != bv[i]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (2 == 5 || 2 == 21) ? !(av[i] < bv[i]) :
+                   (2 == 6 || 2 == 22) ? !(av[i] <= bv[i]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[i] >= bv[i]) :
+                   (2 == 10 || 2 == 26) ? !(av[i] > bv[i]) :
+                   (2 == 13 || 2 == 29) ? (av[i] >= bv[i]) :
+                   (2 == 14 || 2 == 30) ? (av[i] > bv[i]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -380,13 +407,22 @@ static void case_19(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (4 == 0) ? (av[i] == bv[i]) :
-                   (4 == 1) ? (av[i] < bv[i]) :
-                   (4 == 2) ? (av[i] <= bv[i]) :
-                   (4 == 4) ? (av[i] != bv[i]) :
-                   (4 == 5) ? !(av[i] < bv[i]) :
-                   (4 == 6) ? !(av[i] <= bv[i]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[i] == bv[i]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[i] == bv[i]) :
+                   (4 == 1 || 4 == 17) ? (av[i] < bv[i]) :
+                   (4 == 2 || 4 == 18) ? (av[i] <= bv[i]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[i] != bv[i]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (4 == 5 || 4 == 21) ? !(av[i] < bv[i]) :
+                   (4 == 6 || 4 == 22) ? !(av[i] <= bv[i]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[i] >= bv[i]) :
+                   (4 == 10 || 4 == 26) ? !(av[i] > bv[i]) :
+                   (4 == 13 || 4 == 29) ? (av[i] >= bv[i]) :
+                   (4 == 14 || 4 == 30) ? (av[i] > bv[i]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -406,13 +442,22 @@ static void case_20(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (5 == 0) ? (av[i] == bv[i]) :
-                   (5 == 1) ? (av[i] < bv[i]) :
-                   (5 == 2) ? (av[i] <= bv[i]) :
-                   (5 == 4) ? (av[i] != bv[i]) :
-                   (5 == 5) ? !(av[i] < bv[i]) :
-                   (5 == 6) ? !(av[i] <= bv[i]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[i] == bv[i]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[i] == bv[i]) :
+                   (5 == 1 || 5 == 17) ? (av[i] < bv[i]) :
+                   (5 == 2 || 5 == 18) ? (av[i] <= bv[i]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[i] != bv[i]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (5 == 5 || 5 == 21) ? !(av[i] < bv[i]) :
+                   (5 == 6 || 5 == 22) ? !(av[i] <= bv[i]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[i] >= bv[i]) :
+                   (5 == 10 || 5 == 26) ? !(av[i] > bv[i]) :
+                   (5 == 13 || 5 == 29) ? (av[i] >= bv[i]) :
+                   (5 == 14 || 5 == 30) ? (av[i] > bv[i]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -432,13 +477,22 @@ static void case_21(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (6 == 0) ? (av[i] == bv[i]) :
-                   (6 == 1) ? (av[i] < bv[i]) :
-                   (6 == 2) ? (av[i] <= bv[i]) :
-                   (6 == 4) ? (av[i] != bv[i]) :
-                   (6 == 5) ? !(av[i] < bv[i]) :
-                   (6 == 6) ? !(av[i] <= bv[i]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[i] == bv[i]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[i] == bv[i]) :
+                   (6 == 1 || 6 == 17) ? (av[i] < bv[i]) :
+                   (6 == 2 || 6 == 18) ? (av[i] <= bv[i]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[i] != bv[i]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (6 == 5 || 6 == 21) ? !(av[i] < bv[i]) :
+                   (6 == 6 || 6 == 22) ? !(av[i] <= bv[i]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[i] >= bv[i]) :
+                   (6 == 10 || 6 == 26) ? !(av[i] > bv[i]) :
+                   (6 == 13 || 6 == 29) ? (av[i] >= bv[i]) :
+                   (6 == 14 || 6 == 30) ? (av[i] > bv[i]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -458,13 +512,22 @@ static void case_22(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (7 == 0) ? (av[i] == bv[i]) :
-                   (7 == 1) ? (av[i] < bv[i]) :
-                   (7 == 2) ? (av[i] <= bv[i]) :
-                   (7 == 4) ? (av[i] != bv[i]) :
-                   (7 == 5) ? !(av[i] < bv[i]) :
-                   (7 == 6) ? !(av[i] <= bv[i]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[i] == bv[i]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[i] == bv[i]) :
+                   (7 == 1 || 7 == 17) ? (av[i] < bv[i]) :
+                   (7 == 2 || 7 == 18) ? (av[i] <= bv[i]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[i] != bv[i]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (7 == 5 || 7 == 21) ? !(av[i] < bv[i]) :
+                   (7 == 6 || 7 == 22) ? !(av[i] <= bv[i]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[i] >= bv[i]) :
+                   (7 == 10 || 7 == 26) ? !(av[i] > bv[i]) :
+                   (7 == 13 || 7 == 29) ? (av[i] >= bv[i]) :
+                   (7 == 14 || 7 == 30) ? (av[i] > bv[i]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -484,13 +547,22 @@ static void case_23(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (0 == 0) ? (av[i] == bv[i]) :
-                   (0 == 1) ? (av[i] < bv[i]) :
-                   (0 == 2) ? (av[i] <= bv[i]) :
-                   (0 == 4) ? (av[i] != bv[i]) :
-                   (0 == 5) ? !(av[i] < bv[i]) :
-                   (0 == 6) ? !(av[i] <= bv[i]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[i] == bv[i]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[i] == bv[i]) :
+                   (0 == 1 || 0 == 17) ? (av[i] < bv[i]) :
+                   (0 == 2 || 0 == 18) ? (av[i] <= bv[i]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[i] != bv[i]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (0 == 5 || 0 == 21) ? !(av[i] < bv[i]) :
+                   (0 == 6 || 0 == 22) ? !(av[i] <= bv[i]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[i] >= bv[i]) :
+                   (0 == 10 || 0 == 26) ? !(av[i] > bv[i]) :
+                   (0 == 13 || 0 == 29) ? (av[i] >= bv[i]) :
+                   (0 == 14 || 0 == 30) ? (av[i] > bv[i]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -510,13 +582,22 @@ static void case_24(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (1 == 0) ? (av[i] == bv[i]) :
-                   (1 == 1) ? (av[i] < bv[i]) :
-                   (1 == 2) ? (av[i] <= bv[i]) :
-                   (1 == 4) ? (av[i] != bv[i]) :
-                   (1 == 5) ? !(av[i] < bv[i]) :
-                   (1 == 6) ? !(av[i] <= bv[i]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[i] == bv[i]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[i] == bv[i]) :
+                   (1 == 1 || 1 == 17) ? (av[i] < bv[i]) :
+                   (1 == 2 || 1 == 18) ? (av[i] <= bv[i]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[i] != bv[i]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (1 == 5 || 1 == 21) ? !(av[i] < bv[i]) :
+                   (1 == 6 || 1 == 22) ? !(av[i] <= bv[i]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[i] >= bv[i]) :
+                   (1 == 10 || 1 == 26) ? !(av[i] > bv[i]) :
+                   (1 == 13 || 1 == 29) ? (av[i] >= bv[i]) :
+                   (1 == 14 || 1 == 30) ? (av[i] > bv[i]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -536,13 +617,22 @@ static void case_25(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (2 == 0) ? (av[i] == bv[i]) :
-                   (2 == 1) ? (av[i] < bv[i]) :
-                   (2 == 2) ? (av[i] <= bv[i]) :
-                   (2 == 4) ? (av[i] != bv[i]) :
-                   (2 == 5) ? !(av[i] < bv[i]) :
-                   (2 == 6) ? !(av[i] <= bv[i]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[i] == bv[i]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[i] == bv[i]) :
+                   (2 == 1 || 2 == 17) ? (av[i] < bv[i]) :
+                   (2 == 2 || 2 == 18) ? (av[i] <= bv[i]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[i] != bv[i]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (2 == 5 || 2 == 21) ? !(av[i] < bv[i]) :
+                   (2 == 6 || 2 == 22) ? !(av[i] <= bv[i]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[i] >= bv[i]) :
+                   (2 == 10 || 2 == 26) ? !(av[i] > bv[i]) :
+                   (2 == 13 || 2 == 29) ? (av[i] >= bv[i]) :
+                   (2 == 14 || 2 == 30) ? (av[i] > bv[i]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -562,13 +652,22 @@ static void case_26(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (4 == 0) ? (av[i] == bv[i]) :
-                   (4 == 1) ? (av[i] < bv[i]) :
-                   (4 == 2) ? (av[i] <= bv[i]) :
-                   (4 == 4) ? (av[i] != bv[i]) :
-                   (4 == 5) ? !(av[i] < bv[i]) :
-                   (4 == 6) ? !(av[i] <= bv[i]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[i] == bv[i]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[i] == bv[i]) :
+                   (4 == 1 || 4 == 17) ? (av[i] < bv[i]) :
+                   (4 == 2 || 4 == 18) ? (av[i] <= bv[i]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[i] != bv[i]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (4 == 5 || 4 == 21) ? !(av[i] < bv[i]) :
+                   (4 == 6 || 4 == 22) ? !(av[i] <= bv[i]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[i] >= bv[i]) :
+                   (4 == 10 || 4 == 26) ? !(av[i] > bv[i]) :
+                   (4 == 13 || 4 == 29) ? (av[i] >= bv[i]) :
+                   (4 == 14 || 4 == 30) ? (av[i] > bv[i]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -588,13 +687,22 @@ static void case_27(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (5 == 0) ? (av[i] == bv[i]) :
-                   (5 == 1) ? (av[i] < bv[i]) :
-                   (5 == 2) ? (av[i] <= bv[i]) :
-                   (5 == 4) ? (av[i] != bv[i]) :
-                   (5 == 5) ? !(av[i] < bv[i]) :
-                   (5 == 6) ? !(av[i] <= bv[i]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[i] == bv[i]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[i] == bv[i]) :
+                   (5 == 1 || 5 == 17) ? (av[i] < bv[i]) :
+                   (5 == 2 || 5 == 18) ? (av[i] <= bv[i]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[i] != bv[i]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (5 == 5 || 5 == 21) ? !(av[i] < bv[i]) :
+                   (5 == 6 || 5 == 22) ? !(av[i] <= bv[i]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[i] >= bv[i]) :
+                   (5 == 10 || 5 == 26) ? !(av[i] > bv[i]) :
+                   (5 == 13 || 5 == 29) ? (av[i] >= bv[i]) :
+                   (5 == 14 || 5 == 30) ? (av[i] > bv[i]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -614,13 +722,22 @@ static void case_28(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (6 == 0) ? (av[i] == bv[i]) :
-                   (6 == 1) ? (av[i] < bv[i]) :
-                   (6 == 2) ? (av[i] <= bv[i]) :
-                   (6 == 4) ? (av[i] != bv[i]) :
-                   (6 == 5) ? !(av[i] < bv[i]) :
-                   (6 == 6) ? !(av[i] <= bv[i]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[i] == bv[i]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[i] == bv[i]) :
+                   (6 == 1 || 6 == 17) ? (av[i] < bv[i]) :
+                   (6 == 2 || 6 == 18) ? (av[i] <= bv[i]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[i] != bv[i]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (6 == 5 || 6 == 21) ? !(av[i] < bv[i]) :
+                   (6 == 6 || 6 == 22) ? !(av[i] <= bv[i]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[i] >= bv[i]) :
+                   (6 == 10 || 6 == 26) ? !(av[i] > bv[i]) :
+                   (6 == 13 || 6 == 29) ? (av[i] >= bv[i]) :
+                   (6 == 14 || 6 == 30) ? (av[i] > bv[i]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -640,13 +757,22 @@ static void case_29(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 8; i++) {
-          int p_ = (7 == 0) ? (av[i] == bv[i]) :
-                   (7 == 1) ? (av[i] < bv[i]) :
-                   (7 == 2) ? (av[i] <= bv[i]) :
-                   (7 == 4) ? (av[i] != bv[i]) :
-                   (7 == 5) ? !(av[i] < bv[i]) :
-                   (7 == 6) ? !(av[i] <= bv[i]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[i] == bv[i]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[i] == bv[i]) :
+                   (7 == 1 || 7 == 17) ? (av[i] < bv[i]) :
+                   (7 == 2 || 7 == 18) ? (av[i] <= bv[i]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[i] != bv[i]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (7 == 5 || 7 == 21) ? !(av[i] < bv[i]) :
+                   (7 == 6 || 7 == 22) ? !(av[i] <= bv[i]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[i] >= bv[i]) :
+                   (7 == 10 || 7 == 26) ? !(av[i] > bv[i]) :
+                   (7 == 13 || 7 == 29) ? (av[i] >= bv[i]) :
+                   (7 == 14 || 7 == 30) ? (av[i] > bv[i]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 8; i++)
@@ -666,13 +792,22 @@ static void case_30(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (0 == 0) ? (av[i] == bv[i]) :
-                   (0 == 1) ? (av[i] < bv[i]) :
-                   (0 == 2) ? (av[i] <= bv[i]) :
-                   (0 == 4) ? (av[i] != bv[i]) :
-                   (0 == 5) ? !(av[i] < bv[i]) :
-                   (0 == 6) ? !(av[i] <= bv[i]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[i] == bv[i]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[i] == bv[i]) :
+                   (0 == 1 || 0 == 17) ? (av[i] < bv[i]) :
+                   (0 == 2 || 0 == 18) ? (av[i] <= bv[i]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[i] != bv[i]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (0 == 5 || 0 == 21) ? !(av[i] < bv[i]) :
+                   (0 == 6 || 0 == 22) ? !(av[i] <= bv[i]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[i] >= bv[i]) :
+                   (0 == 10 || 0 == 26) ? !(av[i] > bv[i]) :
+                   (0 == 13 || 0 == 29) ? (av[i] >= bv[i]) :
+                   (0 == 14 || 0 == 30) ? (av[i] > bv[i]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -692,13 +827,22 @@ static void case_31(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (1 == 0) ? (av[i] == bv[i]) :
-                   (1 == 1) ? (av[i] < bv[i]) :
-                   (1 == 2) ? (av[i] <= bv[i]) :
-                   (1 == 4) ? (av[i] != bv[i]) :
-                   (1 == 5) ? !(av[i] < bv[i]) :
-                   (1 == 6) ? !(av[i] <= bv[i]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[i] == bv[i]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[i] == bv[i]) :
+                   (1 == 1 || 1 == 17) ? (av[i] < bv[i]) :
+                   (1 == 2 || 1 == 18) ? (av[i] <= bv[i]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[i] != bv[i]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (1 == 5 || 1 == 21) ? !(av[i] < bv[i]) :
+                   (1 == 6 || 1 == 22) ? !(av[i] <= bv[i]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[i] >= bv[i]) :
+                   (1 == 10 || 1 == 26) ? !(av[i] > bv[i]) :
+                   (1 == 13 || 1 == 29) ? (av[i] >= bv[i]) :
+                   (1 == 14 || 1 == 30) ? (av[i] > bv[i]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -718,13 +862,22 @@ static void case_32(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (2 == 0) ? (av[i] == bv[i]) :
-                   (2 == 1) ? (av[i] < bv[i]) :
-                   (2 == 2) ? (av[i] <= bv[i]) :
-                   (2 == 4) ? (av[i] != bv[i]) :
-                   (2 == 5) ? !(av[i] < bv[i]) :
-                   (2 == 6) ? !(av[i] <= bv[i]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[i] == bv[i]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[i] == bv[i]) :
+                   (2 == 1 || 2 == 17) ? (av[i] < bv[i]) :
+                   (2 == 2 || 2 == 18) ? (av[i] <= bv[i]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[i] != bv[i]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (2 == 5 || 2 == 21) ? !(av[i] < bv[i]) :
+                   (2 == 6 || 2 == 22) ? !(av[i] <= bv[i]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[i] >= bv[i]) :
+                   (2 == 10 || 2 == 26) ? !(av[i] > bv[i]) :
+                   (2 == 13 || 2 == 29) ? (av[i] >= bv[i]) :
+                   (2 == 14 || 2 == 30) ? (av[i] > bv[i]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -744,13 +897,22 @@ static void case_33(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (4 == 0) ? (av[i] == bv[i]) :
-                   (4 == 1) ? (av[i] < bv[i]) :
-                   (4 == 2) ? (av[i] <= bv[i]) :
-                   (4 == 4) ? (av[i] != bv[i]) :
-                   (4 == 5) ? !(av[i] < bv[i]) :
-                   (4 == 6) ? !(av[i] <= bv[i]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[i] == bv[i]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[i] == bv[i]) :
+                   (4 == 1 || 4 == 17) ? (av[i] < bv[i]) :
+                   (4 == 2 || 4 == 18) ? (av[i] <= bv[i]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[i] != bv[i]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (4 == 5 || 4 == 21) ? !(av[i] < bv[i]) :
+                   (4 == 6 || 4 == 22) ? !(av[i] <= bv[i]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[i] >= bv[i]) :
+                   (4 == 10 || 4 == 26) ? !(av[i] > bv[i]) :
+                   (4 == 13 || 4 == 29) ? (av[i] >= bv[i]) :
+                   (4 == 14 || 4 == 30) ? (av[i] > bv[i]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -770,13 +932,22 @@ static void case_34(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (5 == 0) ? (av[i] == bv[i]) :
-                   (5 == 1) ? (av[i] < bv[i]) :
-                   (5 == 2) ? (av[i] <= bv[i]) :
-                   (5 == 4) ? (av[i] != bv[i]) :
-                   (5 == 5) ? !(av[i] < bv[i]) :
-                   (5 == 6) ? !(av[i] <= bv[i]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[i] == bv[i]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[i] == bv[i]) :
+                   (5 == 1 || 5 == 17) ? (av[i] < bv[i]) :
+                   (5 == 2 || 5 == 18) ? (av[i] <= bv[i]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[i] != bv[i]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (5 == 5 || 5 == 21) ? !(av[i] < bv[i]) :
+                   (5 == 6 || 5 == 22) ? !(av[i] <= bv[i]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[i] >= bv[i]) :
+                   (5 == 10 || 5 == 26) ? !(av[i] > bv[i]) :
+                   (5 == 13 || 5 == 29) ? (av[i] >= bv[i]) :
+                   (5 == 14 || 5 == 30) ? (av[i] > bv[i]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -796,13 +967,22 @@ static void case_35(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (6 == 0) ? (av[i] == bv[i]) :
-                   (6 == 1) ? (av[i] < bv[i]) :
-                   (6 == 2) ? (av[i] <= bv[i]) :
-                   (6 == 4) ? (av[i] != bv[i]) :
-                   (6 == 5) ? !(av[i] < bv[i]) :
-                   (6 == 6) ? !(av[i] <= bv[i]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[i] == bv[i]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[i] == bv[i]) :
+                   (6 == 1 || 6 == 17) ? (av[i] < bv[i]) :
+                   (6 == 2 || 6 == 18) ? (av[i] <= bv[i]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[i] != bv[i]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (6 == 5 || 6 == 21) ? !(av[i] < bv[i]) :
+                   (6 == 6 || 6 == 22) ? !(av[i] <= bv[i]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[i] >= bv[i]) :
+                   (6 == 10 || 6 == 26) ? !(av[i] > bv[i]) :
+                   (6 == 13 || 6 == 29) ? (av[i] >= bv[i]) :
+                   (6 == 14 || 6 == 30) ? (av[i] > bv[i]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -822,13 +1002,22 @@ static void case_36(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (7 == 0) ? (av[i] == bv[i]) :
-                   (7 == 1) ? (av[i] < bv[i]) :
-                   (7 == 2) ? (av[i] <= bv[i]) :
-                   (7 == 4) ? (av[i] != bv[i]) :
-                   (7 == 5) ? !(av[i] < bv[i]) :
-                   (7 == 6) ? !(av[i] <= bv[i]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[i] == bv[i]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[i] == bv[i]) :
+                   (7 == 1 || 7 == 17) ? (av[i] < bv[i]) :
+                   (7 == 2 || 7 == 18) ? (av[i] <= bv[i]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[i] != bv[i]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (7 == 5 || 7 == 21) ? !(av[i] < bv[i]) :
+                   (7 == 6 || 7 == 22) ? !(av[i] <= bv[i]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[i] >= bv[i]) :
+                   (7 == 10 || 7 == 26) ? !(av[i] > bv[i]) :
+                   (7 == 13 || 7 == 29) ? (av[i] >= bv[i]) :
+                   (7 == 14 || 7 == 30) ? (av[i] > bv[i]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -848,13 +1037,22 @@ static void case_37(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (0 == 0) ? (av[i] == bv[i]) :
-                   (0 == 1) ? (av[i] < bv[i]) :
-                   (0 == 2) ? (av[i] <= bv[i]) :
-                   (0 == 4) ? (av[i] != bv[i]) :
-                   (0 == 5) ? !(av[i] < bv[i]) :
-                   (0 == 6) ? !(av[i] <= bv[i]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[i] == bv[i]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[i] == bv[i]) :
+                   (0 == 1 || 0 == 17) ? (av[i] < bv[i]) :
+                   (0 == 2 || 0 == 18) ? (av[i] <= bv[i]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[i] != bv[i]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (0 == 5 || 0 == 21) ? !(av[i] < bv[i]) :
+                   (0 == 6 || 0 == 22) ? !(av[i] <= bv[i]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[i] >= bv[i]) :
+                   (0 == 10 || 0 == 26) ? !(av[i] > bv[i]) :
+                   (0 == 13 || 0 == 29) ? (av[i] >= bv[i]) :
+                   (0 == 14 || 0 == 30) ? (av[i] > bv[i]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -874,13 +1072,22 @@ static void case_38(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (1 == 0) ? (av[i] == bv[i]) :
-                   (1 == 1) ? (av[i] < bv[i]) :
-                   (1 == 2) ? (av[i] <= bv[i]) :
-                   (1 == 4) ? (av[i] != bv[i]) :
-                   (1 == 5) ? !(av[i] < bv[i]) :
-                   (1 == 6) ? !(av[i] <= bv[i]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[i] == bv[i]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[i] == bv[i]) :
+                   (1 == 1 || 1 == 17) ? (av[i] < bv[i]) :
+                   (1 == 2 || 1 == 18) ? (av[i] <= bv[i]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[i] != bv[i]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (1 == 5 || 1 == 21) ? !(av[i] < bv[i]) :
+                   (1 == 6 || 1 == 22) ? !(av[i] <= bv[i]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[i] >= bv[i]) :
+                   (1 == 10 || 1 == 26) ? !(av[i] > bv[i]) :
+                   (1 == 13 || 1 == 29) ? (av[i] >= bv[i]) :
+                   (1 == 14 || 1 == 30) ? (av[i] > bv[i]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -900,13 +1107,22 @@ static void case_39(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (2 == 0) ? (av[i] == bv[i]) :
-                   (2 == 1) ? (av[i] < bv[i]) :
-                   (2 == 2) ? (av[i] <= bv[i]) :
-                   (2 == 4) ? (av[i] != bv[i]) :
-                   (2 == 5) ? !(av[i] < bv[i]) :
-                   (2 == 6) ? !(av[i] <= bv[i]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[i] == bv[i]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[i] == bv[i]) :
+                   (2 == 1 || 2 == 17) ? (av[i] < bv[i]) :
+                   (2 == 2 || 2 == 18) ? (av[i] <= bv[i]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[i] != bv[i]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (2 == 5 || 2 == 21) ? !(av[i] < bv[i]) :
+                   (2 == 6 || 2 == 22) ? !(av[i] <= bv[i]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[i] >= bv[i]) :
+                   (2 == 10 || 2 == 26) ? !(av[i] > bv[i]) :
+                   (2 == 13 || 2 == 29) ? (av[i] >= bv[i]) :
+                   (2 == 14 || 2 == 30) ? (av[i] > bv[i]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -926,13 +1142,22 @@ static void case_40(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (4 == 0) ? (av[i] == bv[i]) :
-                   (4 == 1) ? (av[i] < bv[i]) :
-                   (4 == 2) ? (av[i] <= bv[i]) :
-                   (4 == 4) ? (av[i] != bv[i]) :
-                   (4 == 5) ? !(av[i] < bv[i]) :
-                   (4 == 6) ? !(av[i] <= bv[i]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[i] == bv[i]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[i] == bv[i]) :
+                   (4 == 1 || 4 == 17) ? (av[i] < bv[i]) :
+                   (4 == 2 || 4 == 18) ? (av[i] <= bv[i]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[i] != bv[i]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (4 == 5 || 4 == 21) ? !(av[i] < bv[i]) :
+                   (4 == 6 || 4 == 22) ? !(av[i] <= bv[i]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[i] >= bv[i]) :
+                   (4 == 10 || 4 == 26) ? !(av[i] > bv[i]) :
+                   (4 == 13 || 4 == 29) ? (av[i] >= bv[i]) :
+                   (4 == 14 || 4 == 30) ? (av[i] > bv[i]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -952,13 +1177,22 @@ static void case_41(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (5 == 0) ? (av[i] == bv[i]) :
-                   (5 == 1) ? (av[i] < bv[i]) :
-                   (5 == 2) ? (av[i] <= bv[i]) :
-                   (5 == 4) ? (av[i] != bv[i]) :
-                   (5 == 5) ? !(av[i] < bv[i]) :
-                   (5 == 6) ? !(av[i] <= bv[i]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[i] == bv[i]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[i] == bv[i]) :
+                   (5 == 1 || 5 == 17) ? (av[i] < bv[i]) :
+                   (5 == 2 || 5 == 18) ? (av[i] <= bv[i]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[i] != bv[i]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (5 == 5 || 5 == 21) ? !(av[i] < bv[i]) :
+                   (5 == 6 || 5 == 22) ? !(av[i] <= bv[i]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[i] >= bv[i]) :
+                   (5 == 10 || 5 == 26) ? !(av[i] > bv[i]) :
+                   (5 == 13 || 5 == 29) ? (av[i] >= bv[i]) :
+                   (5 == 14 || 5 == 30) ? (av[i] > bv[i]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -978,13 +1212,22 @@ static void case_42(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (6 == 0) ? (av[i] == bv[i]) :
-                   (6 == 1) ? (av[i] < bv[i]) :
-                   (6 == 2) ? (av[i] <= bv[i]) :
-                   (6 == 4) ? (av[i] != bv[i]) :
-                   (6 == 5) ? !(av[i] < bv[i]) :
-                   (6 == 6) ? !(av[i] <= bv[i]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[i] == bv[i]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[i] == bv[i]) :
+                   (6 == 1 || 6 == 17) ? (av[i] < bv[i]) :
+                   (6 == 2 || 6 == 18) ? (av[i] <= bv[i]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[i] != bv[i]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (6 == 5 || 6 == 21) ? !(av[i] < bv[i]) :
+                   (6 == 6 || 6 == 22) ? !(av[i] <= bv[i]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[i] >= bv[i]) :
+                   (6 == 10 || 6 == 26) ? !(av[i] > bv[i]) :
+                   (6 == 13 || 6 == 29) ? (av[i] >= bv[i]) :
+                   (6 == 14 || 6 == 30) ? (av[i] > bv[i]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -1004,13 +1247,22 @@ static void case_43(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (7 == 0) ? (av[i] == bv[i]) :
-                   (7 == 1) ? (av[i] < bv[i]) :
-                   (7 == 2) ? (av[i] <= bv[i]) :
-                   (7 == 4) ? (av[i] != bv[i]) :
-                   (7 == 5) ? !(av[i] < bv[i]) :
-                   (7 == 6) ? !(av[i] <= bv[i]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[i] == bv[i]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[i] == bv[i]) :
+                   (7 == 1 || 7 == 17) ? (av[i] < bv[i]) :
+                   (7 == 2 || 7 == 18) ? (av[i] <= bv[i]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[i] != bv[i]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (7 == 5 || 7 == 21) ? !(av[i] < bv[i]) :
+                   (7 == 6 || 7 == 22) ? !(av[i] <= bv[i]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[i] >= bv[i]) :
+                   (7 == 10 || 7 == 26) ? !(av[i] > bv[i]) :
+                   (7 == 13 || 7 == 29) ? (av[i] >= bv[i]) :
+                   (7 == 14 || 7 == 30) ? (av[i] > bv[i]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 4; i++)
@@ -3012,7 +3264,7 @@ static void case_136(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3049,7 +3301,7 @@ static void case_137(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3086,7 +3338,7 @@ static void case_138(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3123,7 +3375,7 @@ static void case_139(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3160,7 +3412,7 @@ static void case_140(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3197,7 +3449,7 @@ static void case_141(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3234,7 +3486,7 @@ static void case_142(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3271,7 +3523,7 @@ static void case_143(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3308,7 +3560,7 @@ static void case_144(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3345,7 +3597,7 @@ static void case_145(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3382,7 +3634,7 @@ static void case_146(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -3419,7 +3671,7 @@ static void case_147(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -5851,13 +6103,22 @@ static void case_244(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (0 == 0) ? (av[0] == bv[0]) :
-                   (0 == 1) ? (av[0] < bv[0]) :
-                   (0 == 2) ? (av[0] <= bv[0]) :
-                   (0 == 4) ? (av[0] != bv[0]) :
-                   (0 == 5) ? !(av[0] < bv[0]) :
-                   (0 == 6) ? !(av[0] <= bv[0]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[0] == bv[0]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[0] == bv[0]) :
+                   (0 == 1 || 0 == 17) ? (av[0] < bv[0]) :
+                   (0 == 2 || 0 == 18) ? (av[0] <= bv[0]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[0] != bv[0]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (0 == 5 || 0 == 21) ? !(av[0] < bv[0]) :
+                   (0 == 6 || 0 == 22) ? !(av[0] <= bv[0]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[0] >= bv[0]) :
+                   (0 == 10 || 0 == 26) ? !(av[0] > bv[0]) :
+                   (0 == 13 || 0 == 29) ? (av[0] >= bv[0]) :
+                   (0 == 14 || 0 == 30) ? (av[0] > bv[0]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -5877,13 +6138,22 @@ static void case_245(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (1 == 0) ? (av[0] == bv[0]) :
-                   (1 == 1) ? (av[0] < bv[0]) :
-                   (1 == 2) ? (av[0] <= bv[0]) :
-                   (1 == 4) ? (av[0] != bv[0]) :
-                   (1 == 5) ? !(av[0] < bv[0]) :
-                   (1 == 6) ? !(av[0] <= bv[0]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[0] == bv[0]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[0] == bv[0]) :
+                   (1 == 1 || 1 == 17) ? (av[0] < bv[0]) :
+                   (1 == 2 || 1 == 18) ? (av[0] <= bv[0]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[0] != bv[0]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (1 == 5 || 1 == 21) ? !(av[0] < bv[0]) :
+                   (1 == 6 || 1 == 22) ? !(av[0] <= bv[0]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[0] >= bv[0]) :
+                   (1 == 10 || 1 == 26) ? !(av[0] > bv[0]) :
+                   (1 == 13 || 1 == 29) ? (av[0] >= bv[0]) :
+                   (1 == 14 || 1 == 30) ? (av[0] > bv[0]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -5903,13 +6173,22 @@ static void case_246(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (2 == 0) ? (av[0] == bv[0]) :
-                   (2 == 1) ? (av[0] < bv[0]) :
-                   (2 == 2) ? (av[0] <= bv[0]) :
-                   (2 == 4) ? (av[0] != bv[0]) :
-                   (2 == 5) ? !(av[0] < bv[0]) :
-                   (2 == 6) ? !(av[0] <= bv[0]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[0] == bv[0]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[0] == bv[0]) :
+                   (2 == 1 || 2 == 17) ? (av[0] < bv[0]) :
+                   (2 == 2 || 2 == 18) ? (av[0] <= bv[0]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[0] != bv[0]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (2 == 5 || 2 == 21) ? !(av[0] < bv[0]) :
+                   (2 == 6 || 2 == 22) ? !(av[0] <= bv[0]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[0] >= bv[0]) :
+                   (2 == 10 || 2 == 26) ? !(av[0] > bv[0]) :
+                   (2 == 13 || 2 == 29) ? (av[0] >= bv[0]) :
+                   (2 == 14 || 2 == 30) ? (av[0] > bv[0]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -5929,13 +6208,22 @@ static void case_247(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (4 == 0) ? (av[0] == bv[0]) :
-                   (4 == 1) ? (av[0] < bv[0]) :
-                   (4 == 2) ? (av[0] <= bv[0]) :
-                   (4 == 4) ? (av[0] != bv[0]) :
-                   (4 == 5) ? !(av[0] < bv[0]) :
-                   (4 == 6) ? !(av[0] <= bv[0]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[0] == bv[0]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[0] == bv[0]) :
+                   (4 == 1 || 4 == 17) ? (av[0] < bv[0]) :
+                   (4 == 2 || 4 == 18) ? (av[0] <= bv[0]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[0] != bv[0]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (4 == 5 || 4 == 21) ? !(av[0] < bv[0]) :
+                   (4 == 6 || 4 == 22) ? !(av[0] <= bv[0]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[0] >= bv[0]) :
+                   (4 == 10 || 4 == 26) ? !(av[0] > bv[0]) :
+                   (4 == 13 || 4 == 29) ? (av[0] >= bv[0]) :
+                   (4 == 14 || 4 == 30) ? (av[0] > bv[0]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -5955,13 +6243,22 @@ static void case_248(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (5 == 0) ? (av[0] == bv[0]) :
-                   (5 == 1) ? (av[0] < bv[0]) :
-                   (5 == 2) ? (av[0] <= bv[0]) :
-                   (5 == 4) ? (av[0] != bv[0]) :
-                   (5 == 5) ? !(av[0] < bv[0]) :
-                   (5 == 6) ? !(av[0] <= bv[0]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[0] == bv[0]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[0] == bv[0]) :
+                   (5 == 1 || 5 == 17) ? (av[0] < bv[0]) :
+                   (5 == 2 || 5 == 18) ? (av[0] <= bv[0]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[0] != bv[0]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (5 == 5 || 5 == 21) ? !(av[0] < bv[0]) :
+                   (5 == 6 || 5 == 22) ? !(av[0] <= bv[0]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[0] >= bv[0]) :
+                   (5 == 10 || 5 == 26) ? !(av[0] > bv[0]) :
+                   (5 == 13 || 5 == 29) ? (av[0] >= bv[0]) :
+                   (5 == 14 || 5 == 30) ? (av[0] > bv[0]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -5981,13 +6278,22 @@ static void case_249(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (6 == 0) ? (av[0] == bv[0]) :
-                   (6 == 1) ? (av[0] < bv[0]) :
-                   (6 == 2) ? (av[0] <= bv[0]) :
-                   (6 == 4) ? (av[0] != bv[0]) :
-                   (6 == 5) ? !(av[0] < bv[0]) :
-                   (6 == 6) ? !(av[0] <= bv[0]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[0] == bv[0]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[0] == bv[0]) :
+                   (6 == 1 || 6 == 17) ? (av[0] < bv[0]) :
+                   (6 == 2 || 6 == 18) ? (av[0] <= bv[0]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[0] != bv[0]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (6 == 5 || 6 == 21) ? !(av[0] < bv[0]) :
+                   (6 == 6 || 6 == 22) ? !(av[0] <= bv[0]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[0] >= bv[0]) :
+                   (6 == 10 || 6 == 26) ? !(av[0] > bv[0]) :
+                   (6 == 13 || 6 == 29) ? (av[0] >= bv[0]) :
+                   (6 == 14 || 6 == 30) ? (av[0] > bv[0]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -6007,13 +6313,22 @@ static void case_250(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (7 == 0) ? (av[0] == bv[0]) :
-                   (7 == 1) ? (av[0] < bv[0]) :
-                   (7 == 2) ? (av[0] <= bv[0]) :
-                   (7 == 4) ? (av[0] != bv[0]) :
-                   (7 == 5) ? !(av[0] < bv[0]) :
-                   (7 == 6) ? !(av[0] <= bv[0]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[0] == bv[0]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[0] == bv[0]) :
+                   (7 == 1 || 7 == 17) ? (av[0] < bv[0]) :
+                   (7 == 2 || 7 == 18) ? (av[0] <= bv[0]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[0] != bv[0]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (7 == 5 || 7 == 21) ? !(av[0] < bv[0]) :
+                   (7 == 6 || 7 == 22) ? !(av[0] <= bv[0]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[0] >= bv[0]) :
+                   (7 == 10 || 7 == 26) ? !(av[0] > bv[0]) :
+                   (7 == 13 || 7 == 29) ? (av[0] >= bv[0]) :
+                   (7 == 14 || 7 == 30) ? (av[0] > bv[0]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -6033,13 +6348,22 @@ static void case_251(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (0 == 0) ? (av[0] == bv[0]) :
-                   (0 == 1) ? (av[0] < bv[0]) :
-                   (0 == 2) ? (av[0] <= bv[0]) :
-                   (0 == 4) ? (av[0] != bv[0]) :
-                   (0 == 5) ? !(av[0] < bv[0]) :
-                   (0 == 6) ? !(av[0] <= bv[0]) :
-                   (0 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (0 == 0 || 0 == 16) ? (av[0] == bv[0]) :
+                   (0 == 8 || 0 == 24) ? (un_ || av[0] == bv[0]) :
+                   (0 == 1 || 0 == 17) ? (av[0] < bv[0]) :
+                   (0 == 2 || 0 == 18) ? (av[0] <= bv[0]) :
+                   (0 == 3 || 0 == 19) ? un_ :
+                   (0 == 4 || 0 == 20) ? (av[0] != bv[0]) :
+                   (0 == 12 || 0 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (0 == 5 || 0 == 21) ? !(av[0] < bv[0]) :
+                   (0 == 6 || 0 == 22) ? !(av[0] <= bv[0]) :
+                   (0 == 7 || 0 == 23) ? !un_ :
+                   (0 == 9 || 0 == 25) ? !(av[0] >= bv[0]) :
+                   (0 == 10 || 0 == 26) ? !(av[0] > bv[0]) :
+                   (0 == 13 || 0 == 29) ? (av[0] >= bv[0]) :
+                   (0 == 14 || 0 == 30) ? (av[0] > bv[0]) :
+                   (0 == 15 || 0 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6059,13 +6383,22 @@ static void case_252(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (1 == 0) ? (av[0] == bv[0]) :
-                   (1 == 1) ? (av[0] < bv[0]) :
-                   (1 == 2) ? (av[0] <= bv[0]) :
-                   (1 == 4) ? (av[0] != bv[0]) :
-                   (1 == 5) ? !(av[0] < bv[0]) :
-                   (1 == 6) ? !(av[0] <= bv[0]) :
-                   (1 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (1 == 0 || 1 == 16) ? (av[0] == bv[0]) :
+                   (1 == 8 || 1 == 24) ? (un_ || av[0] == bv[0]) :
+                   (1 == 1 || 1 == 17) ? (av[0] < bv[0]) :
+                   (1 == 2 || 1 == 18) ? (av[0] <= bv[0]) :
+                   (1 == 3 || 1 == 19) ? un_ :
+                   (1 == 4 || 1 == 20) ? (av[0] != bv[0]) :
+                   (1 == 12 || 1 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (1 == 5 || 1 == 21) ? !(av[0] < bv[0]) :
+                   (1 == 6 || 1 == 22) ? !(av[0] <= bv[0]) :
+                   (1 == 7 || 1 == 23) ? !un_ :
+                   (1 == 9 || 1 == 25) ? !(av[0] >= bv[0]) :
+                   (1 == 10 || 1 == 26) ? !(av[0] > bv[0]) :
+                   (1 == 13 || 1 == 29) ? (av[0] >= bv[0]) :
+                   (1 == 14 || 1 == 30) ? (av[0] > bv[0]) :
+                   (1 == 15 || 1 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6085,13 +6418,22 @@ static void case_253(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (2 == 0) ? (av[0] == bv[0]) :
-                   (2 == 1) ? (av[0] < bv[0]) :
-                   (2 == 2) ? (av[0] <= bv[0]) :
-                   (2 == 4) ? (av[0] != bv[0]) :
-                   (2 == 5) ? !(av[0] < bv[0]) :
-                   (2 == 6) ? !(av[0] <= bv[0]) :
-                   (2 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (2 == 0 || 2 == 16) ? (av[0] == bv[0]) :
+                   (2 == 8 || 2 == 24) ? (un_ || av[0] == bv[0]) :
+                   (2 == 1 || 2 == 17) ? (av[0] < bv[0]) :
+                   (2 == 2 || 2 == 18) ? (av[0] <= bv[0]) :
+                   (2 == 3 || 2 == 19) ? un_ :
+                   (2 == 4 || 2 == 20) ? (av[0] != bv[0]) :
+                   (2 == 12 || 2 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (2 == 5 || 2 == 21) ? !(av[0] < bv[0]) :
+                   (2 == 6 || 2 == 22) ? !(av[0] <= bv[0]) :
+                   (2 == 7 || 2 == 23) ? !un_ :
+                   (2 == 9 || 2 == 25) ? !(av[0] >= bv[0]) :
+                   (2 == 10 || 2 == 26) ? !(av[0] > bv[0]) :
+                   (2 == 13 || 2 == 29) ? (av[0] >= bv[0]) :
+                   (2 == 14 || 2 == 30) ? (av[0] > bv[0]) :
+                   (2 == 15 || 2 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6111,13 +6453,22 @@ static void case_254(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (4 == 0) ? (av[0] == bv[0]) :
-                   (4 == 1) ? (av[0] < bv[0]) :
-                   (4 == 2) ? (av[0] <= bv[0]) :
-                   (4 == 4) ? (av[0] != bv[0]) :
-                   (4 == 5) ? !(av[0] < bv[0]) :
-                   (4 == 6) ? !(av[0] <= bv[0]) :
-                   (4 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (4 == 0 || 4 == 16) ? (av[0] == bv[0]) :
+                   (4 == 8 || 4 == 24) ? (un_ || av[0] == bv[0]) :
+                   (4 == 1 || 4 == 17) ? (av[0] < bv[0]) :
+                   (4 == 2 || 4 == 18) ? (av[0] <= bv[0]) :
+                   (4 == 3 || 4 == 19) ? un_ :
+                   (4 == 4 || 4 == 20) ? (av[0] != bv[0]) :
+                   (4 == 12 || 4 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (4 == 5 || 4 == 21) ? !(av[0] < bv[0]) :
+                   (4 == 6 || 4 == 22) ? !(av[0] <= bv[0]) :
+                   (4 == 7 || 4 == 23) ? !un_ :
+                   (4 == 9 || 4 == 25) ? !(av[0] >= bv[0]) :
+                   (4 == 10 || 4 == 26) ? !(av[0] > bv[0]) :
+                   (4 == 13 || 4 == 29) ? (av[0] >= bv[0]) :
+                   (4 == 14 || 4 == 30) ? (av[0] > bv[0]) :
+                   (4 == 15 || 4 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6137,13 +6488,22 @@ static void case_255(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (5 == 0) ? (av[0] == bv[0]) :
-                   (5 == 1) ? (av[0] < bv[0]) :
-                   (5 == 2) ? (av[0] <= bv[0]) :
-                   (5 == 4) ? (av[0] != bv[0]) :
-                   (5 == 5) ? !(av[0] < bv[0]) :
-                   (5 == 6) ? !(av[0] <= bv[0]) :
-                   (5 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (5 == 0 || 5 == 16) ? (av[0] == bv[0]) :
+                   (5 == 8 || 5 == 24) ? (un_ || av[0] == bv[0]) :
+                   (5 == 1 || 5 == 17) ? (av[0] < bv[0]) :
+                   (5 == 2 || 5 == 18) ? (av[0] <= bv[0]) :
+                   (5 == 3 || 5 == 19) ? un_ :
+                   (5 == 4 || 5 == 20) ? (av[0] != bv[0]) :
+                   (5 == 12 || 5 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (5 == 5 || 5 == 21) ? !(av[0] < bv[0]) :
+                   (5 == 6 || 5 == 22) ? !(av[0] <= bv[0]) :
+                   (5 == 7 || 5 == 23) ? !un_ :
+                   (5 == 9 || 5 == 25) ? !(av[0] >= bv[0]) :
+                   (5 == 10 || 5 == 26) ? !(av[0] > bv[0]) :
+                   (5 == 13 || 5 == 29) ? (av[0] >= bv[0]) :
+                   (5 == 14 || 5 == 30) ? (av[0] > bv[0]) :
+                   (5 == 15 || 5 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6163,13 +6523,22 @@ static void case_256(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (6 == 0) ? (av[0] == bv[0]) :
-                   (6 == 1) ? (av[0] < bv[0]) :
-                   (6 == 2) ? (av[0] <= bv[0]) :
-                   (6 == 4) ? (av[0] != bv[0]) :
-                   (6 == 5) ? !(av[0] < bv[0]) :
-                   (6 == 6) ? !(av[0] <= bv[0]) :
-                   (6 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (6 == 0 || 6 == 16) ? (av[0] == bv[0]) :
+                   (6 == 8 || 6 == 24) ? (un_ || av[0] == bv[0]) :
+                   (6 == 1 || 6 == 17) ? (av[0] < bv[0]) :
+                   (6 == 2 || 6 == 18) ? (av[0] <= bv[0]) :
+                   (6 == 3 || 6 == 19) ? un_ :
+                   (6 == 4 || 6 == 20) ? (av[0] != bv[0]) :
+                   (6 == 12 || 6 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (6 == 5 || 6 == 21) ? !(av[0] < bv[0]) :
+                   (6 == 6 || 6 == 22) ? !(av[0] <= bv[0]) :
+                   (6 == 7 || 6 == 23) ? !un_ :
+                   (6 == 9 || 6 == 25) ? !(av[0] >= bv[0]) :
+                   (6 == 10 || 6 == 26) ? !(av[0] > bv[0]) :
+                   (6 == 13 || 6 == 29) ? (av[0] >= bv[0]) :
+                   (6 == 14 || 6 == 30) ? (av[0] > bv[0]) :
+                   (6 == 15 || 6 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6189,13 +6558,22 @@ static void case_257(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (7 == 0) ? (av[0] == bv[0]) :
-                   (7 == 1) ? (av[0] < bv[0]) :
-                   (7 == 2) ? (av[0] <= bv[0]) :
-                   (7 == 4) ? (av[0] != bv[0]) :
-                   (7 == 5) ? !(av[0] < bv[0]) :
-                   (7 == 6) ? !(av[0] <= bv[0]) :
-                   (7 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (7 == 0 || 7 == 16) ? (av[0] == bv[0]) :
+                   (7 == 8 || 7 == 24) ? (un_ || av[0] == bv[0]) :
+                   (7 == 1 || 7 == 17) ? (av[0] < bv[0]) :
+                   (7 == 2 || 7 == 18) ? (av[0] <= bv[0]) :
+                   (7 == 3 || 7 == 19) ? un_ :
+                   (7 == 4 || 7 == 20) ? (av[0] != bv[0]) :
+                   (7 == 12 || 7 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (7 == 5 || 7 == 21) ? !(av[0] < bv[0]) :
+                   (7 == 6 || 7 == 22) ? !(av[0] <= bv[0]) :
+                   (7 == 7 || 7 == 23) ? !un_ :
+                   (7 == 9 || 7 == 25) ? !(av[0] >= bv[0]) :
+                   (7 == 10 || 7 == 26) ? !(av[0] > bv[0]) :
+                   (7 == 13 || 7 == 29) ? (av[0] >= bv[0]) :
+                   (7 == 14 || 7 == 30) ? (av[0] > bv[0]) :
+                   (7 == 15 || 7 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -6220,7 +6598,7 @@ static void case_258(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6256,7 +6634,7 @@ static void case_259(void) {
           int c_;
           switch (1) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (1 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (1 == 8 || 1 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6292,7 +6670,7 @@ static void case_260(void) {
           int c_;
           switch (2) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (2 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (2 == 8 || 2 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6328,7 +6706,7 @@ static void case_261(void) {
           int c_;
           switch (4) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (4 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (4 == 8 || 4 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6364,7 +6742,7 @@ static void case_262(void) {
           int c_;
           switch (5) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (5 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (5 == 8 || 5 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6400,7 +6778,7 @@ static void case_263(void) {
           int c_;
           switch (6) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (6 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (6 == 8 || 6 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6436,7 +6814,7 @@ static void case_264(void) {
           int c_;
           switch (7) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (7 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (7 == 8 || 7 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6473,7 +6851,7 @@ static void case_265(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6511,7 +6889,7 @@ static void case_266(void) {
           int c_;
           switch (1) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (1 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (1 == 8 || 1 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6549,7 +6927,7 @@ static void case_267(void) {
           int c_;
           switch (2) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (2 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (2 == 8 || 2 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6587,7 +6965,7 @@ static void case_268(void) {
           int c_;
           switch (4) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (4 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (4 == 8 || 4 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6625,7 +7003,7 @@ static void case_269(void) {
           int c_;
           switch (5) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (5 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (5 == 8 || 5 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6663,7 +7041,7 @@ static void case_270(void) {
           int c_;
           switch (6) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (6 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (6 == 8 || 6 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6701,7 +7079,7 @@ static void case_271(void) {
           int c_;
           switch (7) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (7 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (7 == 8 || 7 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6738,7 +7116,7 @@ static void case_272(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6774,7 +7152,7 @@ static void case_273(void) {
           int c_;
           switch (1) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (1 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (1 == 8 || 1 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6810,7 +7188,7 @@ static void case_274(void) {
           int c_;
           switch (2) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (2 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (2 == 8 || 2 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6846,7 +7224,7 @@ static void case_275(void) {
           int c_;
           switch (4) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (4 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (4 == 8 || 4 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6882,7 +7260,7 @@ static void case_276(void) {
           int c_;
           switch (5) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (5 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (5 == 8 || 5 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6918,7 +7296,7 @@ static void case_277(void) {
           int c_;
           switch (6) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (6 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (6 == 8 || 6 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6954,7 +7332,7 @@ static void case_278(void) {
           int c_;
           switch (7) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (7 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (7 == 8 || 7 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -6991,7 +7369,7 @@ static void case_279(void) {
           int c_;
           switch (0) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (0 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (0 == 8 || 0 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7029,7 +7407,7 @@ static void case_280(void) {
           int c_;
           switch (1) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (1 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (1 == 8 || 1 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7067,7 +7445,7 @@ static void case_281(void) {
           int c_;
           switch (2) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (2 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (2 == 8 || 2 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7105,7 +7483,7 @@ static void case_282(void) {
           int c_;
           switch (4) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (4 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (4 == 8 || 4 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7143,7 +7521,7 @@ static void case_283(void) {
           int c_;
           switch (5) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (5 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (5 == 8 || 5 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7181,7 +7559,7 @@ static void case_284(void) {
           int c_;
           switch (6) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (6 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (6 == 8 || 6 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7219,7 +7597,7 @@ static void case_285(void) {
           int c_;
           switch (7) {
           case 0: case 16: case 8: case 24:
-              c_ = un_ ? (7 >= 8) : av[i] == bv[i]; break;
+              c_ = un_ ? (7 == 8 || 7 == 24) : av[i] == bv[i]; break;
           case 1: case 17: c_ = !un_ && av[i] < bv[i]; break;
           case 2: case 18: c_ = !un_ && av[i] <= bv[i]; break;
           case 3: case 19: c_ = un_; break;
@@ -7891,13 +8269,22 @@ static void case_306(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (14 == 0) ? (av[i] == bv[i]) :
-                   (14 == 1) ? (av[i] < bv[i]) :
-                   (14 == 2) ? (av[i] <= bv[i]) :
-                   (14 == 4) ? (av[i] != bv[i]) :
-                   (14 == 5) ? !(av[i] < bv[i]) :
-                   (14 == 6) ? !(av[i] <= bv[i]) :
-                   (14 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (14 == 0 || 14 == 16) ? (av[i] == bv[i]) :
+                   (14 == 8 || 14 == 24) ? (un_ || av[i] == bv[i]) :
+                   (14 == 1 || 14 == 17) ? (av[i] < bv[i]) :
+                   (14 == 2 || 14 == 18) ? (av[i] <= bv[i]) :
+                   (14 == 3 || 14 == 19) ? un_ :
+                   (14 == 4 || 14 == 20) ? (av[i] != bv[i]) :
+                   (14 == 12 || 14 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (14 == 5 || 14 == 21) ? !(av[i] < bv[i]) :
+                   (14 == 6 || 14 == 22) ? !(av[i] <= bv[i]) :
+                   (14 == 7 || 14 == 23) ? !un_ :
+                   (14 == 9 || 14 == 25) ? !(av[i] >= bv[i]) :
+                   (14 == 10 || 14 == 26) ? !(av[i] > bv[i]) :
+                   (14 == 13 || 14 == 29) ? (av[i] >= bv[i]) :
+                   (14 == 14 || 14 == 30) ? (av[i] > bv[i]) :
+                   (14 == 15 || 14 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -7917,13 +8304,22 @@ static void case_307(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (14 == 0) ? (av[i] == bv[i]) :
-                   (14 == 1) ? (av[i] < bv[i]) :
-                   (14 == 2) ? (av[i] <= bv[i]) :
-                   (14 == 4) ? (av[i] != bv[i]) :
-                   (14 == 5) ? !(av[i] < bv[i]) :
-                   (14 == 6) ? !(av[i] <= bv[i]) :
-                   (14 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (14 == 0 || 14 == 16) ? (av[i] == bv[i]) :
+                   (14 == 8 || 14 == 24) ? (un_ || av[i] == bv[i]) :
+                   (14 == 1 || 14 == 17) ? (av[i] < bv[i]) :
+                   (14 == 2 || 14 == 18) ? (av[i] <= bv[i]) :
+                   (14 == 3 || 14 == 19) ? un_ :
+                   (14 == 4 || 14 == 20) ? (av[i] != bv[i]) :
+                   (14 == 12 || 14 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (14 == 5 || 14 == 21) ? !(av[i] < bv[i]) :
+                   (14 == 6 || 14 == 22) ? !(av[i] <= bv[i]) :
+                   (14 == 7 || 14 == 23) ? !un_ :
+                   (14 == 9 || 14 == 25) ? !(av[i] >= bv[i]) :
+                   (14 == 10 || 14 == 26) ? !(av[i] > bv[i]) :
+                   (14 == 13 || 14 == 29) ? (av[i] >= bv[i]) :
+                   (14 == 14 || 14 == 30) ? (av[i] > bv[i]) :
+                   (14 == 15 || 14 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -7943,13 +8339,22 @@ static void case_308(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (14 == 0) ? (av[0] == bv[0]) :
-                   (14 == 1) ? (av[0] < bv[0]) :
-                   (14 == 2) ? (av[0] <= bv[0]) :
-                   (14 == 4) ? (av[0] != bv[0]) :
-                   (14 == 5) ? !(av[0] < bv[0]) :
-                   (14 == 6) ? !(av[0] <= bv[0]) :
-                   (14 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (14 == 0 || 14 == 16) ? (av[0] == bv[0]) :
+                   (14 == 8 || 14 == 24) ? (un_ || av[0] == bv[0]) :
+                   (14 == 1 || 14 == 17) ? (av[0] < bv[0]) :
+                   (14 == 2 || 14 == 18) ? (av[0] <= bv[0]) :
+                   (14 == 3 || 14 == 19) ? un_ :
+                   (14 == 4 || 14 == 20) ? (av[0] != bv[0]) :
+                   (14 == 12 || 14 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (14 == 5 || 14 == 21) ? !(av[0] < bv[0]) :
+                   (14 == 6 || 14 == 22) ? !(av[0] <= bv[0]) :
+                   (14 == 7 || 14 == 23) ? !un_ :
+                   (14 == 9 || 14 == 25) ? !(av[0] >= bv[0]) :
+                   (14 == 10 || 14 == 26) ? !(av[0] > bv[0]) :
+                   (14 == 13 || 14 == 29) ? (av[0] >= bv[0]) :
+                   (14 == 14 || 14 == 30) ? (av[0] > bv[0]) :
+                   (14 == 15 || 14 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -7969,13 +8374,22 @@ static void case_309(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (14 == 0) ? (av[0] == bv[0]) :
-                   (14 == 1) ? (av[0] < bv[0]) :
-                   (14 == 2) ? (av[0] <= bv[0]) :
-                   (14 == 4) ? (av[0] != bv[0]) :
-                   (14 == 5) ? !(av[0] < bv[0]) :
-                   (14 == 6) ? !(av[0] <= bv[0]) :
-                   (14 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (14 == 0 || 14 == 16) ? (av[0] == bv[0]) :
+                   (14 == 8 || 14 == 24) ? (un_ || av[0] == bv[0]) :
+                   (14 == 1 || 14 == 17) ? (av[0] < bv[0]) :
+                   (14 == 2 || 14 == 18) ? (av[0] <= bv[0]) :
+                   (14 == 3 || 14 == 19) ? un_ :
+                   (14 == 4 || 14 == 20) ? (av[0] != bv[0]) :
+                   (14 == 12 || 14 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (14 == 5 || 14 == 21) ? !(av[0] < bv[0]) :
+                   (14 == 6 || 14 == 22) ? !(av[0] <= bv[0]) :
+                   (14 == 7 || 14 == 23) ? !un_ :
+                   (14 == 9 || 14 == 25) ? !(av[0] >= bv[0]) :
+                   (14 == 10 || 14 == 26) ? !(av[0] > bv[0]) :
+                   (14 == 13 || 14 == 29) ? (av[0] >= bv[0]) :
+                   (14 == 14 || 14 == 30) ? (av[0] > bv[0]) :
+                   (14 == 15 || 14 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -7995,13 +8409,22 @@ static void case_310(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (13 == 0) ? (av[i] == bv[i]) :
-                   (13 == 1) ? (av[i] < bv[i]) :
-                   (13 == 2) ? (av[i] <= bv[i]) :
-                   (13 == 4) ? (av[i] != bv[i]) :
-                   (13 == 5) ? !(av[i] < bv[i]) :
-                   (13 == 6) ? !(av[i] <= bv[i]) :
-                   (13 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (13 == 0 || 13 == 16) ? (av[i] == bv[i]) :
+                   (13 == 8 || 13 == 24) ? (un_ || av[i] == bv[i]) :
+                   (13 == 1 || 13 == 17) ? (av[i] < bv[i]) :
+                   (13 == 2 || 13 == 18) ? (av[i] <= bv[i]) :
+                   (13 == 3 || 13 == 19) ? un_ :
+                   (13 == 4 || 13 == 20) ? (av[i] != bv[i]) :
+                   (13 == 12 || 13 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (13 == 5 || 13 == 21) ? !(av[i] < bv[i]) :
+                   (13 == 6 || 13 == 22) ? !(av[i] <= bv[i]) :
+                   (13 == 7 || 13 == 23) ? !un_ :
+                   (13 == 9 || 13 == 25) ? !(av[i] >= bv[i]) :
+                   (13 == 10 || 13 == 26) ? !(av[i] > bv[i]) :
+                   (13 == 13 || 13 == 29) ? (av[i] >= bv[i]) :
+                   (13 == 14 || 13 == 30) ? (av[i] > bv[i]) :
+                   (13 == 15 || 13 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -8021,13 +8444,22 @@ static void case_311(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (13 == 0) ? (av[i] == bv[i]) :
-                   (13 == 1) ? (av[i] < bv[i]) :
-                   (13 == 2) ? (av[i] <= bv[i]) :
-                   (13 == 4) ? (av[i] != bv[i]) :
-                   (13 == 5) ? !(av[i] < bv[i]) :
-                   (13 == 6) ? !(av[i] <= bv[i]) :
-                   (13 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (13 == 0 || 13 == 16) ? (av[i] == bv[i]) :
+                   (13 == 8 || 13 == 24) ? (un_ || av[i] == bv[i]) :
+                   (13 == 1 || 13 == 17) ? (av[i] < bv[i]) :
+                   (13 == 2 || 13 == 18) ? (av[i] <= bv[i]) :
+                   (13 == 3 || 13 == 19) ? un_ :
+                   (13 == 4 || 13 == 20) ? (av[i] != bv[i]) :
+                   (13 == 12 || 13 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (13 == 5 || 13 == 21) ? !(av[i] < bv[i]) :
+                   (13 == 6 || 13 == 22) ? !(av[i] <= bv[i]) :
+                   (13 == 7 || 13 == 23) ? !un_ :
+                   (13 == 9 || 13 == 25) ? !(av[i] >= bv[i]) :
+                   (13 == 10 || 13 == 26) ? !(av[i] > bv[i]) :
+                   (13 == 13 || 13 == 29) ? (av[i] >= bv[i]) :
+                   (13 == 14 || 13 == 30) ? (av[i] > bv[i]) :
+                   (13 == 15 || 13 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -8047,13 +8479,22 @@ static void case_312(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (13 == 0) ? (av[0] == bv[0]) :
-                   (13 == 1) ? (av[0] < bv[0]) :
-                   (13 == 2) ? (av[0] <= bv[0]) :
-                   (13 == 4) ? (av[0] != bv[0]) :
-                   (13 == 5) ? !(av[0] < bv[0]) :
-                   (13 == 6) ? !(av[0] <= bv[0]) :
-                   (13 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (13 == 0 || 13 == 16) ? (av[0] == bv[0]) :
+                   (13 == 8 || 13 == 24) ? (un_ || av[0] == bv[0]) :
+                   (13 == 1 || 13 == 17) ? (av[0] < bv[0]) :
+                   (13 == 2 || 13 == 18) ? (av[0] <= bv[0]) :
+                   (13 == 3 || 13 == 19) ? un_ :
+                   (13 == 4 || 13 == 20) ? (av[0] != bv[0]) :
+                   (13 == 12 || 13 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (13 == 5 || 13 == 21) ? !(av[0] < bv[0]) :
+                   (13 == 6 || 13 == 22) ? !(av[0] <= bv[0]) :
+                   (13 == 7 || 13 == 23) ? !un_ :
+                   (13 == 9 || 13 == 25) ? !(av[0] >= bv[0]) :
+                   (13 == 10 || 13 == 26) ? !(av[0] > bv[0]) :
+                   (13 == 13 || 13 == 29) ? (av[0] >= bv[0]) :
+                   (13 == 14 || 13 == 30) ? (av[0] > bv[0]) :
+                   (13 == 15 || 13 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -8073,13 +8514,22 @@ static void case_313(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (13 == 0) ? (av[0] == bv[0]) :
-                   (13 == 1) ? (av[0] < bv[0]) :
-                   (13 == 2) ? (av[0] <= bv[0]) :
-                   (13 == 4) ? (av[0] != bv[0]) :
-                   (13 == 5) ? !(av[0] < bv[0]) :
-                   (13 == 6) ? !(av[0] <= bv[0]) :
-                   (13 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (13 == 0 || 13 == 16) ? (av[0] == bv[0]) :
+                   (13 == 8 || 13 == 24) ? (un_ || av[0] == bv[0]) :
+                   (13 == 1 || 13 == 17) ? (av[0] < bv[0]) :
+                   (13 == 2 || 13 == 18) ? (av[0] <= bv[0]) :
+                   (13 == 3 || 13 == 19) ? un_ :
+                   (13 == 4 || 13 == 20) ? (av[0] != bv[0]) :
+                   (13 == 12 || 13 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (13 == 5 || 13 == 21) ? !(av[0] < bv[0]) :
+                   (13 == 6 || 13 == 22) ? !(av[0] <= bv[0]) :
+                   (13 == 7 || 13 == 23) ? !un_ :
+                   (13 == 9 || 13 == 25) ? !(av[0] >= bv[0]) :
+                   (13 == 10 || 13 == 26) ? !(av[0] > bv[0]) :
+                   (13 == 13 || 13 == 29) ? (av[0] >= bv[0]) :
+                   (13 == 14 || 13 == 30) ? (av[0] > bv[0]) :
+                   (13 == 15 || 13 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -8099,13 +8549,22 @@ static void case_314(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (10 == 0) ? (av[i] == bv[i]) :
-                   (10 == 1) ? (av[i] < bv[i]) :
-                   (10 == 2) ? (av[i] <= bv[i]) :
-                   (10 == 4) ? (av[i] != bv[i]) :
-                   (10 == 5) ? !(av[i] < bv[i]) :
-                   (10 == 6) ? !(av[i] <= bv[i]) :
-                   (10 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (10 == 0 || 10 == 16) ? (av[i] == bv[i]) :
+                   (10 == 8 || 10 == 24) ? (un_ || av[i] == bv[i]) :
+                   (10 == 1 || 10 == 17) ? (av[i] < bv[i]) :
+                   (10 == 2 || 10 == 18) ? (av[i] <= bv[i]) :
+                   (10 == 3 || 10 == 19) ? un_ :
+                   (10 == 4 || 10 == 20) ? (av[i] != bv[i]) :
+                   (10 == 12 || 10 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (10 == 5 || 10 == 21) ? !(av[i] < bv[i]) :
+                   (10 == 6 || 10 == 22) ? !(av[i] <= bv[i]) :
+                   (10 == 7 || 10 == 23) ? !un_ :
+                   (10 == 9 || 10 == 25) ? !(av[i] >= bv[i]) :
+                   (10 == 10 || 10 == 26) ? !(av[i] > bv[i]) :
+                   (10 == 13 || 10 == 29) ? (av[i] >= bv[i]) :
+                   (10 == 14 || 10 == 30) ? (av[i] > bv[i]) :
+                   (10 == 15 || 10 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -8125,13 +8584,22 @@ static void case_315(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (10 == 0) ? (av[i] == bv[i]) :
-                   (10 == 1) ? (av[i] < bv[i]) :
-                   (10 == 2) ? (av[i] <= bv[i]) :
-                   (10 == 4) ? (av[i] != bv[i]) :
-                   (10 == 5) ? !(av[i] < bv[i]) :
-                   (10 == 6) ? !(av[i] <= bv[i]) :
-                   (10 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (10 == 0 || 10 == 16) ? (av[i] == bv[i]) :
+                   (10 == 8 || 10 == 24) ? (un_ || av[i] == bv[i]) :
+                   (10 == 1 || 10 == 17) ? (av[i] < bv[i]) :
+                   (10 == 2 || 10 == 18) ? (av[i] <= bv[i]) :
+                   (10 == 3 || 10 == 19) ? un_ :
+                   (10 == 4 || 10 == 20) ? (av[i] != bv[i]) :
+                   (10 == 12 || 10 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (10 == 5 || 10 == 21) ? !(av[i] < bv[i]) :
+                   (10 == 6 || 10 == 22) ? !(av[i] <= bv[i]) :
+                   (10 == 7 || 10 == 23) ? !un_ :
+                   (10 == 9 || 10 == 25) ? !(av[i] >= bv[i]) :
+                   (10 == 10 || 10 == 26) ? !(av[i] > bv[i]) :
+                   (10 == 13 || 10 == 29) ? (av[i] >= bv[i]) :
+                   (10 == 14 || 10 == 30) ? (av[i] > bv[i]) :
+                   (10 == 15 || 10 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -8151,13 +8619,22 @@ static void case_316(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (10 == 0) ? (av[0] == bv[0]) :
-                   (10 == 1) ? (av[0] < bv[0]) :
-                   (10 == 2) ? (av[0] <= bv[0]) :
-                   (10 == 4) ? (av[0] != bv[0]) :
-                   (10 == 5) ? !(av[0] < bv[0]) :
-                   (10 == 6) ? !(av[0] <= bv[0]) :
-                   (10 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (10 == 0 || 10 == 16) ? (av[0] == bv[0]) :
+                   (10 == 8 || 10 == 24) ? (un_ || av[0] == bv[0]) :
+                   (10 == 1 || 10 == 17) ? (av[0] < bv[0]) :
+                   (10 == 2 || 10 == 18) ? (av[0] <= bv[0]) :
+                   (10 == 3 || 10 == 19) ? un_ :
+                   (10 == 4 || 10 == 20) ? (av[0] != bv[0]) :
+                   (10 == 12 || 10 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (10 == 5 || 10 == 21) ? !(av[0] < bv[0]) :
+                   (10 == 6 || 10 == 22) ? !(av[0] <= bv[0]) :
+                   (10 == 7 || 10 == 23) ? !un_ :
+                   (10 == 9 || 10 == 25) ? !(av[0] >= bv[0]) :
+                   (10 == 10 || 10 == 26) ? !(av[0] > bv[0]) :
+                   (10 == 13 || 10 == 29) ? (av[0] >= bv[0]) :
+                   (10 == 14 || 10 == 30) ? (av[0] > bv[0]) :
+                   (10 == 15 || 10 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -8177,13 +8654,22 @@ static void case_317(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (10 == 0) ? (av[0] == bv[0]) :
-                   (10 == 1) ? (av[0] < bv[0]) :
-                   (10 == 2) ? (av[0] <= bv[0]) :
-                   (10 == 4) ? (av[0] != bv[0]) :
-                   (10 == 5) ? !(av[0] < bv[0]) :
-                   (10 == 6) ? !(av[0] <= bv[0]) :
-                   (10 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (10 == 0 || 10 == 16) ? (av[0] == bv[0]) :
+                   (10 == 8 || 10 == 24) ? (un_ || av[0] == bv[0]) :
+                   (10 == 1 || 10 == 17) ? (av[0] < bv[0]) :
+                   (10 == 2 || 10 == 18) ? (av[0] <= bv[0]) :
+                   (10 == 3 || 10 == 19) ? un_ :
+                   (10 == 4 || 10 == 20) ? (av[0] != bv[0]) :
+                   (10 == 12 || 10 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (10 == 5 || 10 == 21) ? !(av[0] < bv[0]) :
+                   (10 == 6 || 10 == 22) ? !(av[0] <= bv[0]) :
+                   (10 == 7 || 10 == 23) ? !un_ :
+                   (10 == 9 || 10 == 25) ? !(av[0] >= bv[0]) :
+                   (10 == 10 || 10 == 26) ? !(av[0] > bv[0]) :
+                   (10 == 13 || 10 == 29) ? (av[0] >= bv[0]) :
+                   (10 == 14 || 10 == 30) ? (av[0] > bv[0]) :
+                   (10 == 15 || 10 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
@@ -8203,13 +8689,22 @@ static void case_318(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (9 == 0) ? (av[i] == bv[i]) :
-                   (9 == 1) ? (av[i] < bv[i]) :
-                   (9 == 2) ? (av[i] <= bv[i]) :
-                   (9 == 4) ? (av[i] != bv[i]) :
-                   (9 == 5) ? !(av[i] < bv[i]) :
-                   (9 == 6) ? !(av[i] <= bv[i]) :
-                   (9 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (9 == 0 || 9 == 16) ? (av[i] == bv[i]) :
+                   (9 == 8 || 9 == 24) ? (un_ || av[i] == bv[i]) :
+                   (9 == 1 || 9 == 17) ? (av[i] < bv[i]) :
+                   (9 == 2 || 9 == 18) ? (av[i] <= bv[i]) :
+                   (9 == 3 || 9 == 19) ? un_ :
+                   (9 == 4 || 9 == 20) ? (av[i] != bv[i]) :
+                   (9 == 12 || 9 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (9 == 5 || 9 == 21) ? !(av[i] < bv[i]) :
+                   (9 == 6 || 9 == 22) ? !(av[i] <= bv[i]) :
+                   (9 == 7 || 9 == 23) ? !un_ :
+                   (9 == 9 || 9 == 25) ? !(av[i] >= bv[i]) :
+                   (9 == 10 || 9 == 26) ? !(av[i] > bv[i]) :
+                   (9 == 13 || 9 == 29) ? (av[i] >= bv[i]) :
+                   (9 == 14 || 9 == 30) ? (av[i] > bv[i]) :
+                   (9 == 15 || 9 == 31) ? 1 : 0;
           ((unsigned int *)e_)[i] = p_ ? (unsigned int)-1 : (unsigned int)0;
       }
       for (i = 0; i < 4; i++)
@@ -8229,13 +8724,22 @@ static void case_319(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (9 == 0) ? (av[i] == bv[i]) :
-                   (9 == 1) ? (av[i] < bv[i]) :
-                   (9 == 2) ? (av[i] <= bv[i]) :
-                   (9 == 4) ? (av[i] != bv[i]) :
-                   (9 == 5) ? !(av[i] < bv[i]) :
-                   (9 == 6) ? !(av[i] <= bv[i]) :
-                   (9 == 7) ? 1 : 0;
+          int un_ = isnan(av[i]) || isnan(bv[i]);
+          int p_ = (9 == 0 || 9 == 16) ? (av[i] == bv[i]) :
+                   (9 == 8 || 9 == 24) ? (un_ || av[i] == bv[i]) :
+                   (9 == 1 || 9 == 17) ? (av[i] < bv[i]) :
+                   (9 == 2 || 9 == 18) ? (av[i] <= bv[i]) :
+                   (9 == 3 || 9 == 19) ? un_ :
+                   (9 == 4 || 9 == 20) ? (av[i] != bv[i]) :
+                   (9 == 12 || 9 == 28) ? (!un_ && av[i] != bv[i]) :
+                   (9 == 5 || 9 == 21) ? !(av[i] < bv[i]) :
+                   (9 == 6 || 9 == 22) ? !(av[i] <= bv[i]) :
+                   (9 == 7 || 9 == 23) ? !un_ :
+                   (9 == 9 || 9 == 25) ? !(av[i] >= bv[i]) :
+                   (9 == 10 || 9 == 26) ? !(av[i] > bv[i]) :
+                   (9 == 13 || 9 == 29) ? (av[i] >= bv[i]) :
+                   (9 == 14 || 9 == 30) ? (av[i] > bv[i]) :
+                   (9 == 15 || 9 == 31) ? 1 : 0;
           ((unsigned long long *)e_)[i] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
       }
       for (i = 0; i < 2; i++)
@@ -8255,13 +8759,22 @@ static void case_320(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 4; i++) {
-          int p_ = (9 == 0) ? (av[0] == bv[0]) :
-                   (9 == 1) ? (av[0] < bv[0]) :
-                   (9 == 2) ? (av[0] <= bv[0]) :
-                   (9 == 4) ? (av[0] != bv[0]) :
-                   (9 == 5) ? !(av[0] < bv[0]) :
-                   (9 == 6) ? !(av[0] <= bv[0]) :
-                   (9 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (9 == 0 || 9 == 16) ? (av[0] == bv[0]) :
+                   (9 == 8 || 9 == 24) ? (un_ || av[0] == bv[0]) :
+                   (9 == 1 || 9 == 17) ? (av[0] < bv[0]) :
+                   (9 == 2 || 9 == 18) ? (av[0] <= bv[0]) :
+                   (9 == 3 || 9 == 19) ? un_ :
+                   (9 == 4 || 9 == 20) ? (av[0] != bv[0]) :
+                   (9 == 12 || 9 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (9 == 5 || 9 == 21) ? !(av[0] < bv[0]) :
+                   (9 == 6 || 9 == 22) ? !(av[0] <= bv[0]) :
+                   (9 == 7 || 9 == 23) ? !un_ :
+                   (9 == 9 || 9 == 25) ? !(av[0] >= bv[0]) :
+                   (9 == 10 || 9 == 26) ? !(av[0] > bv[0]) :
+                   (9 == 13 || 9 == 29) ? (av[0] >= bv[0]) :
+                   (9 == 14 || 9 == 30) ? (av[0] > bv[0]) :
+                   (9 == 15 || 9 == 31) ? 1 : 0;
           if (i == 0) ((unsigned int *)e_)[0] = p_ ? (unsigned int)-1 : (unsigned int)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 4; i++)
@@ -8281,13 +8794,22 @@ static void case_321(void) {
       memcpy(av, ua.e, sizeof av);
       memcpy(bv, ub.e, sizeof bv);
       for (i = 0; i < 2; i++) {
-          int p_ = (9 == 0) ? (av[0] == bv[0]) :
-                   (9 == 1) ? (av[0] < bv[0]) :
-                   (9 == 2) ? (av[0] <= bv[0]) :
-                   (9 == 4) ? (av[0] != bv[0]) :
-                   (9 == 5) ? !(av[0] < bv[0]) :
-                   (9 == 6) ? !(av[0] <= bv[0]) :
-                   (9 == 7) ? 1 : 0;
+          int un_ = isnan(av[0]) || isnan(bv[0]);
+          int p_ = (9 == 0 || 9 == 16) ? (av[0] == bv[0]) :
+                   (9 == 8 || 9 == 24) ? (un_ || av[0] == bv[0]) :
+                   (9 == 1 || 9 == 17) ? (av[0] < bv[0]) :
+                   (9 == 2 || 9 == 18) ? (av[0] <= bv[0]) :
+                   (9 == 3 || 9 == 19) ? un_ :
+                   (9 == 4 || 9 == 20) ? (av[0] != bv[0]) :
+                   (9 == 12 || 9 == 28) ? (!un_ && av[0] != bv[0]) :
+                   (9 == 5 || 9 == 21) ? !(av[0] < bv[0]) :
+                   (9 == 6 || 9 == 22) ? !(av[0] <= bv[0]) :
+                   (9 == 7 || 9 == 23) ? !un_ :
+                   (9 == 9 || 9 == 25) ? !(av[0] >= bv[0]) :
+                   (9 == 10 || 9 == 26) ? !(av[0] > bv[0]) :
+                   (9 == 13 || 9 == 29) ? (av[0] >= bv[0]) :
+                   (9 == 14 || 9 == 30) ? (av[0] > bv[0]) :
+                   (9 == 15 || 9 == 31) ? 1 : 0;
           if (i == 0) ((unsigned long long *)e_)[0] = p_ ? (unsigned long long)-1 : (unsigned long long)0;
           else e_[i] = av[i]; }
       for (i = 0; i < 2; i++)
