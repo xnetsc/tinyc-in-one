@@ -1978,6 +1978,10 @@ static unsigned pe_add_unwind_info(TCCState *s1)
     return s1->uw_offs;
 }
 
+static unsigned pe_add_unwind_info_saves(TCCState *s1, unsigned prolog_size,
+                                         const PEUnwindSave *saves, int nb_saves,
+                                         int chkstk);
+
 ST_FUNC void pe_add_unwind_data(unsigned start, unsigned end, unsigned stack)
 {
     TCCState *s1 = tcc_state;
@@ -1989,7 +1993,15 @@ ST_FUNC void pe_add_unwind_data(unsigned start, unsigned end, unsigned stack)
       DWORD UnwindData;
     } *p;
 
-    d = pe_add_unwind_info(s1);
+    /* The shared info describes the small-frame prolog only
+       (push rbp; mov rbp, rsp; sub rsp, size).  A frame of
+       4096 bytes or more takes the 11-byte __chkstk prolog
+       (mov eax, size; call __chkstk; nop), so it gets its own
+       info with the frame setup codes at the end of the call. */
+    if (stack >= 4096)
+        d = pe_add_unwind_info_saves(s1, 11, NULL, 0, 1);
+    else
+        d = pe_add_unwind_info(s1);
     pd = s1->uw_pdata;
     o = pd->data_offset;
     p = section_ptr_add(pd, sizeof *p);
@@ -2010,9 +2022,18 @@ ST_FUNC void pe_add_unwind_data(unsigned start, unsigned end, unsigned stack)
    same frame setup codes as the shared info.  A save whose frame
    offset fits the scaled 16-bit form uses UWOP_SAVE_NONVOL, larger
    offsets use UWOP_SAVE_NONVOL_FAR.  The info goes into the text
-   section, like the shared one; returns its offset there. */
+   section, like the shared one; returns its offset there.
+   For a __chkstk prolog (chkstk != 0) the frame pointer is not
+   established until the call returns, so the two frame setup codes
+   carry the offset of the end of the call (10: mov eax, size is
+   5 bytes, call __chkstk is 5 bytes) instead of the small-frame
+   offsets (4 and 1).  An unwind code applies only once the
+   instruction it describes has executed, so with the small-frame
+   offsets a fault inside the call would unwind against a frame
+   pointer that was never set up. */
 static unsigned pe_add_unwind_info_saves(TCCState *s1, unsigned prolog_size,
-                                         const PEUnwindSave *saves, int nb_saves)
+                                         const PEUnwindSave *saves, int nb_saves,
+                                         int chkstk)
 {
     Section *s;
     unsigned char *p;
@@ -2059,8 +2080,8 @@ static unsigned pe_add_unwind_info_saves(TCCState *s1, unsigned prolog_size,
             *p++ = (fo >> 24) & 0xff;
         }
     }
-    *p++ = 0x04; *p++ = 0x03; // 3:0 UWOP_SET_FPREG (mov rsp -> rbp)
-    *p++ = 0x01; *p++ = 0x50; // 0:5 UWOP_PUSH_NONVOL (push rbp)
+    *p++ = chkstk ? 0x0a : 0x04; *p++ = 0x03; // UWOP_SET_FPREG
+    *p++ = chkstk ? 0x0a : 0x01; *p++ = 0x50; // UWOP_PUSH_NONVOL (push rbp)
 
     return o;
 }
@@ -2078,7 +2099,11 @@ ST_FUNC void pe_add_unwind_data_saves(unsigned start, unsigned end, unsigned sta
       DWORD UnwindData;
     } *p;
 
-    d = pe_add_unwind_info_saves(s1, prolog_size, saves, nb_saves);
+    /* A frame of 4096 bytes or more takes the __chkstk prolog
+       (mov eax, size; call __chkstk; nop) instead of
+       push rbp; mov rbp, rsp; sub rsp, size: see x86_64-gen.c. */
+    d = pe_add_unwind_info_saves(s1, prolog_size, saves, nb_saves,
+                                 stack >= 4096);
     pd = s1->uw_pdata;
     o = pd->data_offset;
     p = section_ptr_add(pd, sizeof *p);

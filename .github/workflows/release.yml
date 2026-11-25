@@ -440,6 +440,18 @@ jobs:
         run: |
           bash tests/windows/run_windows_simd_smoke.sh > test-outputs/win-simd-smoke.log 2>&1
 
+      # Cross-frame unwind evidence for the __chkstk prolog: a
+      # >=4096-byte frame's UNWIND_INFO must put the frame setup
+      # codes at the end of the call to __chkstk (prolog offset
+      # 10), not at the small-frame offsets.  The test unwinds a
+      # fabricated context from inside the prolog with
+      # RtlVirtualUnwind, the engine SEH uses, and checks the
+      # metadata through RtlLookupFunctionEntry.
+      - name: Chkstk unwind (PE)
+        shell: bash
+        run: |
+          bash tests/windows/run_windows_chkstk_unwind.sh > test-outputs/win-chkstk-unwind.log 2>&1
+
       - name: Stage the packaging dist from the host build
         shell: msys2 {0}
         run: |
