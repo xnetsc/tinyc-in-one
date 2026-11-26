@@ -93,7 +93,14 @@ def extract_from_header(path):
         text = strip_comments(f.read())
     funcs, vars_ = set(), set()
     for st in statements(text):
-        if st.startswith(("typedef", "struct", "union", "enum")):
+        # Skip typedefs only: a typedef of a function-pointer type
+        # would otherwise be harvested as a function below.  Do NOT
+        # skip statements starting with struct/union/enum: a
+        # declaration whose return type is a struct (e.g.
+        # "struct tm *gmtime_r(...)") starts with "struct" but is a
+        # real function declaration, and a struct definition is
+        # already skipped by the brace check below.
+        if st.startswith("typedef"):
             continue
         if "{" in st or "}" in st:
             continue  # a definition body, not a declaration

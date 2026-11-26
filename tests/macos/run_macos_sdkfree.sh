@@ -105,9 +105,16 @@ fi
 export SDKROOT="$EMPTY_SDK"
 
 echo "=== sdkfree: negative control (SDK-only header must not resolve) ==="
-printf '#include <dispatch/dispatch.h>\nint main(void){return 0;}\n' > "$WORK/ctrl.c"
+# The witness must be a header the platform SDK has and the
+# bundled set deliberately does not ship: <netdb.h> is outside
+# the bundled scope (name-service lookup, not in vendor-darwin),
+# so resolving it with the SDK hidden can only mean leakage.
+# <dispatch/dispatch.h> must NOT be used here: the bundled set
+# ships its own minimal dispatch/dispatch.h, so resolving it
+# proves nothing about the SDK.
+printf '#include <netdb.h>\nint main(void){return 0;}\n' > "$WORK/ctrl.c"
 if "$TINYC" -B"$DIST/lib/tcc" -c "$WORK/ctrl.c" -o "$WORK/ctrl.o" 2>"$WORK/ctrl.log"; then
-    fail "SDK leakage: <dispatch/dispatch.h> resolved with the SDK hidden"
+    fail "SDK leakage: <netdb.h> resolved with the SDK hidden"
 else
     pass "SDK-only header correctly unresolvable with the SDK hidden"
 fi

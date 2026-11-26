@@ -61,16 +61,25 @@ int main(void) {
     OFF(ucontext_t, uc_link); OFF(ucontext_t, uc_mcsize);
     OFF(ucontext_t, uc_mcontext);
     OFF(struct __siginfo, si_code); OFF(struct __siginfo, si_addr);
+/* The register offsets are taken through the __darwin_*_t
+ * typedefs, not the bare Mach struct names: struct
+ * x86_thread_state64 / struct arm_thread_state64 live in
+ * <mach/i386/thread_status.h> / <mach/arm/thread_status.h>,
+ * which <sys/ucontext.h> does not include (so the reference
+ * probe would not compile), while the __darwin_*_t typedefs
+ * are what <sys/ucontext.h> itself provides on both sides -
+ * they name the same thread-state structs the mcontext's __ss
+ * member is declared with. */
 #if defined(__x86_64__)
     OFF(struct __darwin_mcontext64, __ss);
     OFF(struct __darwin_mcontext64, __fs);
-    OFF(struct x86_thread_state64, __rip);
-    OFF(struct x86_thread_state64, __rbp);
+    OFF(__darwin_x86_thread_state64_t, __rip);
+    OFF(__darwin_x86_thread_state64_t, __rbp);
 #elif defined(__aarch64__)
     OFF(struct __darwin_mcontext64, __ss);
     OFF(struct __darwin_mcontext64, __ns);
-    OFF(struct arm_thread_state64, __pc);
-    OFF(struct arm_thread_state64, __fp);
+    OFF(__darwin_arm_thread_state64_t, __pc);
+    OFF(__darwin_arm_thread_state64_t, __fp);
 #endif
     printf("INFO sizeof_jmp_buf=%zu\n", sizeof(jmp_buf));
     printf("INFO sizeof_sigjmp_buf=%zu\n", sizeof(sigjmp_buf));

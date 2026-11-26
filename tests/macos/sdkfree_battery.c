@@ -73,7 +73,7 @@ int main(void) {
         int n = snprintf(buf, sizeof buf, "%d-%s", 42, "tinyc");
         FILE *f;
         char back[16] = {0};
-        SECTION("stdio.snprintf", n == 9 && strcmp(buf, "42-tinyc") == 0);
+        SECTION("stdio.snprintf", n == 8 && strcmp(buf, "42-tinyc") == 0);
         f = tmpfile();
         if (f) {
             fwrite("hello", 1, 5, f);
