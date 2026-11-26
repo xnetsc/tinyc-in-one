@@ -64,4 +64,19 @@ typedef struct fd_set {
 		for (_i = 0; _i < 32; _i++) _p->fds_bits[_i] = 0; \
 	} while (0)
 
+/* The 64-bit-inode symbol variants.  On x86_64 libSystem exports
+ * the stat and directory functions that fill a struct stat or a
+ * struct dirent under a $INODE64-suffixed name (stat$INODE64,
+ * readdir$INODE64, ...); the plain name is the legacy 32-bit-inode
+ * implementation and fills the old, smaller struct layout.  The
+ * platform headers rename the declarations with an asm label, and
+ * this macro is the bundled equivalent.  arm64 never had a
+ * 32-bit-inode ABI, so there the plain names are already the
+ * 64-bit ones and the macro is empty. */
+#if defined(__x86_64__)
+#define __DARWIN_INODE64(sym) __asm__("_" #sym "$INODE64")
+#else
+#define __DARWIN_INODE64(sym)
+#endif
+
 #endif

@@ -32,11 +32,21 @@
 #include <sched.h>
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #define SZ(T) printf("sizeof_" #T "=%zu\n", sizeof(T))
 #define OFF(T, f) printf("off_" #T "_" #f "=%zu\n", offsetof(T, f))
+/* Offset of a register inside the thread-state struct the
+ * mcontext's __ss member is declared with, without naming that
+ * struct: the typedef names differ between the bundled header
+ * and the platform headers (the platform SDK has no
+ * __darwin_*_t typedef at all, so the reference probe must not
+ * name one), so the type is taken from the __ss member itself.
+ * The key is off___ss_<register> on both legs. */
+#define OFF_SS(f) printf("off___ss_" #f "=%zu\n", \
+	offsetof(__typeof__(((struct __darwin_mcontext64 *)0)->__ss), f))
 #define K(name) printf(#name "=%lld\n", (long long)(name))
 
 int main(void) {
@@ -61,25 +71,24 @@ int main(void) {
     OFF(ucontext_t, uc_link); OFF(ucontext_t, uc_mcsize);
     OFF(ucontext_t, uc_mcontext);
     OFF(struct __siginfo, si_code); OFF(struct __siginfo, si_addr);
-/* The register offsets are taken through the __darwin_*_t
- * typedefs, not the bare Mach struct names: struct
- * x86_thread_state64 / struct arm_thread_state64 live in
- * <mach/i386/thread_status.h> / <mach/arm/thread_status.h>,
- * which <sys/ucontext.h> does not include (so the reference
- * probe would not compile), while the __darwin_*_t typedefs
- * are what <sys/ucontext.h> itself provides on both sides -
- * they name the same thread-state structs the mcontext's __ss
- * member is declared with. */
+/* The register offsets are taken through the type of the
+ * mcontext's __ss member (OFF_SS, above), not through the bare
+ * Mach struct names (struct x86_thread_state64 /
+ * struct arm_thread_state64 live in <mach/.../thread_status.h>,
+ * which <sys/ucontext.h> does not include) and not through the
+ * __darwin_*_t typedefs (which only the bundled header provides;
+ * the platform SDK has no such names, so the reference probe
+ * would not compile). */
 #if defined(__x86_64__)
     OFF(struct __darwin_mcontext64, __ss);
     OFF(struct __darwin_mcontext64, __fs);
-    OFF(__darwin_x86_thread_state64_t, __rip);
-    OFF(__darwin_x86_thread_state64_t, __rbp);
+    OFF_SS(__rip);
+    OFF_SS(__rbp);
 #elif defined(__aarch64__)
     OFF(struct __darwin_mcontext64, __ss);
     OFF(struct __darwin_mcontext64, __ns);
-    OFF(__darwin_arm_thread_state64_t, __pc);
-    OFF(__darwin_arm_thread_state64_t, __fp);
+    OFF_SS(__pc);
+    OFF_SS(__fp);
 #endif
     printf("INFO sizeof_jmp_buf=%zu\n", sizeof(jmp_buf));
     printf("INFO sizeof_sigjmp_buf=%zu\n", sizeof(sigjmp_buf));
@@ -89,6 +98,8 @@ int main(void) {
     K(SCHED_OTHER); K(SCHED_FIFO); K(SCHED_RR);
     K(SIGBUS); K(SIGUSR1); K(SIGSYS); K(SIGCHLD); K(SIGKILL);
     K(FPE_INTDIV); K(FPE_FLTDIV); K(SIG_HOLD);
+    K(FP_NAN); K(FP_INFINITE); K(FP_ZERO); K(FP_NORMAL); K(FP_SUBNORMAL);
+    K(FP_ILOGB0); K(FP_ILOGBNAN);
     K(EAGAIN); K(ENOTSUP); K(EDEADLK); K(EPERM); K(EINTR);
     K(PATH_MAX); K(RAND_MAX); K(BUFSIZ); K(FD_SETSIZE);
     K(SEEK_SET); K(F_GETFL); K(F_SETLK); K(AT_FDCWD);

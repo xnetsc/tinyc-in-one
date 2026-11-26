@@ -12,7 +12,9 @@ The symbol surface is extracted mechanically from the headers in
 vendor-darwin/include/ (the headers are written one declaration
 per statement, which keeps this extraction exact), plus a short
 hand list of symbols the headers use but do not declare (the
-__fpclassify functions behind math.h's fpclassify macro).  Files:
+__fpclassify functions behind math.h's fpclassify macro).  A
+declaration carrying __DARWIN_INODE64(sym) contributes both the
+plain name (arm64) and the sym$INODE64 variant (x86_64).  Files:
 
   libc.tbd       every declared function and variable
   libSystem.tbd  the same surface (so -lSystem resolves too)
@@ -115,6 +117,14 @@ def extract_from_header(path):
             ids = _IDENT.findall(head)
             if ids:
                 funcs.add(ids[-1])
+            # A __DARWIN_INODE64(sym) suffix renames the symbol on
+            # x86_64 to sym$INODE64 (the 64-bit-inode variant in
+            # libSystem); the stub is shared by both targets, so
+            # both the plain name (arm64) and the suffixed name
+            # (x86_64) are listed.
+            m2 = re.search(r"__DARWIN_INODE64\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", st)
+            if m2:
+                funcs.add(m2.group(1) + "$INODE64")
             continue
         if st.startswith("extern"):
             body = st[len("extern"):]

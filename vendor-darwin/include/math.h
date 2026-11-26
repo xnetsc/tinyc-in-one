@@ -23,11 +23,16 @@ typedef double		double_t;
 #define INFINITY	__builtin_huge_valf()
 #define NAN		__builtin_nanf("")
 
-#define FP_INFINITE	1
-#define FP_NAN		2
-#define FP_NORMAL	3
-#define FP_SUBNORMAL	4
-#define FP_ZERO		5
+/* Classification values returned by __fpclassify{,f,l}: these are
+ * Apple's enum values (FP_NAN = 1, FP_INFINITE = 2, FP_ZERO = 3,
+ * FP_NORMAL = 4, FP_SUBNORMAL = 5), which are the ABI of the
+ * libSystem classifiers, not the glibc numbering and not the
+ * order the C standard lists the names in. */
+#define FP_NAN		1
+#define FP_INFINITE	2
+#define FP_ZERO		3
+#define FP_NORMAL	4
+#define FP_SUBNORMAL	5
 #define FP_ILOGB0	(-2147483647-1)
 #define FP_ILOGBNAN	2147483647
 

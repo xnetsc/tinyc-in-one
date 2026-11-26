@@ -103,6 +103,10 @@ int main(void) {
             SECTION("stat.file", fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
                     st.st_size == 3 && st.st_nlink >= 1 &&
                     stat(tmpl, &st) == 0 && st.st_size == 3);
+            SECTION("stat.lstat", lstat(tmpl, &st) == 0 && S_ISREG(st.st_mode) &&
+                    st.st_size == 3);
+            SECTION("stat.fstatat", fstatat(AT_FDCWD, tmpl, &st, 0) == 0 &&
+                    S_ISREG(st.st_mode) && st.st_size == 3);
             close(fd);
             unlink(tmpl);
         } else SECTION("stat.file", 0);
@@ -174,6 +178,46 @@ int main(void) {
             closedir(d);
         }
         SECTION("dirent.scan", found);
+        /* The same directory through the other $INODE64 entry
+         * points: a wrong suffix on any of these is a missing
+         * libSystem symbol, so the battery dies at the call -
+         * that is the tripwire for the marking. */
+        {
+            int dfd = open(dir, O_RDONLY);
+            DIR *fdd = dfd >= 0 ? fdopendir(dfd) : NULL;
+            struct dirent entry, *result = NULL;
+            int ffound = 0;
+            if (fdd) {
+                while (readdir_r(fdd, &entry, &result) == 0 && result != NULL)
+                    if (strcmp(result->d_name, "probe.txt") == 0) ffound = 1;
+                closedir(fdd);
+            }
+            SECTION("dirent.fdopendir", ffound);
+        }
+        {
+            char buf[4096];
+            long base = 0;
+            int dfd = open(dir, O_RDONLY);
+            int n = dfd >= 0 ? getdirentries(dfd, buf, sizeof buf, &base) : -1;
+            int gfound = 0, off;
+            if (n > 0) {
+                for (off = 0; off + 9 <= n; off++)
+                    if (memcmp(buf + off, "probe.txt", 9) == 0) gfound = 1;
+            }
+            if (dfd >= 0) close(dfd);
+            SECTION("dirent.getdirentries", gfound);
+        }
+        {
+            struct dirent **list = NULL;
+            int n = scandir(dir, &list, NULL, alphasort);
+            int sfound = 0, i;
+            for (i = 0; i < n; i++) {
+                if (strcmp(list[i]->d_name, "probe.txt") == 0) sfound = 1;
+                free(list[i]);
+            }
+            free(list);
+            SECTION("dirent.scandir", n >= 3 && sfound);
+        }
         unlink(path);
         rmdir(dir);
     }

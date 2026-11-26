@@ -37,10 +37,10 @@ typedef struct __dirdesc DIR;
 #define DT_SOCK		12
 #define DT_WHT		14
 
-DIR *opendir(const char *dirname);
-DIR *fdopendir(int fd);
-struct dirent *readdir(DIR *dirp);
-int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result);
+DIR *opendir(const char *dirname) __DARWIN_INODE64(opendir);
+DIR *fdopendir(int fd) __DARWIN_INODE64(fdopendir);
+struct dirent *readdir(DIR *dirp) __DARWIN_INODE64(readdir);
+int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result) __DARWIN_INODE64(readdir_r);
 void rewinddir(DIR *dirp);
 void seekdir(DIR *dirp, long loc);
 long telldir(DIR *dirp);
@@ -48,8 +48,8 @@ int closedir(DIR *dirp);
 int dirfd(DIR *dirp);
 int scandir(const char *dirname, struct dirent ***namelist,
 	    int (*select)(const struct dirent *),
-	    int (*compar)(const struct dirent **, const struct dirent **));
+	    int (*compar)(const struct dirent **, const struct dirent **)) __DARWIN_INODE64(scandir);
 int alphasort(const struct dirent **d1, const struct dirent **d2);
-int getdirentries(int fd, char *buf, int nbytes, long *basep);
+int getdirentries(int fd, char *buf, int nbytes, long *basep) __DARWIN_INODE64(getdirentries);
 
 #endif

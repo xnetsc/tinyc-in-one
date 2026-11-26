@@ -81,9 +81,9 @@ struct stat {
 #define UTIME_NOW	((1 << 30) - 1)
 #define UTIME_OMIT	((1 << 30) - 2)
 
-int stat(const char *path, struct stat *sb);
-int fstat(int fd, struct stat *sb);
-int lstat(const char *path, struct stat *sb);
+int stat(const char *path, struct stat *sb) __DARWIN_INODE64(stat);
+int fstat(int fd, struct stat *sb) __DARWIN_INODE64(fstat);
+int lstat(const char *path, struct stat *sb) __DARWIN_INODE64(lstat);
 int chmod(const char *path, mode_t mode);
 int fchmod(int fd, mode_t mode);
 int lchmod(const char *path, mode_t mode);
@@ -91,7 +91,7 @@ mode_t umask(mode_t mask);
 int mkdir(const char *path, mode_t mode);
 int mkfifo(const char *path, mode_t mode);
 int mknod(const char *path, mode_t mode, dev_t dev);
-int fstatat(int fd, const char *path, struct stat *sb, int flag);
+int fstatat(int fd, const char *path, struct stat *sb, int flag) __DARWIN_INODE64(fstatat);
 int fchmodat(int fd, const char *path, mode_t mode, int flag);
 int mkdirat(int fd, const char *path, mode_t mode);
 int mkfifoat(int fd, const char *path, mode_t mode);
