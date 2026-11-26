@@ -106,6 +106,15 @@ def stage_sysroot(stage, target, manifest, libtcc1_override=None):
             found = libtcc1_override or find_libtcc1(target)
             if found and not os.path.exists(found):
                 found = None
+        elif source.startswith(f"lib/{target}/"):
+            # The sysroot's link inputs (crt objects, stub
+            # libraries, import definitions, the Darwin text
+            # stub) are committed under packages/browser/
+            # sysroot-lib/<target>/; see that directory's
+            # README.md and gen_sysroot_lib.py.
+            p = os.path.join(BROWSER, "sysroot-lib", target,
+                             source[len(f"lib/{target}/"):])
+            found = p if os.path.exists(p) else None
         else:
             found = None
         if not found:

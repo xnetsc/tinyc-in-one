@@ -45,6 +45,8 @@ The target's module ships as one asset envelope file (`tcc-<target>.tinyc.js`: t
 
 `sysroot: true` loads the target's bundled header set (TCC's own headers: `float.h`, `stdarg.h`, `stddef.h`, `stdbool.h`, `tcclib.h`, and the rest of that target's manifest) into the virtual filesystem under `/sysroot/include` and registers it as an include directory. A custom manifest can be passed as `{ manifest, baseUrl }`.
 
+The sysroot also carries the target's link inputs under `/sysroot/lib`: `libtcc1.a` (the compiler runtime) plus, per target, the platform's C runtime startup objects and a stub shared library for each system library (ELF targets), import definition files (Windows), or a text-based stub (Darwin) — provenance and licenses are listed in `sysroot-lib/README.md`. A hosted link (the default for every target but `wasm32-wasi`) therefore produces a dynamically linked program: the product names the platform's own libraries — `libc.so.6`/`libm.so.6`, the bionic libraries, `msvcrt.dll`/`kernel32.dll`, `libSystem` — and the platform's loader and libraries serve it at run time. The `x86_64-windows` sysroot does not carry `math.h`, `tgmath.h` or `tcclib.h`: the facilities they declare beyond the remaining headers are not exports of `msvcrt.dll`, the C runtime a Windows product binds to.
+
 Target-specific manifest facts:
 
 - The Android manifests describe the bionic sysroot layout of the native Android builds: `libc: "bionic"`, `androidApi: 30`, and `dynamicLinker: "/system/bin/linker64"` (the interpreter of 64-bit Android ELF products).
@@ -251,17 +253,19 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 
 ## SIMD intrinsics
 
-Every target's sysroot carries the same freestanding include
-set. The `wasm32-wasi` sysroot additionally carries the headers
-that serve the wasm target alone: the SIMD compatibility
-headers — `#include <wasm_simd128.h>`, the WebAssembly SIMD128
-intrinsic set, plus wasm forms of `arm_neon.h`, `xmmintrin.h`
-and `emmintrin.h`, subsets of the NEON and SSE/SSE2 surfaces
-mapped onto v128 operations — and `dlfcn.h` and `pthread.h`,
-whose implementations are the wasm process loader and
-scheduler. Other targets take those two headers from their own
-SDKs. See the root README's "SIMD intrinsics" section for the
-per-header breakdown.
+The targets share one freestanding include set, with two
+exceptions. The `wasm32-wasi` sysroot additionally carries the
+headers that serve the wasm target alone: the SIMD
+compatibility headers — `#include <wasm_simd128.h>`, the
+WebAssembly SIMD128 intrinsic set, plus wasm forms of
+`arm_neon.h`, `xmmintrin.h` and `emmintrin.h`, subsets of the
+NEON and SSE/SSE2 surfaces mapped onto v128 operations — and
+`dlfcn.h` and `pthread.h`, whose implementations are the wasm
+process loader and scheduler; the other targets' sysroots do
+not carry those two headers. And the `x86_64-windows` sysroot
+omits `math.h`, `tgmath.h` and `tcclib.h`, as described under
+*Targets and modules* above. See the root README's "SIMD
+intrinsics" section for the per-header breakdown.
 
 ## Tests
 

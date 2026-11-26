@@ -216,11 +216,19 @@ EXPORTED_RUNTIME_METHODS='["HEAPU8","ccall","cwrap","FS","UTF8ToString","stringT
 #                             free slot for the first registration
 #                             and it throws
 #   ENVIRONMENT=web,worker    same build serves page and worker
+#   CONFIG_TCC_CRTPREFIX /    the compiler's crt and library search
+#   CONFIG_TCC_LIBPATHS       prefixes point at the package sysroot
+#                             in the virtual FS (/sysroot/lib): a
+#                             hosted link finds the sysroot's crt
+#                             objects and stub libraries there, and
+#                             no host path is ever searched
 emcc $CORE_SRC \
     -I"$UPSTREAM" \
     $TARGET_DEFS \
     -DONE_SOURCE=0 \
     -DCONFIG_TCC_PREDEFS=1 \
+    -DCONFIG_TCC_CRTPREFIX='"/sysroot/lib"' \
+    -DCONFIG_TCC_LIBPATHS='"/sysroot/lib"' \
     -O2 \
     -sMODULARIZE=1 \
     -sEXPORT_ES6=1 \

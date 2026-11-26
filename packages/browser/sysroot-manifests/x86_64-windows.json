@@ -18,10 +18,6 @@
       "source": "include/limits.h"
     },
     {
-      "path": "/sysroot/include/math.h",
-      "source": "include/math.h"
-    },
-    {
       "path": "/sysroot/include/stdalign.h",
       "source": "include/stdalign.h"
     },
@@ -54,16 +50,8 @@
       "source": "include/tccdefs.h"
     },
     {
-      "path": "/sysroot/include/tgmath.h",
-      "source": "include/tgmath.h"
-    },
-    {
       "path": "/sysroot/include/varargs.h",
       "source": "include/varargs.h"
-    },
-    {
-      "path": "/sysroot/include/tcclib.h",
-      "source": "tcclib.h"
     }
   ],
   "libDir": "/sysroot/lib",
@@ -72,6 +60,16 @@
       "binary": true,
       "path": "/sysroot/lib/libtcc1.a",
       "source": "lib/x86_64-windows/libtcc1.a"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/msvcrt.def",
+      "source": "lib/x86_64-windows/msvcrt.def"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/kernel32.def",
+      "source": "lib/x86_64-windows/kernel32.def"
     }
   ],
   "outputs": {

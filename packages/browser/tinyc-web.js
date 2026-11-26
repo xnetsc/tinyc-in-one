@@ -260,6 +260,31 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/x86_64-linux-gnu/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crt1.o",
+        source: "lib/x86_64-linux-gnu/crt1.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crti.o",
+        source: "lib/x86_64-linux-gnu/crti.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtn.o",
+        source: "lib/x86_64-linux-gnu/crtn.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.so",
+        source: "lib/x86_64-linux-gnu/libc.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.so",
+        source: "lib/x86_64-linux-gnu/libm.so"
       }
     ],
     outputs: {
@@ -357,6 +382,31 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/aarch64-linux-gnu/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crt1.o",
+        source: "lib/aarch64-linux-gnu/crt1.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crti.o",
+        source: "lib/aarch64-linux-gnu/crti.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtn.o",
+        source: "lib/aarch64-linux-gnu/crtn.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.so",
+        source: "lib/aarch64-linux-gnu/libc.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.so",
+        source: "lib/aarch64-linux-gnu/libm.so"
       }
     ],
     outputs: {
@@ -454,6 +504,31 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/riscv64-linux-gnu/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crt1.o",
+        source: "lib/riscv64-linux-gnu/crt1.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crti.o",
+        source: "lib/riscv64-linux-gnu/crti.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtn.o",
+        source: "lib/riscv64-linux-gnu/crtn.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.so",
+        source: "lib/riscv64-linux-gnu/libc.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.so",
+        source: "lib/riscv64-linux-gnu/libm.so"
       }
     ],
     outputs: {
@@ -497,10 +572,6 @@ var TinycWeb = (() => {
         source: "include/limits.h"
       },
       {
-        path: "/sysroot/include/math.h",
-        source: "include/math.h"
-      },
-      {
         path: "/sysroot/include/stdalign.h",
         source: "include/stdalign.h"
       },
@@ -533,16 +604,8 @@ var TinycWeb = (() => {
         source: "include/tccdefs.h"
       },
       {
-        path: "/sysroot/include/tgmath.h",
-        source: "include/tgmath.h"
-      },
-      {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -551,6 +614,16 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/x86_64-windows/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/msvcrt.def",
+        source: "lib/x86_64-windows/msvcrt.def"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/kernel32.def",
+        source: "lib/x86_64-windows/kernel32.def"
       }
     ],
     outputs: {
@@ -648,6 +721,36 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/aarch64-linux-android/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crt1.o",
+        source: "lib/aarch64-linux-android/crt1.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crti.o",
+        source: "lib/aarch64-linux-android/crti.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtn.o",
+        source: "lib/aarch64-linux-android/crtn.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.so",
+        source: "lib/aarch64-linux-android/libc.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.so",
+        source: "lib/aarch64-linux-android/libm.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libdl.so",
+        source: "lib/aarch64-linux-android/libdl.so"
       }
     ],
     outputs: {
@@ -748,6 +851,36 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/x86_64-linux-android/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crt1.o",
+        source: "lib/x86_64-linux-android/crt1.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crti.o",
+        source: "lib/x86_64-linux-android/crti.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtn.o",
+        source: "lib/x86_64-linux-android/crtn.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.so",
+        source: "lib/x86_64-linux-android/libc.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.so",
+        source: "lib/x86_64-linux-android/libm.so"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libdl.so",
+        source: "lib/x86_64-linux-android/libdl.so"
       }
     ],
     outputs: {
@@ -848,6 +981,11 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/arm64-apple-darwin/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.tbd",
+        source: "lib/arm64-apple-darwin/libc.tbd"
       }
     ],
     outputs: {
@@ -946,6 +1084,11 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/x86_64-apple-darwin/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libc.tbd",
+        source: "lib/x86_64-apple-darwin/libc.tbd"
       }
     ],
     outputs: {
@@ -3134,6 +3277,17 @@ var TinycWeb = (() => {
     "x86_64-apple-darwin": { runnable: false, description: "macOS x86-64 Mach-O" }
   });
   var SUPPORTED_TARGETS = Object.freeze(Object.keys(TARGETS));
+  var ELF_TARGETS = /* @__PURE__ */ new Set([
+    "x86_64-linux-gnu",
+    "aarch64-linux-gnu",
+    "riscv64-linux-gnu",
+    "aarch64-linux-android",
+    "x86_64-linux-android"
+  ]);
+  var ANDROID_TARGETS = /* @__PURE__ */ new Set([
+    "aarch64-linux-android",
+    "x86_64-linux-android"
+  ]);
   function isRunnableTarget(target) {
     return Boolean(TARGETS[target]?.runnable);
   }
@@ -4207,6 +4361,7 @@ var TinycWeb = (() => {
         this._call("tcc_set_output_type", "number", ["number"], [type])
       );
       this._outputTypeSet = true;
+      this._outputType = type;
       return rc;
     }
     /* tcc_set_output_type is not a plain setter in libtcc: it also
@@ -4272,6 +4427,13 @@ ${src}`;
      *  inside the module FS (at bridge.modulePath(path)); exportFile
      *  reads it back from there into the virtual FS. */
     outputFile(path) {
+      if (!this._driverLibsAdded && ELF_TARGETS.has(this._instance.target) && (this._outputType === TCC_OUTPUT.EXE || this._outputType === TCC_OUTPUT.DLL)) {
+        this._driverLibsAdded = true;
+        this.addLibrary("m");
+        if (ANDROID_TARGETS.has(this._instance.target)) {
+          this.addLibrary("dl");
+        }
+      }
       return this._checkRc(
         "tcc_output_file",
         this._call(

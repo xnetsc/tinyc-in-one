@@ -204,6 +204,24 @@ export const TARGETS = Object.freeze({
 
 export const SUPPORTED_TARGETS = Object.freeze(Object.keys(TARGETS));
 
+/** The ELF targets: their sysroots carry the platform's crt
+ *  objects and stub shared libraries, and a hosted link is a
+ *  dynamic link against the platform's own libc/libm. */
+const ELF_TARGETS = new Set([
+  'x86_64-linux-gnu',
+  'aarch64-linux-gnu',
+  'riscv64-linux-gnu',
+  'aarch64-linux-android',
+  'x86_64-linux-android',
+]);
+
+/** The Android targets (bionic): the dl* functions live in libdl
+ *  there, not in libc. */
+const ANDROID_TARGETS = new Set([
+  'aarch64-linux-android',
+  'x86_64-linux-android',
+]);
+
 export function isRunnableTarget(target) {
   return Boolean(TARGETS[target]?.runnable);
 }
@@ -1577,6 +1595,7 @@ export class TinycState {
     const rc = this._checkRc('tcc_set_output_type',
       this._call('tcc_set_output_type', 'number', ['number'], [type]));
     this._outputTypeSet = true;
+    this._outputType = type;
     return rc;
   }
 
@@ -1640,6 +1659,25 @@ export class TinycState {
    *  inside the module FS (at bridge.modulePath(path)); exportFile
    *  reads it back from there into the virtual FS. */
   outputFile(path) {
+    // A hosted ELF link resolves the C library through the
+    // runtime's own -lc addition at output time; libm is the one
+    // library TCC leaves to the driver, and the sysroot's stub
+    // carries the full math surface, so an executable or shared
+    // library link adds it here -- at output time, when the
+    // state's library paths are populated and the sysroot's files
+    // are in place. Android keeps the dl* functions in a separate
+    // libdl, also stubbed in the sysroot; glibc targets resolve
+    // them from libc itself.
+    if (!this._driverLibsAdded &&
+        ELF_TARGETS.has(this._instance.target) &&
+        (this._outputType === TCC_OUTPUT.EXE ||
+         this._outputType === TCC_OUTPUT.DLL)) {
+      this._driverLibsAdded = true;
+      this.addLibrary('m');
+      if (ANDROID_TARGETS.has(this._instance.target)) {
+        this.addLibrary('dl');
+      }
+    }
     return this._checkRc('tcc_output_file',
       this._call('tcc_output_file', 'number', ['string'],
         [this._bridge.modulePath(normalizeVfsPath(path))]));

@@ -72,6 +72,36 @@
       "binary": true,
       "path": "/sysroot/lib/libtcc1.a",
       "source": "lib/x86_64-linux-android/libtcc1.a"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/crt1.o",
+      "source": "lib/x86_64-linux-android/crt1.o"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/crti.o",
+      "source": "lib/x86_64-linux-android/crti.o"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/crtn.o",
+      "source": "lib/x86_64-linux-android/crtn.o"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libc.so",
+      "source": "lib/x86_64-linux-android/libc.so"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libm.so",
+      "source": "lib/x86_64-linux-android/libm.so"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libdl.so",
+      "source": "lib/x86_64-linux-android/libdl.so"
     }
   ],
   "outputs": {

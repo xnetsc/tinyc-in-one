@@ -1750,17 +1750,56 @@ const WASM_ONLY_INCLUDE_PATHS = new Set([
 const sharedIncludeFiles = sysrootManifest.includeFiles.filter(
   (e) => !WASM_ONLY_INCLUDE_PATHS.has(e.path));
 
+// math.h, tgmath.h and tcclib.h are not part of the x86_64-windows
+// sysroot: the facilities they declare beyond the C89 core (the
+// C99 math set, the long double forms, snprintf, the dl* quartet)
+// are not exports of msvcrt.dll, the runtime a TCC PE link binds,
+// so the headers cannot close there.  Every other target's runtime
+// (glibc, bionic, libSystem, the wasm shims) exports the full set.
+const WINDOWS_DROPPED_INCLUDE_PATHS = new Set([
+  '/sysroot/include/math.h',
+  '/sysroot/include/tgmath.h',
+  '/sysroot/include/tcclib.h',
+]);
+const windowsIncludeFiles = sharedIncludeFiles.filter(
+  (e) => !WINDOWS_DROPPED_INCLUDE_PATHS.has(e.path));
+
+// The link inputs each target's sysroot carries next to
+// libtcc1.a, in manifest order: crt objects and stub libraries
+// for the ELF targets, the import definition files for Windows,
+// the libSystem text stub for Darwin.  wasm32-wasi carries none:
+// its runtime is the shim layer.
+const EXPECTED_LIB_SOURCES = {
+  'wasm32-wasi': [],
+  'x86_64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
+  'aarch64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
+  'riscv64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
+  'aarch64-linux-android': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so', 'libdl.so'],
+  'x86_64-linux-android': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so', 'libdl.so'],
+  'x86_64-windows': ['msvcrt.def', 'kernel32.def'],
+  'arm64-apple-darwin': ['libc.tbd'],
+  'x86_64-apple-darwin': ['libc.tbd'],
+};
+
 test('sysroot: every supported target has a manifest with its own lib source', () => {
   for (const target of SUPPORTED_TARGETS) {
     const url = new URL(`./sysroot-manifests/${target}.json`, import.meta.url);
     const manifest = JSON.parse(readFileSync(url, 'utf8'));
     assert.equal(manifest.target, target);
     assert.deepEqual(manifest.includeFiles,
-      target === 'wasm32-wasi' ? sysrootManifest.includeFiles : sharedIncludeFiles);
+      target === 'wasm32-wasi' ? sysrootManifest.includeFiles
+        : target === 'x86_64-windows' ? windowsIncludeFiles
+        : sharedIncludeFiles);
     assert.equal(manifest.includeDir, sysrootManifest.includeDir);
-    assert.equal(manifest.libFiles.length, 1);
-    assert.equal(manifest.libFiles[0].source, `lib/${target}/libtcc1.a`);
+    assert.deepEqual(manifest.libFiles.map((e) => e.source), [
+      `lib/${target}/libtcc1.a`,
+      ...EXPECTED_LIB_SOURCES[target].map((n) => `lib/${target}/${n}`),
+    ]);
     assert.equal(manifest.libFiles[0].path, '/sysroot/lib/libtcc1.a');
+    for (const e of manifest.libFiles) {
+      assert.equal(e.path, `/sysroot/lib/${e.source.split('/').pop()}`);
+      assert.equal(e.binary, true);
+    }
   }
 });
 

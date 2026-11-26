@@ -45,6 +45,8 @@ const tinyc = await loadTinyc({ target: 'x86_64-linux-gnu', sysroot: true });
 
 `sysroot: true` 把该目标自带的头文件集合（TCC 自带头：`float.h`、`stdarg.h`、`stddef.h`、`stdbool.h`、`tcclib.h`，以及该目标清单里的其余头）加载进虚拟文件系统的 `/sysroot/include` 并注册为 include 目录。自定义清单可以以 `{ manifest, baseUrl }` 传入。
 
+sysroot 还在 `/sysroot/lib` 下带该目标的链接期输入：`libtcc1.a`（编译器运行时），以及按目标而定的平台 C 运行时启动对象与每个系统库的 stub 共享库（ELF 目标）、导入定义文件（Windows）或文本 stub（Darwin）——来源与许可见 `sysroot-lib/README.md`。因此 hosted 链接（除 `wasm32-wasi` 外每个目标的缺省形态）产出的是动态链接程序：产物按名引用平台自身的库——`libc.so.6`/`libm.so.6`、bionic 的库、`msvcrt.dll`/`kernel32.dll`、`libSystem`——运行时由平台的加载器与库服务。`x86_64-windows` 的 sysroot 不带 `math.h`、`tgmath.h`、`tcclib.h`：这三个头声明的、超出其余头集的设施不是 `msvcrt.dll` 的导出，而 Windows 产物绑定的正是这个 C 运行时。
+
 各目标清单的特有事实：
 
 - Android 清单描述的是原生 Android 构建的 bionic sysroot 布局：`libc: "bionic"`、`androidApi: 30`、`dynamicLinker: "/system/bin/linker64"`（64 位 Android ELF 产物的解释器）。
@@ -251,14 +253,16 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 
 ## SIMD 内建函数
 
-每个目标的 sysroot 带同一套 freestanding 头文件集。`wasm32-wasi`
-的 sysroot 另带只服务 wasm 目标的头：SIMD 兼容头——
-`#include <wasm_simd128.h>`（WebAssembly SIMD128 内建集），
-以及 wasm 形态的 `arm_neon.h`、`xmmintrin.h`、`emmintrin.h`
-（NEON 与 SSE/SSE2 表面中映射到 v128 操作的子集）——还有
-`dlfcn.h` 与 `pthread.h`，其实现是 wasm 的进程装载器与调度器。
-其余目标的这两个头由各自 SDK 提供。逐个头的覆盖明细见根
-README 的「SIMD 内建函数」一节。
+各目标共用同一套 freestanding 头文件集，有两处例外。
+`wasm32-wasi` 的 sysroot 另带只服务 wasm 目标的头：SIMD
+兼容头——`#include <wasm_simd128.h>`（WebAssembly SIMD128
+内建集），以及 wasm 形态的 `arm_neon.h`、`xmmintrin.h`、
+`emmintrin.h`（NEON 与 SSE/SSE2 表面中映射到 v128 操作的
+子集）——还有 `dlfcn.h` 与 `pthread.h`，其实现是 wasm 的
+进程装载器与调度器；其余目标的 sysroot 不带这两个头。
+`x86_64-windows` 的 sysroot 不带 `math.h`、`tgmath.h`、
+`tcclib.h`，如上文「目标与模块」一节所述。逐个头的覆盖
+明细见根 README 的「SIMD 内建函数」一节。
 
 ## 测试
 

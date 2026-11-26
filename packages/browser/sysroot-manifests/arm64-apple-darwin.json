@@ -72,6 +72,11 @@
       "binary": true,
       "path": "/sysroot/lib/libtcc1.a",
       "source": "lib/arm64-apple-darwin/libtcc1.a"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libc.tbd",
+      "source": "lib/arm64-apple-darwin/libc.tbd"
     }
   ],
   "outputs": {

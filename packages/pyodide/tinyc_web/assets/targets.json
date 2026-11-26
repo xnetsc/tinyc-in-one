@@ -11,11 +11,6 @@
       "sysroot": "sysroot-aarch64-linux-gnu.tinyc.js"
     },
     {
-      "target": "arm64-apple-darwin",
-      "compiler": "tcc-arm64-apple-darwin.tinyc.js",
-      "sysroot": "sysroot-arm64-apple-darwin.tinyc.js"
-    },
-    {
       "target": "riscv64-linux-gnu",
       "compiler": "tcc-riscv64-linux-gnu.tinyc.js",
       "sysroot": "sysroot-riscv64-linux-gnu.tinyc.js"
@@ -26,11 +21,6 @@
       "sysroot": "sysroot-wasm32-wasi.tinyc.js"
     },
     {
-      "target": "x86_64-apple-darwin",
-      "compiler": "tcc-x86_64-apple-darwin.tinyc.js",
-      "sysroot": "sysroot-x86_64-apple-darwin.tinyc.js"
-    },
-    {
       "target": "x86_64-linux-android",
       "compiler": "tcc-x86_64-linux-android.tinyc.js",
       "sysroot": "sysroot-x86_64-linux-android.tinyc.js"
@@ -39,11 +29,6 @@
       "target": "x86_64-linux-gnu",
       "compiler": "tcc-x86_64-linux-gnu.tinyc.js",
       "sysroot": "sysroot-x86_64-linux-gnu.tinyc.js"
-    },
-    {
-      "target": "x86_64-windows",
-      "compiler": "tcc-x86_64-windows.tinyc.js",
-      "sysroot": "sysroot-x86_64-windows.tinyc.js"
     }
   ]
 }
