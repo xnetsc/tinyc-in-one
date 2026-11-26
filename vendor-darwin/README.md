@@ -10,7 +10,7 @@ library implementation ships here.
 
 ## Layout
 
-- `include/` — 32 headers, staged into the dist at
+- `include/` — 34 headers, staged into the dist at
   `lib/tcc/include-libc/` (the compiler's baked-in search path is
   `{B}/include-libc:{B}/include`: this set first, TCC's builtin
   header layer second).
@@ -81,13 +81,19 @@ fcntl, dirent, pthread core, sched, and sys/types, sys/stat,
 sys/time, sys/wait, sys/mman, sys/uio, sys/resource).  Combined
 with TCC's builtin layer (stddef, stdarg, stdbool, stdalign,
 stdnoreturn, stdatomic, float, tgmath, varargs) the set is the
-complete compile-time surface the Darwin targets ship.
+complete compile-time surface the Darwin targets ship.  Two
+minimal additions exist only because the compiler's own build
+needs them: dispatch/dispatch.h (the semaphore surface tcc.h
+and bcheck.c use) and sys/syscall.h (exists so bcheck.c's
+unconditional include resolves; it carries only the
+thread_selfid number, since Darwin defines no SYS_thr_self).
 
 Not declared: networking headers (sys/socket.h, netdb.h,
-netinet/*, arpa/*), mach and other Darwin-specific subsystems,
-ucontext and siginfo-level signal detail, pthread cancellation
-and spin locks, and anything past the surface above.  Programs
-using those still need the platform SDK headers.
+netinet/*, arpa/*), mach and other Darwin-specific subsystems
+past the dispatch semaphore surface above, ucontext and
+siginfo-level signal detail, pthread cancellation and spin
+locks, and anything past the surface above.  Programs using
+those still need the platform SDK headers.
 
 ## Verification status
 
