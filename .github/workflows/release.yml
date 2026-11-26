@@ -174,20 +174,23 @@ jobs:
       # local-only until run 45779099647, so CI never judged it.
       # It runs here, after the wasm-backend regression built
       # wasm32-tcc, and reuses the Playwright install the
-      # browser-consumer step put in /tmp/pw. Node 22 needs the
-      # JSPI flag for the simulated tier; the page runner serves
-      # its own COOP/COEP headers, so the real tier needs no
-      # special page serving.
+      # browser-consumer step put in /tmp/pw. Both steps run
+      # on emsdk's Node 24 (EMSDK_NODE): Node 22's JSPI is
+      # incomplete, so the simulated tier's pthread_create
+      # fails there. The page runner serves its own COOP/COEP
+      # headers, so the real tier needs no special page serving.
       - name: Thread suite - Node simulated tier
         run: |
-          node --experimental-wasm-jspi packages/browser/test-threads/run-node.mjs \
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          "$EMSDK_NODE" --experimental-wasm-jspi packages/browser/test-threads/run-node.mjs \
             > test-outputs/test-threads-node.log 2>&1
 
       - name: Thread suite - browser page tiers (real + file simulated)
         env:
           TINYC_PLAYWRIGHT_DIR: /tmp/pw
         run: |
-          node packages/browser/test-threads/run-page.mjs \
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          "$EMSDK_NODE" packages/browser/test-threads/run-page.mjs \
             > test-outputs/test-threads-page.log 2>&1
 
       - name: Android package - native libs, then the Gradle AAR
