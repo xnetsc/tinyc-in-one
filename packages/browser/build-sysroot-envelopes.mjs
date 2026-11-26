@@ -28,6 +28,13 @@
  * committed sources under ./sysroot-lib/<target>/, resolved the
  * same way; a missing one fails like a missing header.
  *
+ * The generator is invoked with --sysroot-only: this script's job
+ * is the sysroot envelope alone. The compiler envelope is built
+ * by build.sh (--compiler-only) before this runs, and callers
+ * like the release job's macOS completion step have no compiler
+ * module pair at all — the release job works from a fresh
+ * checkout, where tcc-<target>.mjs/.wasm do not exist.
+ *
  * A header source that cannot be found fails the build, named: a
  * sysroot envelope with a header missing is a broken package. A
  * libtcc1.a that cannot be found is reported by target and the
@@ -183,6 +190,7 @@ for (const target of targets) {
   const gen = spawnSync(process.execPath, [
     path.join(here, 'build-asset-envelopes.mjs'),
     '--target', target,
+    '--sysroot-only',
     '--assets-dir', here,
     '--sysroot-src', srcRoot,
     '--sysroot-out', sysrootOut,

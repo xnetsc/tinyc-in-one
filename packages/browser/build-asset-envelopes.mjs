@@ -40,6 +40,13 @@
  *                               without it no sysroot envelope is
  *                               built
  *     [--compiler-only]         skip the sysroot envelope
+ *     [--sysroot-only]          skip the compiler envelope (for
+ *                               callers that only need the sysroot
+ *                               envelope and have no compiler module
+ *                               pair, e.g. the release job
+ *                               regenerating the macOS sysroot
+ *                               envelopes from the macOS jobs' dist
+ *                               tarballs)
  *
  * build.sh runs this for the compiler envelope after each target
  * build. The sysroot envelope is built wherever the served sysroot
@@ -55,7 +62,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
-  const out = { target: 'wasm32-wasi', assetsDir: here, compilerOnly: false };
+  const out = { target: 'wasm32-wasi', assetsDir: here, compilerOnly: false, sysrootOnly: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => {
@@ -70,6 +77,9 @@ function parseArgs(argv) {
     else if (a === '--compiler-only') out.compilerOnly = true;
     else if (a.startsWith('--compiler-only=')) {
       out.compilerOnly = a.endsWith('=true');
+    } else if (a === '--sysroot-only') out.sysrootOnly = true;
+    else if (a.startsWith('--sysroot-only=')) {
+      out.sysrootOnly = a.endsWith('=true');
     } else {
       throw new Error(`unknown argument: ${a}`);
     }
@@ -87,21 +97,26 @@ function envelopeFile(key, payload) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.compilerOnly && args.sysrootOnly) {
+    throw new Error('--compiler-only and --sysroot-only are mutually exclusive');
+  }
   const target = args.target;
 
-  const gluePath = join(args.assetsDir, `tcc-${target}.mjs`);
-  const wasmPath = join(args.assetsDir, `tcc-${target}.wasm`);
-  for (const p of [gluePath, wasmPath]) {
-    if (!existsSync(p)) {
-      throw new Error(`compiler asset not found: ${p} (build it with build.sh)`);
+  if (!args.sysrootOnly) {
+    const gluePath = join(args.assetsDir, `tcc-${target}.mjs`);
+    const wasmPath = join(args.assetsDir, `tcc-${target}.wasm`);
+    for (const p of [gluePath, wasmPath]) {
+      if (!existsSync(p)) {
+        throw new Error(`compiler asset not found: ${p} (build it with build.sh)`);
+      }
     }
+    const compilerOut = join(args.assetsDir, `tcc-${target}.tinyc.js`);
+    writeFileSync(compilerOut, envelopeFile(`tcc-${target}`, {
+      glue: readFileSync(gluePath, 'utf8'),
+      wasm: readFileSync(wasmPath).toString('base64'),
+    }));
+    console.log(`built: ${compilerOut}`);
   }
-  const compilerOut = join(args.assetsDir, `tcc-${target}.tinyc.js`);
-  writeFileSync(compilerOut, envelopeFile(`tcc-${target}`, {
-    glue: readFileSync(gluePath, 'utf8'),
-    wasm: readFileSync(wasmPath).toString('base64'),
-  }));
-  console.log(`built: ${compilerOut}`);
 
   if (args.compilerOnly) return;
   if (!args.sysrootOut) {
