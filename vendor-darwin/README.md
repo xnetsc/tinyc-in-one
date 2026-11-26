@@ -10,7 +10,7 @@ library implementation ships here.
 
 ## Layout
 
-- `include/` — 34 headers, staged into the dist at
+- `include/` — 36 headers, staged into the dist at
   `lib/tcc/include-libc/` (the compiler's baked-in search path is
   `{B}/include-libc:{B}/include`: this set first, TCC's builtin
   header layer second).
@@ -56,7 +56,10 @@ encode the Darwin value: `errno` codes (EAGAIN is 35, EDEADLK
 0x1000000), `MAP_ANON` 0x1000, `CLOCK_MONOTONIC` 6, `errno`
 itself is `(*__error())`, the stdio streams are `__stdinp` /
 `__stdoutp` / `__stderrp`, `qsort_r` takes the thunk first,
-`strerror_r` is the XSI form, and `struct stat` carries a
+`strerror_r` is the XSI form, `mcontext_t` is a pointer to the
+machine state (unlike Linux, where it is the struct itself),
+siginfo_t is the 104-byte LP64 form with the BSD si_code
+values, and `struct stat` carries a
 birth-time field (144 bytes, offsets in sys/stat.h).
 
 Opaque or fixed-size types follow the platform's public layout:
@@ -78,22 +81,25 @@ string, strings, math in all three floating forms, ctype, time,
 wide characters, errno, limits, stdint, inttypes, locale,
 setjmp, signal, assert) and the common POSIX surface (unistd,
 fcntl, dirent, pthread core, sched, and sys/types, sys/stat,
-sys/time, sys/wait, sys/mman, sys/uio, sys/resource).  Combined
+sys/time, sys/wait, sys/mman, sys/uio, sys/resource,
+sys/ucontext).  Combined
 with TCC's builtin layer (stddef, stdarg, stdbool, stdalign,
 stdnoreturn, stdatomic, float, tgmath, varargs) the set is the
-complete compile-time surface the Darwin targets ship.  Two
+complete compile-time surface the Darwin targets ship.  Four
 minimal additions exist only because the compiler's own build
 needs them: dispatch/dispatch.h (the semaphore surface tcc.h
-and bcheck.c use) and sys/syscall.h (exists so bcheck.c's
+and bcheck.c use), sys/syscall.h (exists so bcheck.c's
 unconditional include resolves; it carries only the
-thread_selfid number, since Darwin defines no SYS_thr_self).
+thread_selfid number, since Darwin defines no SYS_thr_self),
+sys/ucontext.h (the machine state tccrun.c's backtrace reads
+out of the signal handler's context), and runetype.h (the
+_DefaultRuneLocale pointer bcheck.c takes the address of).
 
 Not declared: networking headers (sys/socket.h, netdb.h,
 netinet/*, arpa/*), mach and other Darwin-specific subsystems
-past the dispatch semaphore surface above, ucontext and
-siginfo-level signal detail, pthread cancellation and spin
-locks, and anything past the surface above.  Programs using
-those still need the platform SDK headers.
+past the dispatch semaphore surface above, pthread cancellation
+and spin locks, and anything past the surface above.  Programs
+using those still need the platform SDK headers.
 
 ## Verification status
 

@@ -6,7 +6,9 @@
  * SIGSYS is 12, SIGUSR1 is 30), sigset_t is a 32-bit mask,
  * struct sigaction wraps the handler in the __sigaction_u union
  * with sa_handler/sa_sigaction as member macros, and stack_t is
- * { sp, size, flags } in that order.
+ * { sp, size, flags } in that order.  siginfo_t is the 104-byte
+ * LP64 form (signo, errno, code, pid, uid, status, addr,
+ * value, band, padding) with the BSD si_code values.
  */
 
 #ifndef _TINYC_DARWIN_SIGNAL_H
@@ -54,11 +56,85 @@ typedef uint32_t sigset_t;
 #define SIG_DFL		((void (*)(int))0)
 #define SIG_IGN		((void (*)(int))1)
 #define SIG_ERR		((void (*)(int))-1)
-#define SIG_HOLD	((void (*)(int))3)
+#define SIG_HOLD	((void (*)(int))5)
+
+union sigval {
+	int sival_int;
+	void *sival_ptr;
+};
+
+struct __siginfo {
+	int si_signo;
+	int si_errno;
+	int si_code;
+	pid_t si_pid;
+	uid_t si_uid;
+	int si_status;
+	void *si_addr;
+	union sigval si_value;
+	long si_band;
+	unsigned long __pad[7];
+};
+typedef struct __siginfo siginfo_t;
+
+#define SI_USER		0x10001
+#define SI_QUEUE	0x10002
+#define SI_TIMER	0x10003
+#define SI_ASYNCIO	0x10004
+#define SI_MESGQ	0x10005
+
+/* Codes for SIGILL */
+#define ILL_ILLOPC	1
+#define ILL_ILLTRP	2
+#define ILL_PRVOPC	3
+#define ILL_ILLOPN	4
+#define ILL_ILLADR	5
+#define ILL_PRVREG	6
+#define ILL_COPROC	7
+#define ILL_BADSTK	8
+
+/* Codes for SIGFPE */
+#define FPE_FLTDIV	1
+#define FPE_FLTOVF	2
+#define FPE_FLTUND	3
+#define FPE_FLTRES	4
+#define FPE_FLTINV	5
+#define FPE_FLTSUB	6
+#define FPE_INTDIV	7
+#define FPE_INTOVF	8
+
+/* Codes for SIGSEGV */
+#define SEGV_MAPERR	1
+#define SEGV_ACCERR	2
+
+/* Codes for SIGBUS */
+#define BUS_ADRALN	1
+#define BUS_ADRERR	2
+#define BUS_OBJERR	3
+
+/* Codes for SIGTRAP */
+#define TRAP_BRKPT	1
+#define TRAP_TRACE	2
+
+/* Codes for SIGCHLD */
+#define CLD_EXITED	1
+#define CLD_KILLED	2
+#define CLD_DUMPED	3
+#define CLD_TRAPPED	4
+#define CLD_STOPPED	5
+#define CLD_CONTINUED	6
+
+/* Codes for SIGPOLL */
+#define POLL_IN		1
+#define POLL_OUT	2
+#define POLL_MSG	3
+#define POLL_ERR	4
+#define POLL_PRI	5
+#define POLL_HUP	6
 
 union __sigaction_u {
 	void (*__sa_handler)(int);
-	void (*__sa_sigaction)(int, void *, void *);
+	void (*__sa_sigaction)(int, struct __siginfo *, void *);
 };
 
 struct sigaction {

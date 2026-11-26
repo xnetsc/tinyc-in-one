@@ -8,6 +8,8 @@
 #ifndef _TINYC_DARWIN_CTYPE_H
 #define _TINYC_DARWIN_CTYPE_H
 
+#include <runetype.h>
+
 int isalnum(int c);
 int isalpha(int c);
 int isblank(int c);

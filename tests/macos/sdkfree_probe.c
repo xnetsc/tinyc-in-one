@@ -21,6 +21,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/mman.h>
+#include <sys/ucontext.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -42,6 +43,8 @@ int main(void) {
     SZ(struct stat); SZ(struct timespec); SZ(struct timeval);
     SZ(struct dirent); SZ(struct flock); SZ(struct sigaction);
     SZ(stack_t); SZ(struct tm); SZ(struct rusage); SZ(struct rlimit);
+    SZ(ucontext_t); SZ(struct __siginfo);
+    SZ(struct __darwin_mcontext64);
     SZ(pthread_attr_t); SZ(pthread_mutex_t); SZ(pthread_mutexattr_t);
     SZ(pthread_cond_t); SZ(pthread_condattr_t); SZ(pthread_rwlock_t);
     SZ(pthread_rwlockattr_t); SZ(pthread_once_t); SZ(pthread_t);
@@ -54,6 +57,21 @@ int main(void) {
     OFF(struct dirent, d_name); OFF(struct dirent, d_reclen);
     OFF(struct tm, tm_gmtoff); OFF(struct rusage, ru_maxrss);
     OFF(struct flock, l_start); OFF(struct sigaction, sa_mask);
+    OFF(ucontext_t, uc_sigmask); OFF(ucontext_t, uc_stack);
+    OFF(ucontext_t, uc_link); OFF(ucontext_t, uc_mcsize);
+    OFF(ucontext_t, uc_mcontext);
+    OFF(struct __siginfo, si_code); OFF(struct __siginfo, si_addr);
+#if defined(__x86_64__)
+    OFF(struct __darwin_mcontext64, __ss);
+    OFF(struct __darwin_mcontext64, __fs);
+    OFF(struct x86_thread_state64, __rip);
+    OFF(struct x86_thread_state64, __rbp);
+#elif defined(__aarch64__)
+    OFF(struct __darwin_mcontext64, __ss);
+    OFF(struct __darwin_mcontext64, __ns);
+    OFF(struct arm_thread_state64, __pc);
+    OFF(struct arm_thread_state64, __fp);
+#endif
     printf("INFO sizeof_jmp_buf=%zu\n", sizeof(jmp_buf));
     printf("INFO sizeof_sigjmp_buf=%zu\n", sizeof(sigjmp_buf));
     K(O_CREAT); K(O_APPEND); K(O_CLOEXEC); K(O_RDONLY); K(O_RDWR);
@@ -61,6 +79,7 @@ int main(void) {
     K(CLOCK_REALTIME); K(CLOCK_MONOTONIC);
     K(SCHED_OTHER); K(SCHED_FIFO); K(SCHED_RR);
     K(SIGBUS); K(SIGUSR1); K(SIGSYS); K(SIGCHLD); K(SIGKILL);
+    K(FPE_INTDIV); K(FPE_FLTDIV); K(SIG_HOLD);
     K(EAGAIN); K(ENOTSUP); K(EDEADLK); K(EPERM); K(EINTR);
     K(PATH_MAX); K(RAND_MAX); K(BUFSIZ); K(FD_SETSIZE);
     K(SEEK_SET); K(F_GETFL); K(F_SETLK); K(AT_FDCWD);

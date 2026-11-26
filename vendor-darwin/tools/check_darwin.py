@@ -155,6 +155,7 @@ LAYOUT_ASSERTS = """
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/ucontext.h>
 #include <sys/wait.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -205,6 +206,33 @@ SA_OFF(struct sigaction, sa_mask, 8);
 SA_OFF(struct sigaction, sa_flags, 12);
 SA_SIZE(stack_t, 24);
 SA_OFF(stack_t, ss_size, 8);
+
+SA_SIZE(struct __siginfo, 104);
+SA_OFF(struct __siginfo, si_code, 8);
+SA_OFF(struct __siginfo, si_addr, 24);
+
+SA_SIZE(ucontext_t, 56);
+SA_OFF(ucontext_t, uc_sigmask, 4);
+SA_OFF(ucontext_t, uc_stack, 8);
+SA_OFF(ucontext_t, uc_link, 32);
+SA_OFF(ucontext_t, uc_mcsize, 40);
+SA_OFF(ucontext_t, uc_mcontext, 48);
+
+#if defined(__x86_64__)
+SA_SIZE(struct x86_float_state64, 524);
+SA_SIZE(struct __darwin_mcontext64, 712);
+SA_OFF(struct __darwin_mcontext64, __ss, 16);
+SA_OFF(struct __darwin_mcontext64, __fs, 184);
+SA_OFF(struct x86_thread_state64, __rip, 128);
+SA_OFF(struct x86_thread_state64, __rbp, 48);
+#elif defined(__aarch64__)
+SA_SIZE(struct arm_neon_state64, 528);
+SA_SIZE(struct __darwin_mcontext64, 816);
+SA_OFF(struct __darwin_mcontext64, __ss, 16);
+SA_OFF(struct __darwin_mcontext64, __ns, 288);
+SA_OFF(struct arm_thread_state64, __pc, 256);
+SA_OFF(struct arm_thread_state64, __fp, 232);
+#endif
 
 SA_SIZE(struct tm, 56);
 SA_OFF(struct tm, tm_gmtoff, 40);
