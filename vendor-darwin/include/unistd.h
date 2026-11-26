@@ -48,7 +48,7 @@
 #define _SC_PAGESIZE		29
 #define _SC_PAGE_SIZE		_SC_PAGESIZE
 #define _SC_NPROCESSORS_CONF	14
-#define _SC_NPROCESSORS_ONLN	15
+#define _SC_NPROCESSORS_ONLN	58
 
 /* confstr names. */
 #define _CS_PATH		1

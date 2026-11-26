@@ -3,7 +3,7 @@
  * Written for this package from the POSIX <dirent.h>
  * requirements with the Darwin struct dirent layout: 64-bit
  * inode, the 64-bit seek offset, the two 16-bit lengths, the
- * type byte, then the name buffer of 256 bytes (280 bytes in
+ * type byte, then the name buffer of 1024 bytes (1048 bytes in
  * total).  The macOS CI probe compares the size and the d_name
  * offset against the platform headers.
  */
@@ -22,7 +22,7 @@ struct dirent {
 	uint16_t	d_reclen;
 	uint16_t	d_namlen;
 	uint8_t		d_type;
-	char		d_name[256];
+	char		d_name[1024];
 };
 
 typedef struct __dirdesc DIR;
@@ -50,6 +50,11 @@ int scandir(const char *dirname, struct dirent ***namelist,
 	    int (*select)(const struct dirent *),
 	    int (*compar)(const struct dirent **, const struct dirent **)) __DARWIN_INODE64(scandir);
 int alphasort(const struct dirent **d1, const struct dirent **d2);
-int getdirentries(int fd, char *buf, int nbytes, long *basep) __DARWIN_INODE64(getdirentries);
+/* getdirentries has no $INODE64 variant: the SDK redirects it to the
+ * deliberately-unavailable symbol
+ * _getdirentries_is_not_available_when_64_bit_inodes_are_in_effect,
+ * so it is not callable on x86_64.  The plain symbol exists on arm64
+ * and is declared here without a rename. */
+int getdirentries(int fd, char *buf, int nbytes, long *basep);
 
 #endif

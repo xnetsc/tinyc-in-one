@@ -191,7 +191,7 @@ SA_OFF(struct stat, st_blocks, 104);
 SA_OFF(struct stat, st_blksize, 112);
 SA_OFF(struct stat, st_qspare, 128);
 
-SA_SIZE(struct dirent, 280);
+SA_SIZE(struct dirent, 1048);
 SA_OFF(struct dirent, d_seekoff, 8);
 SA_OFF(struct dirent, d_reclen, 16);
 SA_OFF(struct dirent, d_type, 20);

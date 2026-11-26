@@ -34,7 +34,7 @@ typedef double		double_t;
 #define FP_NORMAL	4
 #define FP_SUBNORMAL	5
 #define FP_ILOGB0	(-2147483647-1)
-#define FP_ILOGBNAN	2147483647
+#define FP_ILOGBNAN	(-2147483647-1)
 
 #define MATH_ERRNO	1
 #define MATH_ERREXCEPT	2

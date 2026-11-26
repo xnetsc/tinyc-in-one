@@ -194,19 +194,11 @@ int main(void) {
             }
             SECTION("dirent.fdopendir", ffound);
         }
-        {
-            char buf[4096];
-            long base = 0;
-            int dfd = open(dir, O_RDONLY);
-            int n = dfd >= 0 ? getdirentries(dfd, buf, sizeof buf, &base) : -1;
-            int gfound = 0, off;
-            if (n > 0) {
-                for (off = 0; off + 9 <= n; off++)
-                    if (memcmp(buf + off, "probe.txt", 9) == 0) gfound = 1;
-            }
-            if (dfd >= 0) close(dfd);
-            SECTION("dirent.getdirentries", gfound);
-        }
+        /* No dirent.getdirentries section: the function is not
+         * callable under 64-bit inodes -- the SDK redirects it to
+         * _getdirentries_is_not_available_when_64_bit_inodes_are_in_effect,
+         * and there is no $INODE64 variant either.  It is not tested
+         * here, on either leg. */
         {
             struct dirent **list = NULL;
             int n = scandir(dir, &list, NULL, alphasort);

@@ -2,7 +2,7 @@
  *
  * Written for this package from the POSIX <sched.h>
  * requirements.  Darwin policy numbers: SCHED_OTHER is 1,
- * SCHED_FIFO is 4, SCHED_RR is 5 (not the glibc 1/2).
+ * SCHED_FIFO is 4, SCHED_RR is 2 (not the glibc 1/2).
  */
 
 #ifndef _TINYC_DARWIN_SCHED_H
@@ -19,7 +19,7 @@ struct sched_param {
 
 #define SCHED_OTHER	1
 #define SCHED_FIFO	4
-#define SCHED_RR	5
+#define SCHED_RR	2
 
 int sched_yield(void);
 int sched_get_priority_max(int policy);
