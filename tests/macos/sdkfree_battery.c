@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <fenv.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -136,6 +137,25 @@ int main(void) {
                 fabs(l - 1.0) < 1e-9);
         SECTION("math.classify", isnan(zero / zero) && isinf(1.0 / zero) &&
                 isfinite(1.5) && fpclassify(1.5) == FP_NORMAL);
+    }
+    /* fenv: the rounding mode is observable through rint on a
+     * volatile operand (a plain constant could be folded at
+     * the default rounding mode), and the exception flags
+     * through raise/test. */
+    {
+        volatile double v = 1.5;
+        int down_ok, up_ok, exc_ok;
+        feclearexcept(FE_ALL_EXCEPT);
+        feraiseexcept(FE_OVERFLOW);
+        exc_ok = fetestexcept(FE_OVERFLOW) != 0;
+        feclearexcept(FE_ALL_EXCEPT);
+        fesetround(FE_DOWNWARD);
+        down_ok = fegetround() == FE_DOWNWARD && rint(v) == 1.0;
+        fesetround(FE_UPWARD);
+        up_ok = fegetround() == FE_UPWARD && rint(v) == 2.0;
+        fesetround(FE_TONEAREST);
+        SECTION("fenv.round", down_ok && up_ok &&
+                fegetround() == FE_TONEAREST && exc_ok);
     }
     /* pthread + stdatomic */
     {

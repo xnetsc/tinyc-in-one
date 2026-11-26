@@ -31,6 +31,7 @@
 #include <wchar.h>
 #include <sched.h>
 #include <errno.h>
+#include <fenv.h>
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -62,6 +63,7 @@ int main(void) {
     SZ(off_t); SZ(time_t); SZ(dev_t); SZ(ino_t); SZ(mode_t);
     SZ(nlink_t); SZ(blksize_t); SZ(blkcnt_t); SZ(clock_t);
     SZ(suseconds_t); SZ(pid_t); SZ(uid_t); SZ(size_t); SZ(ptrdiff_t);
+    SZ(fenv_t); SZ(fexcept_t);
     OFF(struct stat, st_size); OFF(struct stat, st_mtimespec);
     OFF(struct stat, st_birthtimespec); OFF(struct stat, st_blocks);
     OFF(struct dirent, d_name); OFF(struct dirent, d_reclen);
@@ -100,6 +102,9 @@ int main(void) {
     K(FPE_INTDIV); K(FPE_FLTDIV); K(SIG_HOLD);
     K(FP_NAN); K(FP_INFINITE); K(FP_ZERO); K(FP_NORMAL); K(FP_SUBNORMAL);
     K(FP_ILOGB0); K(FP_ILOGBNAN);
+    K(FE_INVALID); K(FE_DIVBYZERO); K(FE_OVERFLOW); K(FE_UNDERFLOW);
+    K(FE_INEXACT); K(FE_ALL_EXCEPT);
+    K(FE_TONEAREST); K(FE_DOWNWARD); K(FE_UPWARD); K(FE_TOWARDZERO);
     K(EAGAIN); K(ENOTSUP); K(EDEADLK); K(EPERM); K(EINTR);
     K(PATH_MAX); K(RAND_MAX); K(BUFSIZ); K(FD_SETSIZE);
     K(SEEK_SET); K(F_GETFL); K(F_SETLK); K(AT_FDCWD);

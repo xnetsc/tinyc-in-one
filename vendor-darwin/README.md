@@ -10,7 +10,7 @@ library implementation ships here.
 
 ## Layout
 
-- `include/` — 36 headers, staged into the dist at
+- `include/` — 37 headers, staged into the dist at
   `lib/tcc/include-libc/` (the compiler's baked-in search path is
   `{B}/include-libc:{B}/include`: this set first, TCC's builtin
   header layer second).
@@ -59,7 +59,9 @@ itself is `(*__error())`, the stdio streams are `__stdinp` /
 `strerror_r` is the XSI form, `mcontext_t` is a pointer to the
 machine state (unlike Linux, where it is the struct itself),
 siginfo_t is the 104-byte LP64 form with the BSD si_code
-values, and `struct stat` carries a
+values, fenv has no FE_DENORMAL and fenv_t is 32 bytes on
+x86_64 (x87 fields plus MXCSR) and 8 bytes on arm64
+(FPSR/FPCR), and `struct stat` carries a
 birth-time field (144 bytes, offsets in sys/stat.h).
 
 Opaque or fixed-size types follow the platform's public layout:
@@ -77,10 +79,10 @@ is outside what these headers guarantee.
 ## Coverage
 
 Declared: the C standard library surface (stdio, stdlib,
-string, strings, math in all three floating forms, ctype, time,
-wide characters, errno, limits, stdint, inttypes, locale,
-setjmp, signal, assert) and the common POSIX surface (unistd,
-fcntl, dirent, pthread core, sched, and sys/types, sys/stat,
+string, strings, math in all three floating forms, fenv,
+ctype, time, wide characters, errno, limits, stdint,
+inttypes, locale, setjmp, signal, assert) and the common
+POSIX surface (unistd, fcntl, dirent, pthread core, sched, and sys/types, sys/stat,
 sys/time, sys/wait, sys/mman, sys/uio, sys/resource,
 sys/ucontext).  Combined
 with TCC's builtin layer (stddef, stdarg, stdbool, stdalign,

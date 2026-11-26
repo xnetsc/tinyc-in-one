@@ -159,6 +159,7 @@ LAYOUT_ASSERTS = """
 #include <sys/wait.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <fenv.h>
 #include <pthread.h>
 #include <signal.h>
 #include <time.h>
@@ -233,6 +234,13 @@ SA_OFF(struct __darwin_mcontext64, __ns, 288);
 SA_OFF(struct arm_thread_state64, __pc, 256);
 SA_OFF(struct arm_thread_state64, __fp, 232);
 #endif
+
+#if defined(__x86_64__)
+SA_SIZE(fenv_t, 32);
+#elif defined(__aarch64__)
+SA_SIZE(fenv_t, 8);
+#endif
+SA_SIZE(fexcept_t, 4);
 
 SA_SIZE(struct tm, 56);
 SA_OFF(struct tm, tm_gmtoff, 40);
