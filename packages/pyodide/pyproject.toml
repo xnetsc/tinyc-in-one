@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinyc-web"
+version = "0.5.0"
+description = "TinyC (TCC) embedded compiler for Python on Pyodide: the tinyc-web JavaScript build, bundled with its per-target compiler and sysroot asset envelopes, driven through Pyodide's JS interop."
+requires-python = ">=3.11"
+license = { text = "LGPL-2.1-or-later" }
+
+[tool.setuptools]
+packages = ["tinyc_web"]
+
+[tool.setuptools.package-data]
+tinyc_web = ["assets/*.js", "assets/*.json"]

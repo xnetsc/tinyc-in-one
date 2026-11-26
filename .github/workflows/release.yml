@@ -141,6 +141,24 @@ jobs:
           bash packages/java/build.sh > test-outputs/java-build.log 2>&1
           bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
 
+      # The committed script bundle (packages/browser/tinyc-web.js)
+      # is a build product of the ESM sources, and every test in
+      # this pipeline drives the ESM entry — so a bundle that was
+      # not rebuilt after a source change ships stale code without
+      # anything noticing (it once kept a pre-replay TinycState.run
+      # for a whole release line). Rebuild it from source here and
+      # byte-compare against the committed copy.
+      - name: Web bundle freshness - committed tinyc-web.js must match a fresh build
+        run: |
+          cd packages/browser
+          cp tinyc-web.js /tmp/tinyc-web.committed.js
+          node build-web-bundle.mjs > "$GITHUB_WORKSPACE/test-outputs/web-bundle-build.log" 2>&1
+          if ! cmp -s tinyc-web.js /tmp/tinyc-web.committed.js; then
+            echo "::error::STALE WEB BUNDLE: packages/browser/tinyc-web.js differs from a fresh build of the current sources. Rebuild it with 'npm run build:web' in packages/browser and commit the result."
+            exit 1
+          fi
+          echo "tinyc-web.js is up to date with the sources."
+
       - name: Browser package - build all targets, real-browser consumer test
         run: |
           cd packages/browser

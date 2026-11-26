@@ -1,6 +1,6 @@
 {
   "name": "@xnetx/tinyc",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "TinyC (TCC) embedded compiler: one dual-form native file (executable + library) with bundled headers and libraries, driven from Node.js via koffi.",
   "type": "commonjs",
   "main": "index.js",
@@ -18,11 +18,11 @@
     "README.zh-CN.md"
   ],
   "optionalDependencies": {
-    "@xnetx/tinyc-native-aarch64-linux-gnu": "0.4.0",
-    "@xnetx/tinyc-native-arm64-apple-darwin": "0.4.0",
-    "@xnetx/tinyc-native-x86_64-apple-darwin": "0.4.0",
-    "@xnetx/tinyc-native-x86_64-linux-gnu": "0.4.0",
-    "@xnetx/tinyc-native-x86_64-w64-mingw32": "0.4.0"
+    "@xnetx/tinyc-native-aarch64-linux-gnu": "0.5.0",
+    "@xnetx/tinyc-native-arm64-apple-darwin": "0.5.0",
+    "@xnetx/tinyc-native-x86_64-apple-darwin": "0.5.0",
+    "@xnetx/tinyc-native-x86_64-linux-gnu": "0.5.0",
+    "@xnetx/tinyc-native-x86_64-w64-mingw32": "0.5.0"
   },
   "dependencies": {
     "koffi": "^2.9.0"

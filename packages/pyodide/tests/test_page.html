@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>tinyc_web async tier test</title>
+<!--
+  Async-tier test page: Pyodide runs on the page main thread, so
+  tinyc_web takes its asynchronous tier (its own detection finds
+  no worker scope; nothing forces a tier here). The package files
+  are fetched from this server (they are the repository's
+  packages/pyodide tree) and written into Pyodide's site-packages,
+  then the shared case list (cases.py) runs as a coroutine.
+  Results land on window.__SUMMARY__ / __ERROR__ / __LOG__ /
+  __DONE__ for run_page.mjs.
+-->
+<script type="module">
+import { loadPyodide } from '/tests/node_modules/pyodide/pyodide.mjs';
+
+const log = [];
+globalThis.__TINYC_WEB_TEST_TIER__ = 'async';
+try {
+  const pyodide = await loadPyodide({
+    indexURL: '/tests/node_modules/pyodide/',
+  });
+  pyodide.setStdout({ batched: (s) => { log.push(s); console.log(s); } });
+  pyodide.setStderr({ batched: (s) => { log.push(s); console.error(s); } });
+  const purelib = pyodide.runPython(
+    'import sysconfig; sysconfig.get_paths()["purelib"]');
+  const files = await (await fetch('/tests/pkg-files.json')).json();
+  for (const rel of files) {
+    const buf = await (await fetch('/tinyc_web/' + rel)).arrayBuffer();
+    const dest = purelib + '/tinyc_web/' + rel;
+    pyodide.FS.mkdirTree(dest.slice(0, dest.lastIndexOf('/')));
+    pyodide.FS.writeFile(dest, new Uint8Array(buf));
+  }
+  const cases = await (await fetch('/tests/cases.py')).text();
+  pyodide.FS.writeFile('/cases.py', cases);
+  const main = pyodide.runPython(
+    'import sys; sys.path.insert(0, "/")\nimport cases\ncases.run_all');
+  const summary = await main();
+  window.__SUMMARY__ = summary.toJs();
+} catch (e) {
+  window.__ERROR__ = String((e && e.stack) || e);
+}
+window.__LOG__ = log;
+window.__DONE__ = true;
+</script>
+<body>tinyc_web async tier test</body>

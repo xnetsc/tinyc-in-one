@@ -1,0 +1,16 @@
+PASS tier is sync or async
+PASS tier matches the harness
+PASS default target is bundled
+PASS compileString + add(19, 23) == 42
+PASS State.run main() == 7
+PASS bad source raises TinyCError
+PASS run_cli_capture --version
+PASS run_cli_capture -E expands macros
+PASS run_cli -run returns 3 and prints
+PASS IO.callback receives --version output
+PASS state run with IO returns 0
+PASS state IO buffer captured run output
+PASS compile_file via VFS, getv() == 1234
+PASS define_symbol MAGIC == 123
+PASS output_file product has wasm magic
+CASES DONE 15/15

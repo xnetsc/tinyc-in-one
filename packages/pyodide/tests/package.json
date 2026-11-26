@@ -1,0 +1,1 @@
+{"dependencies":{"pyodide":"314.0.8"},"description":"Test harness for the tinyc_web Pyodide package: provides the pyodide npm package the runners load.","name":"tinyc-web-pyodide-tests","private":true,"scripts":{"test:node":"node run_node.mjs","test:page":"node run_page.mjs"},"type":"module","version":"0.4.0"}
