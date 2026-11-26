@@ -324,6 +324,179 @@ static int wasm_defined_order(int wf)
     return n;
 }
 
+/* ---- data-section relocations ---------------------------------------
+ *
+ * Initialised pointers in the data sections (char *s = "hi",
+ * int *p = &gv, function-pointer tables) are recorded by the
+ * frontend as R_DATA_PTR entries in the section's reloc array, with
+ * the addend stored in place and the slot itself holding only that
+ * addend.  The ELF output path applies the entries in
+ * relocate_sections(); the wasm path applies them here, against its
+ * own layout, or the slots keep the bare addend (typically 0). */
+
+typedef struct DyDataRel {
+    addr_t slot;  /* module-local offset of the pointer slot */
+    int is_func;  /* the slot holds a function address (a table
+                     slot), not a memory address */
+} DyDataRel;
+
+/* A data slot whose initial value is the address of an undefined
+   symbol (int (*fp)(int) = imported_fn; int *p = &imported_var;):
+   the value only the process linker knows, delivered through the
+   symbol's GOT global.  The synthesized init copies the GOT value
+   (plus the in-place addend) into the slot at load time. */
+typedef struct DyDataGot {
+    addr_t slot;      /* module-local offset of the pointer slot */
+    const char *name; /* borrowed: symtab string storage */
+    int kind;         /* DY_GOTFUNC or DY_GOTMEM */
+    int32_t addend;   /* the in-place addend the slot starts with */
+} DyDataGot;
+
+static void dy_data_got_add(DyDataGot **listp, int *np, int *capp,
+                            addr_t slot, const char *name, int kind,
+                            int32_t addend)
+{
+    DyDataGot *list = *listp;
+    if (*np >= *capp) {
+        *capp = *capp ? *capp * 2 : 8;
+        list = tcc_realloc(list, *capp * sizeof(DyDataGot));
+        *listp = list;
+    }
+    list[*np].slot = slot;
+    list[*np].name = name;
+    list[*np].kind = kind;
+    list[*np].addend = addend;
+    (*np)++;
+}
+
+/* The frontend's relocation types as they survive in a stored
+   entry: ELF32 R_INFO keeps only the low byte of the type, so the
+   backend's private R_DATA_PTR / R_DATA_32 constants (0x5701 /
+   0x5700) read back as 1 / 0. */
+#define DY_RDATA_PTR (R_DATA_PTR & 0xff)
+#define DY_RDATA_32  (R_DATA_32 & 0xff)
+
+/* Apply the data relocations of every placed section against the
+   layout in wsec_base[], patching the section bytes in place: each
+   slot becomes target + addend in module-local coordinates (the
+   standalone layout is its own absolute layout, so the values are
+   final there).  When list_out is non-NULL (dylink output), the
+   applied slots are also recorded, so the synthesized init function
+   can add the process base (__memory_base, or __table_base for
+   function addresses) to each of them at load time.  Slots whose
+   target is an undefined symbol cannot be patched at output time
+   at all: in dylink output they are recorded in the glist_out list
+   instead, for the init to fill from the target's GOT global. */
+static void wasm_apply_data_relocs(TCCState *s,
+                                   DyDataRel **list_out, int *n_out,
+                                   DyDataGot **glist_out, int *ng_out)
+{
+    int i, n = 0, cap = 0, gn = 0, gcap = 0;
+    DyDataRel *list = NULL;
+    DyDataGot *glist = NULL;
+    if (list_out) *list_out = NULL;
+    if (n_out) *n_out = 0;
+    if (glist_out) *glist_out = NULL;
+    if (ng_out) *ng_out = 0;
+    for (i = 1; i < s->nb_sections; i++) {
+        Section *sec = s->sections[i];
+        int nrel, k;
+        if (!sec->reloc || !sec->data || sec->sh_type == SHT_NOBITS)
+            continue;
+        if (wsec_base[i] == (addr_t)-1) continue;
+        nrel = sec->reloc->data_offset / sizeof(ElfW_Rel);
+        for (k = 0; k < nrel; k++) {
+            ElfW_Rel *rel = &((ElfW_Rel *)sec->reloc->data)[k];
+            ElfSym *es;
+            Section *tsec;
+            int type = ELFW(R_TYPE)(rel->r_info);
+            int sym_index = ELFW(R_SYM)(rel->r_info);
+            addr_t value;
+            int is_func = 0;
+            if (type != DY_RDATA_PTR && type != DY_RDATA_32) continue;
+            if (rel->r_offset + 4 > sec->data_offset) continue;
+            if (sym_index <= 0 ||
+                sym_index >= (int)(symtab_section->data_offset /
+                                   sizeof(ElfSym)))
+                continue;
+            es = &((ElfSym *)symtab_section->data)[sym_index];
+            if (es->st_shndx == SHN_UNDEF) {
+                /* Undefined target: a cross-module reference whose
+                   value only the process linker knows.  In dylink
+                   output, record it for the synthesized init to
+                   fill from the symbol's GOT global at load time
+                   (the slot keeps its in-place addend, which the
+                   init adds to the GOT value).  A weak undefined
+                   reference keeps the historical behaviour — the
+                   slot reads its addend, typically 0 — and so does
+                   standalone output, which has no GOT. */
+                if (glist_out &&
+                    ELFW(ST_BIND)(es->st_info) != STB_WEAK) {
+                    const char *name =
+                        (const char *)symtab_section->link->data +
+                        es->st_name;
+                    int is_func =
+                        ELFW(ST_TYPE)(es->st_info) == STT_FUNC;
+                    int wf;
+                    if (!is_func &&
+                        (wf = wasm_find_wfunc(name, 0)) >= 0 &&
+                        !wfuns[wf].defined)
+                        is_func = 1;
+                    dy_data_got_add(&glist, &gn, &gcap,
+                                    wsec_base[i] + rel->r_offset, name,
+                                    is_func ? DY_GOTFUNC : DY_GOTMEM,
+                                    (int32_t)read32le(sec->data +
+                                                      rel->r_offset));
+                }
+                continue;
+            }
+            if (es->st_shndx >= s->nb_sections)
+                continue;
+            tsec = s->sections[es->st_shndx];
+            if (tsec->name && !strcmp(tsec->name, ".text")) {
+                const char *name =
+                    (const char *)symtab_section->link->data + es->st_name;
+                int wf = wasm_find_wfunc(name, 0);
+                if (wf < 0) continue;
+                if (list_out) {
+                    /* dylink: only this module's own functions have
+                       a slot in its table window; an imported
+                       function's address is a GOT.func value, which
+                       the init copies into the slot at load time */
+                    if (!wfuns[wf].defined) {
+                        if (glist_out)
+                            dy_data_got_add(&glist, &gn, &gcap,
+                                            wsec_base[i] + rel->r_offset,
+                                            name, DY_GOTFUNC,
+                                            (int32_t)read32le(sec->data +
+                                                              rel->r_offset));
+                        continue;
+                    }
+                    value = wasm_defined_order(wf);
+                } else
+                    value = wfuns[wf].final_index;
+                is_func = 1;
+            } else {
+                if (wsec_base[es->st_shndx] == (addr_t)-1) continue;
+                value = wsec_base[es->st_shndx] + es->st_value;
+            }
+            write32le(sec->data + rel->r_offset,
+                      value + read32le(sec->data + rel->r_offset));
+            if (list_out) {
+                if (n >= cap) {
+                    cap = cap ? cap * 2 : 16;
+                    list = tcc_realloc(list, cap * sizeof(DyDataRel));
+                }
+                list[n].slot = wsec_base[i] + rel->r_offset;
+                list[n].is_func = is_func;
+                n++;
+            }
+        }
+    }
+    if (list_out) { *list_out = list; *n_out = n; }
+    if (glist_out) { *glist_out = glist; *ng_out = gn; }
+}
+
 /* Symtab lookup by name: the hash hit when there is one, else a
    linear scan preferring a defined entry (local symbols are not in
    the hash).  Returns the symtab index or -1. */
@@ -376,12 +549,21 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
             }
             return 0; /* defined in a section the layout does not place */
         }
-        return ELFW(ST_TYPE)(es->st_info) == STT_FUNC ? DY_GOTFUNC : DY_GOTMEM;
+        /* undefined: the symbol's own type decides — the symtab
+           attribute when an entry exists, the attribute the fixup
+           captured from the C symbol otherwise */
+        return (ELFW(ST_TYPE)(es->st_info) == STT_FUNC || x->sym_func)
+            ? DY_GOTFUNC : DY_GOTMEM;
     }
-    /* no symtab entry: a registered (imported) function is a
-       function; anything else is treated as a variable */
-    if (wasm_find_wfunc(x->name, 0) >= 0) return DY_GOTFUNC;
-    return DY_GOTMEM;
+    /* No symtab entry at all: a symbol referenced only from code
+       address materialisations never reaches the ELF symtab (no
+       relocation ever names it, and it is interned as a WFunc only
+       when something calls it).  Classify by the type the fixup
+       captured from the C symbol itself — the same attribute
+       put_extern_sym2 would have written into the symtab — so a
+       function goes through GOT.func whether or not anything ever
+       called it directly, and a variable through GOT.mem. */
+    return x->sym_func ? DY_GOTFUNC : DY_GOTMEM;
 }
 
 static int wasm_dy_got(DyGot *gots, int ngots, int kind, const char *name)
@@ -470,6 +652,10 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     int ngots = 0, gotcap = 0, sp_gindex;
     DyVar *vars = NULL;
     int nvars = 0, varcap = 0;
+    DyDataRel *drels = NULL;
+    int ndrels = 0;
+    DyDataGot *dgots = NULL;
+    int ndgots = 0;
     int rc = 0;
 
     if (wasm_find_wfunc("__tinyc_dylink_init", 0) >= 0 ||
@@ -521,6 +707,12 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     }
     sp_init = ((data_end + 15) & -16) + 65536; /* 64 KiB C stack */
     mem_bytes = (sp_init + 65535) & -65536;
+
+    /* ---- data relocations: patch the slots to module-local values;
+       the synthesized init adds the process base at load time.
+       Slots referencing undefined symbols are collected as GOT
+       references (dgots) for the init to fill from the GOT -------- */
+    wasm_apply_data_relocs(s, &drels, &ndrels, &dgots, &ndgots);
 
     /* ---- load hooks ------------------------------------------------- */
     hook_init = wasm_dy_hook("_init", 0, -1);
@@ -591,6 +783,19 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             j++; /* the DYCONST half is classified with its DYGLOB */
         }
     }
+    /* ---- register the GOT globals the data slots reference ------- */
+    for (i = 0; i < ndgots; i++) {
+        if (wasm_dy_got(gots, ngots, dgots[i].kind, dgots[i].name) < 0) {
+            if (ngots >= gotcap) {
+                gotcap = gotcap ? gotcap * 2 : 16;
+                gots = tcc_realloc(gots, gotcap * sizeof(DyGot));
+            }
+            gots[ngots].name = dgots[i].name;
+            gots[ngots].kind = dgots[i].kind;
+            gots[ngots].gindex = 2 + ngots;
+            ngots++;
+        }
+    }
     sp_gindex = 2 + ngots;
 
     /* ---- collect the exported variables for the metadata ---------- */
@@ -635,6 +840,50 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             wb_putc(b, 0x41); wb_putc(b, 0x00);  /* fill value 0 */
             wb_putc(b, 0x41); wb_sleb(b, (int32_t)bss_size);
             wb_putc(b, 0xfc); wb_putc(b, 0x0b); wb_putc(b, 0x00); /* memory.fill */
+        }
+        /* data relocations: the output stage left module-local
+           values in the pointer slots; add the process base to each
+           (__memory_base for memory addresses, __table_base for
+           function addresses) before any hook or constructor runs.
+           The slot itself always lives in memory: its address is
+           __memory_base + slot regardless of what it holds. */
+        for (i = 0; i < ndrels; i++) {
+            int bg = drels[i].is_func ? 1 : 0;
+            /* scratch local 0: nparams + NB_REGS + 1, inside the
+               standard locals block every function body carries */
+            int L = wfuns[init_wf].nparams + 19;
+            wb_putc(b, 0x23); wb_putc(b, 0x00);           /* global.get __memory_base */
+            wb_putc(b, 0x41); wb_sleb(b, (int32_t)drels[i].slot);
+            wb_putc(b, 0x6a);                            /* i32.add */
+            wb_putc(b, 0x21); wb_uleb(b, L);             /* local.set L */
+            wb_putc(b, 0x20); wb_uleb(b, L);             /* local.get L (address) */
+            wb_putc(b, 0x20); wb_uleb(b, L);             /* local.get L */
+            wb_putc(b, 0x28); wb_putc(b, 0x00); wb_putc(b, 0x00); /* i32.load */
+            wb_putc(b, 0x23); wb_uleb(b, bg);            /* global.get value base */
+            wb_putc(b, 0x6a);                            /* i32.add */
+            wb_putc(b, 0x36); wb_putc(b, 0x00); wb_putc(b, 0x00); /* i32.store */
+        }
+        /* data slots referencing undefined symbols: store the
+           symbol's GOT value (plus the slot's in-place addend).
+           The GOT global is the canonical per-process value — a
+           function's table slot or a variable's absolute address —
+           so the copied pointer is identical to what a runtime
+           address materialisation or dlsym produces.  The loader
+           binds the GOT.func entries named by these slots eagerly
+           (metadata "data_got_func"): the value leaves the GOT
+           here, so a later binding could never repair the copy. */
+        for (i = 0; i < ndgots; i++) {
+            int gindex = wasm_dy_got(gots, ngots, dgots[i].kind,
+                                     dgots[i].name);
+            wb_putc(b, 0x23); wb_putc(b, 0x00);           /* global.get __memory_base */
+            wb_putc(b, 0x41); wb_sleb(b, (int32_t)dgots[i].slot);
+            wb_putc(b, 0x6a);                            /* i32.add: slot address */
+            wb_putc(b, 0x23); wb_uleb(b, gindex);        /* global.get GOT */
+            if (dgots[i].addend) {
+                wb_putc(b, 0x41); wb_sleb(b, dgots[i].addend);
+                wb_putc(b, 0x6a);                        /* i32.add */
+            }
+            wb_putc(b, 0x36); wb_putc(b, 0x00); wb_putc(b, 0x00); /* i32.store */
         }
         if (hook_init >= 0) {
             wb_putc(b, 0x10); wb_uleb(b, wfuns[hook_init].final_index);
@@ -883,6 +1132,27 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             if (i) wb_putc(&text, ',');
             dy_json_str(&text, s->wasm_dylink_needs[i]);
         }
+        /* The GOT.func symbols static data references: the loader
+           binds these eagerly (the init copies their values into
+           data slots, where a later binding could not reach). */
+        wb_write(&text, "],\"data_got_func\":[", (int)strlen("],\"data_got_func\":["));
+        {
+            int first = 1;
+            for (i = 0; i < ndgots; i++) {
+                int dup = 0, k;
+                if (dgots[i].kind != DY_GOTFUNC) continue;
+                for (k = 0; k < i; k++)
+                    if (dgots[k].kind == DY_GOTFUNC &&
+                        !strcmp(dgots[k].name, dgots[i].name)) {
+                        dup = 1;
+                        break;
+                    }
+                if (dup) continue;
+                if (!first) wb_putc(&text, ',');
+                first = 0;
+                dy_json_str(&text, dgots[i].name);
+            }
+        }
         wb_write(&text, "],\"exports\":[", (int)strlen("],\"exports\":["));
         {
             int first = 1;
@@ -930,6 +1200,8 @@ out:
     tcc_free(ctors);
     tcc_free(dtors);
     tcc_free(vars);
+    tcc_free(drels);
+    tcc_free(dgots);
     return rc;
 }
 
@@ -980,6 +1252,11 @@ static int wasm_output_module(TCCState *s, const char *filename)
     }
     sp_init = ((data_end + 15) & -16) + 65536; /* 64 KiB C stack */
     mem_bytes = (sp_init + 65535) & -65536;
+
+    /* ---- apply the data-section relocations against the layout:
+       the standalone layout is absolute (memory starts at 0), so
+       the patched values are final ------------------------------- */
+    wasm_apply_data_relocs(s, NULL, NULL, NULL, NULL);
 
     /* ---- patch fixups in every defined function body -------------- */
     for (i = 0; i < nb_wfuns; i++) {

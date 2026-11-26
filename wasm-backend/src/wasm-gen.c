@@ -273,10 +273,20 @@ static int wasm_sig_from_ftype(CType *ft, WSig *sig)
     if (sig->ret == -2) return -1;
     for (s = ft->ref; (s = s->next) != NULL; ) {
         int wt;
-        if (s->v == FUNC_ELLIPSIS) return -1; /* variadic: unsupported */
         wt = wasm_type_of(&s->type);
         if (wt < 0 || sig->nparams >= 16) return -1;
         sig->params[sig->nparams++] = wt;
+    }
+    if (ft->ref && ft->ref->f.func_type == FUNC_ELLIPSIS) {
+        /* variadic: the wasm signature carries the fixed
+           parameters plus one trailing i32, a pointer to the
+           variadic argument area the caller materialises in
+           its own frame (see gfunc_call); the callee's
+           va_start reads it back (see gen_va_start).  The
+           ellipsis itself is not a chain entry - it lives in
+           the prototype's func_type. */
+        if (sig->nparams >= 16) return -1;
+        sig->params[sig->nparams++] = WT_I32;
     }
     return 0;
 }
@@ -356,6 +366,7 @@ static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
     x->name = tcc_strdup(get_tok_str(sym->v, NULL));
     x->kind = kind; x->addend = addend;
     x->shndx = -1; x->value = 0;
+    x->sym_func = (sym->type.t & VT_BTYPE) == VT_FUNC;
     {
         /* A symbol already defined in a data section when the fixup
            is created - an anonymous symbol (float constants spilled
@@ -1906,9 +1917,18 @@ ST_FUNC void gfunc_call(int nb_args)
     SValue *func_sv = &vtop[-nb_args];
     WFunc *callee = NULL;
     WSig isig;
-    int indirect = !(func_sv->r & VT_SYM);
+    /* Direct call only for a bare function designator (VT_SYM
+       without VT_LVAL): the symbol IS the callee.  A VT_SYM|VT_LVAL
+       value names a memory cell - a global or static function-
+       pointer variable, or an element of a function-pointer array -
+       whose contents are the callee, so it must go indirect (load
+       the pointer, call_indirect); treating it as a direct call
+       would call whatever function bears the CELL's name instead. */
+    int indirect = !(func_sv->r & VT_SYM) || (func_sv->r & VT_LVAL);
     int rettype = -2;
     int i;
+    int variadic = 0, nfixed = 0, va_ofs = 0;
+    int va_slot[40], va_wt[40];
     if (indirect) {
         /* Call through a function-pointer value: the signature comes
            from the pointer's function type (synthesised from the call
@@ -2005,6 +2025,46 @@ ST_FUNC void gfunc_call(int nb_args)
                 wasm_vec_spill_sv(p);
     }
     save_regs(nb_args + 1);
+    /* Variadic callee (prototype ends in ...): the wasm signature
+       takes the fixed arguments plus a trailing pointer to a
+       variadic argument area.  The remaining arguments are
+       materialised into a fresh area in this function's frame
+       (allocated from `loc' like a local, so it lives exactly for
+       the call), laid out with the default argument promotions -
+       float to double, sub-int types to int, i64/f64 in 8-byte
+       slots aligned to 8, the rest in 4-byte slots.  gen_va_arg
+       and the stdio shims read the same layout back. */
+    {
+        CType *cft = &func_sv->type;
+        if ((cft->t & VT_BTYPE) == VT_PTR && cft->ref)
+            cft = &cft->ref->type;
+        if (cft->ref && cft->ref->f.func_type == FUNC_ELLIPSIS) {
+            Sym *s2;
+            int off = 0;
+            variadic = 1;
+            /* every chain entry is a named parameter (the
+               ellipsis is not one) */
+            for (s2 = cft->ref; (s2 = s2->next) != NULL; )
+                nfixed++;
+            for (i = nfixed; i < nb_args; i++) {
+                SValue *sv = &vtop[1 + i - nb_args];
+                int bt = sv->type.t & VT_BTYPE, sz, al;
+                if ((sv->type.t & VT_VECTOR) || bt == VT_STRUCT)
+                    tcc_error("wasm: aggregate variadic arguments "
+                              "are not supported");
+                if (bt == VT_FLOAT || bt == VT_DOUBLE ||
+                    bt == VT_LDOUBLE) { sz = 8; al = 8; va_wt[i] = WT_F64; }
+                else if (bt == VT_LLONG) { sz = 8; al = 8; va_wt[i] = WT_I64; }
+                else { sz = 4; al = 4; va_wt[i] = WT_I32; }
+                off = (off + al - 1) & ~(al - 1);
+                va_slot[i] = off;
+                off += sz;
+            }
+            if (off < 16) off = 16;
+            loc = (loc - off) & -16;
+            va_ofs = loc;
+        }
+    }
     /* Stage arguments: materialise each into a scratch local, then
        push them in order onto the wasm operand stack.  load() takes a
        TCC register number r and writes local wloc_reg(r)=nparams+r;
@@ -2012,9 +2072,17 @@ ST_FUNC void gfunc_call(int nb_args)
        Vector arguments skip the scalar scratch locals: they are
        materialised into a v128 slot and pushed from there (pushing
        in argument order, interleaved with the scalar gets, keeps the
-       operand stack order correct). */
+       operand stack order correct).  Variadic arguments are not
+       pushed: each is stored into the frame area instead. */
     for (i = 0; i < nb_args; i++) {
         SValue *sv = &vtop[1 + i - nb_args];
+        int is_va = variadic && i >= nfixed;
+        if (is_va) {
+            /* slot address first: wasm stores take [address, value] */
+            we_local_get(wloc_fp());
+            we_i32_const(va_ofs + va_slot[i]);
+            we(0x6a); /* i32.add */
+        }
         if (sv->type.t & VT_VECTOR) {
             int s = wasm_vec_ensure(sv, NULL);
             we_local_get(wloc_vec(s));
@@ -2050,12 +2118,25 @@ ST_FUNC void gfunc_call(int nb_args)
                argument's own type on the operand stack */
             load(REG_FRET, sv);
             we_local_get(wloc_reg(REG_FRET));
-            if ((sv->type.t & VT_BTYPE) == VT_FLOAT)
-                we(0xb6); /* f32.demote_f64 */
+            if ((sv->type.t & VT_BTYPE) == VT_FLOAT && !is_va)
+                we(0xb6); /* f32.demote_f64 (variadic args stay
+                             promoted to f64) */
         } else {
             load(NB_REGS + 1 + i, sv);
             we_local_get(wloc_scratch(i));
         }
+        if (is_va) {
+            /* [address, value] -> store into the variadic area */
+            int op = va_wt[i] == WT_I64 ? 0x37 :
+                     va_wt[i] == WT_F64 ? 0x39 : 0x36;
+            we(op); we(0x00); we(0x00);
+        }
+    }
+    if (variadic) {
+        /* the trailing operand: the variadic area pointer */
+        we_local_get(wloc_fp());
+        we_i32_const(va_ofs);
+        we(0x6a); /* i32.add */
     }
     if (indirect) {
         /* the callee value goes onto the operand stack last, above
@@ -2103,14 +2184,16 @@ ST_FUNC void gfunc_call(int nb_args)
 
 static int wfunc_frame_size; /* filled at epilog from the global `loc' */
 
+/* frame offset of the slot gfunc_prolog reserves in a variadic
+   function for the hidden trailing parameter (the caller's
+   variadic-area pointer); gen_va_start reads it */
+static int func_va_list_ofs;
+
 ST_FUNC void gfunc_prolog(Sym *func_sym)
 {
     CType *func_type = &func_sym->type;
     Sym *sym;
     int param_addr = 0, i = 0;
-    if (func_var)
-        tcc_error("wasm: variadic functions not implemented in skeleton ('%s')",
-                  get_tok_str(func_sym->v, NULL));
     if ((func_vt.t & VT_BTYPE) == VT_STRUCT) {
         int al, sz = type_size(&func_vt, &al);
         if (sz > 8)
@@ -2162,6 +2245,18 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
             int isf = 0; int op = wasm_store_op(&sym->type, &isf);
             we(op); we(0x00); we(0x00);
         }
+    }
+    if (func_var) {
+        /* the trailing hidden wasm parameter (local i, just past
+           the declared ones) carries the caller's variadic-area
+           pointer; park it in a frame slot for gen_va_start */
+        loc -= 4;
+        func_va_list_ofs = loc;
+        we_local_get(wloc_fp());
+        we_i32_const(loc);
+        we(0x6a); /* i32.add */
+        we_local_get(i);
+        we(0x36); we(0x00); we(0x00); /* i32.store */
     }
     (void)param_addr;
 }
@@ -2375,13 +2470,59 @@ ST_FUNC void gen_vla_alloc(CType *type, int align)
 
 ST_FUNC void gen_va_start(void)
 {
-    tcc_error("wasm: va_start not implemented in skeleton (variadic unsupported)");
+    /* the vstack holds [ap lvalue, last-arg]; drop the last-arg
+       and push the value of the hidden-parameter slot (the area
+       pointer itself); tccgen's vstore() assigns it to ap */
+    vtop--;
+    vset(&char_pointer_type, VT_LOCAL | VT_LVAL, func_va_list_ofs);
 }
 
 ST_FUNC void gen_va_arg(CType *t)
 {
-    (void)t;
-    tcc_error("wasm: va_arg not implemented in skeleton (variadic unsupported)");
+    int bt = t->t & VT_BTYPE;
+    int size, align;
+    SValue apsv;
+    int r, r2;
+    /* slot geometry follows the default argument promotions - the
+       layout gfunc_call materialises and the stdio shims read:
+       float promotes to double, sub-int types promote to int,
+       i64/f64 occupy 8-byte slots aligned to 8, the rest 4 */
+    if (bt == VT_FLOAT || bt == VT_DOUBLE || bt == VT_LDOUBLE) {
+        size = 8; align = 8;
+    } else if (bt == VT_LLONG) {
+        size = 8; align = 8;
+    } else if (bt == VT_STRUCT || (t->t & VT_VECTOR)) {
+        tcc_error("wasm: va_arg of an aggregate type is not supported");
+        size = 4; align = 4;
+    } else {
+        size = 4; align = 4;
+    }
+    apsv = *vtop;          /* the va_list lvalue */
+    r = gv(RC_INT);        /* r = ap, the area cursor */
+    if (align == 8) {
+        we_local_get(wloc_reg(r));
+        we_i32_const(7);
+        we(0x6a);          /* i32.add */
+        we_i32_const(-8);
+        we(0x71);          /* i32.and */
+        we_local_set(wloc_reg(r));
+    }
+    /* ap = aligned cursor + size */
+    r2 = get_reg(RC_INT);
+    we_local_get(wloc_reg(r));
+    we_i32_const(size);
+    we(0x6a);              /* i32.add */
+    we_local_set(wloc_reg(r2));
+    store(r2, &apsv);
+    /* the argument itself: an lvalue at the aligned cursor; a
+       float request reads the promoted double slot, so the value
+       is left typed double and the caller narrows it */
+    vtop->type = *t;
+    if (bt == VT_FLOAT)
+        vtop->type.t = (t->t & ~VT_BTYPE) | VT_DOUBLE;
+    vtop->r = r | VT_LVAL;
+    vtop->r2 = VT_CONST;
+    vtop->sym = NULL;
 }
 
 ST_FUNC void gen_clear_cache(void)

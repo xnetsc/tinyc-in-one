@@ -199,7 +199,7 @@ jobs:
           (cd packages/browser && zip -qr "$GITHUB_WORKSPACE/release-assets/tinyc-web.zip" \
             index.mjs runtime-shims.mjs vfs-store.mjs worker.mjs tinyc-web.js package.json \
             README.md README.zh-CN.md \
-            sysroot-manifest.json sysroot-manifests sysroot tcc-*.mjs tcc-*.wasm)
+            sysroot-manifest.json sysroot-manifests sysroot tcc-*.tinyc.js)
           ls -la release-assets/
 
       - uses: actions/upload-artifact@v4

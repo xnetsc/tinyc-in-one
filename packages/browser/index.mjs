@@ -1,8 +1,10 @@
 // tinyc-web: TinyC (TCC) WebAssembly glue layer.
 //
 // A TCC build has exactly one code generation target, so the native
-// side is one WASM module per target (see build.sh), named
-// tcc-<target>.wasm with glue tcc-<target>.mjs. loadTinyc() picks the
+// side is one WASM module per target (see build.sh), shipped as one
+// asset envelope file tcc-<target>.tinyc.js (the Emscripten glue
+// source plus the module bytes as base64; see the transport section
+// below). loadTinyc() picks the
 // module for the requested target from a registry and loads it
 // lazily; instances of different targets coexist. This file provides,
 // in plain JS:
@@ -34,9 +36,10 @@
 //                         implementing the same tcc_* names (test double)
 //   options.loadModule    async loader called with (target, files);
 //                         its result is cached per target
-//   (default)             the per-target glue tcc-<target>.mjs built
-//                         by build.sh, with the wasm at options.wasmUrl
-//                         or tcc-<target>.wasm alongside the glue
+//   (default)             the per-target asset envelope
+//                         tcc-<target>.tinyc.js built by build.sh,
+//                         retrieved through the §14 transport (fetch
+//                         reads it as text, script injects it)
 
 import manifestWasm32Wasi from './sysroot-manifests/wasm32-wasi.json' with { type: 'json' };
 import manifestX86_64LinuxGnu from './sysroot-manifests/x86_64-linux-gnu.json' with { type: 'json' };
@@ -74,7 +77,7 @@ const SYSROOT_MANIFESTS = Object.freeze({
 // ---------------------------------------------------------------------
 // Asset base URL
 //
-// The per-target glue/wasm files and the sysroot files resolve
+// The per-target envelope files and the sysroot files resolve
 // against a base captured for the environment this code runs in:
 //   - ES module: this module's own URL (import.meta.url), so assets
 //     sitting next to index.mjs are found;
@@ -83,8 +86,7 @@ const SYSROOT_MANIFESTS = Object.freeze({
 //     document.currentScript while the bundle executes, so assets
 //     sitting next to tinyc-web.js are found; when no script URL is
 //     available, the page's own directory (location.href) is used.
-// loadTinyc's baseUrl option overrides the base per call; its
-// wasmUrl / glueUrl options override individual files.
+// loadTinyc's baseUrl option overrides the base per call.
 // ---------------------------------------------------------------------
 
 const SCRIPT_DIR_HREF = (() => {
@@ -159,9 +161,10 @@ export class TinycMissingExportError extends TinycError {
 // A TCC binary has exactly one code generation target, fixed when it
 // is built; upstream ships parallel cross-compiler variants instead
 // of one multi-target binary. This package does the same: one WASM
-// module per target, named tcc-<target>.wasm (glue tcc-<target>.mjs),
-// chosen through the registry below and loaded lazily — only the
-// requested target's module is ever fetched. Instances of different
+// module per target, shipped as one asset envelope file
+// tcc-<target>.tinyc.js, chosen through the registry below and
+// loaded lazily — only the requested target's module is ever
+// fetched. Instances of different
 // targets coexist in one page; each has its own virtual FS and its
 // own sysroot manifest (sysroot-manifests/<target>.json).
 //
@@ -195,7 +198,7 @@ export function isRunnableTarget(target) {
 }
 
 export function targetModuleFiles(target) {
-  return { wasmFile: `tcc-${target}.wasm`, glueFile: `tcc-${target}.mjs` };
+  return { envelopeFile: `tcc-${target}.tinyc.js` };
 }
 
 function assertKnownTarget(target) {
@@ -2180,6 +2183,15 @@ function base64ToBytes(b64) {
   return out;
 }
 
+function bytesToBase64(bytes) {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
 // The manifest envelope (design §14): a manifest file is a text
 // file whose fixed form both serves over http(s) and executes as a
 // classic script, registering the manifest object under the
@@ -2234,6 +2246,8 @@ function manifestToLibrary(manifest, canonical) {
     bssSize: manifest.bss_size | 0,
     tableSize: manifest.table_size | 0,
     needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
+    dataGotFunc: Array.isArray(manifest.data_got_func)
+      ? manifest.data_got_func.map(String) : [],
     exports: (Array.isArray(manifest.exports) ? manifest.exports : [])
       .map((e) => ({ name: String(e.name), kind: e.kind | 0, value: e.value | 0 })),
   };
@@ -2334,6 +2348,82 @@ function createTransport(option) {
       return parseManifestEnvelope(text, url);
     },
   };
+}
+
+/* The compiler's own assets travel through the same transport as
+ * library unit files (design §14): every asset arrives as an
+ * envelope file — a classic script that registers its payload in
+ * this registry — the compiler envelope under the key `tcc-<target>`
+ * (the glue source text plus the module bytes as base64) and the
+ * sysroot envelope under `sysroot-<target>` (the sysroot files'
+ * bytes as base64, keyed by manifest source).
+ * build-asset-envelopes.mjs generates both. The fetch transport
+ * reads the envelope as text and parses the payload out of it
+ * without executing it; the script transport injects it and reads
+ * the registry. */
+const ASSET_REGISTRY = '__TINYC_ASSET_REGISTRY__';
+
+function assetRegistry() {
+  return (globalThis[ASSET_REGISTRY] ??= Object.create(null));
+}
+
+/** Retrieve one registered asset payload through the transport. The
+ *  fetch side reads the envelope file as text and parses the
+ *  registered object out of it without executing it, the same rule
+ *  as for library manifests; the script side injects the envelope
+ *  as a classic script and reads the registry. Returns null when
+ *  the envelope carries no entry under `key`. A caller-supplied
+ *  fetchImpl, when given, performs the fetch side's request. */
+async function retrieveAsset(transport, url, key, fetchImpl) {
+  const registry = assetRegistry();
+  if (registry[key] !== undefined) return registry[key];
+  if (transport.kind === 'fetch') {
+    let text;
+    try {
+      const response = await (fetchImpl ?? globalThis.fetch)(url);
+      if (!response.ok) {
+        throw new TinycError(
+          `tinyc: cannot load asset "${key}" from ${url}: HTTP ${response.status}`);
+      }
+      text = await response.text();
+    } catch (err) {
+      if (err instanceof TinycError) throw err;
+      throw new TinycError(
+        `tinyc: cannot load asset "${key}" from ${url}: ${err.message}`);
+    }
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start < 0 || end <= start) {
+      throw new TinycError(
+        `tinyc: asset envelope at ${url} is not in the envelope form`);
+    }
+    let payload;
+    try {
+      payload = JSON.parse(text.slice(start, end + 1));
+    } catch (err) {
+      throw new TinycError(
+        `tinyc: asset envelope at ${url} does not parse: ${err.message}`);
+    }
+    registry[key] = payload;
+    return payload;
+  }
+  const doc = globalThis.document;
+  if (!doc?.createElement || typeof doc.createElement !== 'function') {
+    throw new TinycError(
+      `tinyc: the script transport needs a page main thread; cannot retrieve ${url}`);
+  }
+  await new Promise((resolve, reject) => {
+    const el = doc.createElement('script');
+    el.src = url;
+    el.onload = () => { el.remove(); resolve(); };
+    el.onerror = () => {
+      el.remove();
+      reject(new TinycError(
+        `tinyc: cannot load asset "${key}" from ${url} (script transport)`));
+    };
+    doc.head.appendChild(el);
+  });
+  return registry[key] ?? null;
 }
 
 /** A module path's canonical virtual-FS location: an absolute path
@@ -2944,7 +3034,21 @@ export class TinycProcess {
       }
       unresolvedOther.push(key);
     }
-    return { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther };
+    // GOT.func entries that static data initializers reference
+    // bind eagerly, like GOT.mem: the module's init copies the
+    // GOT value into a data slot, and a definition arriving later
+    // updates the GOT global but can never repair the copy.  An
+    // entry still unfilled here has no resolution source in this
+    // load, so the load must fail naming the symbol instead of
+    // baking a stub slot (or worse, the previous silent 0) into
+    // the module's data.
+    const unresolvedDataGotFunc = [];
+    for (const name of record.meta.dataGotFunc ?? []) {
+      const entry = this._got.get(`func:${name}`);
+      if (!entry || !entry.filled) unresolvedDataGotFunc.push(name);
+    }
+    return { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther,
+             unresolvedDataGotFunc };
   }
 
   /** A GOT value for a not-yet-filled entry, in the §5 order:
@@ -3049,13 +3153,20 @@ export class TinycProcess {
       const wasmModule = lib.wasmModule ?? new WebAssembly.Module(lib.bodyBytes);
       record.wasmModule = wasmModule;
       record.importTypes = parseImportTypes(lib.bodyBytes);
-      const { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther } =
+      const { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther,
+              unresolvedDataGotFunc } =
         this._buildImports(record, wasmModule);
       if (unresolvedGotMem.length > 0) {
         throw new TinycDylinkError(
           `tinyc: cannot load "${canonical}": unresolved variable(s) ` +
           `${unresolvedGotMem.map((n) => `"${n}"`).join(', ')} ` +
           `(GOT.mem references bind eagerly)`);
+      }
+      if (unresolvedDataGotFunc.length > 0) {
+        throw new TinycDylinkError(
+          `tinyc: cannot load "${canonical}": unresolved function(s) ` +
+          `${unresolvedDataGotFunc.map((n) => `"${n}"`).join(', ')} ` +
+          `(GOT.func references from static data bind eagerly)`);
       }
       if ((flags & RTLD_NOW) && unresolvedFunctions.length > 0) {
         throw new TinycDylinkError(
@@ -3454,7 +3565,7 @@ export function createProcess(options = {}) {
 // ---------------------------------------------------------------------
 
 // Per-target native module cache. Only modules obtained through
-// loadModule or the shipped glue files are cached: a target's module
+// loadModule or the shipped envelope files are cached: a target's module
 // is loaded at most once, and only when an instance of that target
 // is actually requested. Injected modules (module / createModule /
 // wasmExports) are used as-is per call and never enter the cache, so
@@ -3462,7 +3573,7 @@ export function createProcess(options = {}) {
 const targetModuleCache = new Map();
 
 /** Targets whose native module has been loaded through the
- *  per-target loader (loadModule or the shipped glue files). */
+ *  per-target loader (loadModule or the shipped envelope files). */
 export function getLoadedTargets() {
   return [...targetModuleCache.keys()];
 }
@@ -3471,24 +3582,55 @@ export function clearTargetModuleCache() {
   targetModuleCache.clear();
 }
 
-async function createModuleFromGlue(glueUrl, wasmUrl, io) {
-  let factory;
-  try {
-    factory = (await import(/* @vite-ignore */ glueUrl)).default;
-  } catch {
+/* The compiler module from its asset envelope: the envelope
+ * registers the glue source text and the module bytes; the factory
+ * is built by importing the glue source from a blob URL (a module
+ * script cannot be imported from a file: page, and the envelope
+ * itself is a classic script, not a module), and the module bytes
+ * are handed to the factory directly, so the glue never fetches. */
+async function createModuleFromAssetEnvelope(transport, envelopeUrl, target, io) {
+  const asset = await retrieveAsset(
+    transport, envelopeUrl, `tcc-${target}`);
+  if (!asset || typeof asset.glue !== 'string' || typeof asset.wasm !== 'string') {
     throw new TinycError(
-      `tinyc: the Emscripten glue ${glueUrl} could not be loaded. ` +
-      `Build it with build.sh, or pass module / createModule / wasmExports / loadModule.`
-    );
+      `tinyc: asset envelope at ${envelopeUrl} carries no compiler module for target "${target}"`);
+  }
+  let factory;
+  const blobUrl = URL.createObjectURL(
+    new Blob([asset.glue], { type: 'text/javascript' }));
+  try {
+    factory = (await import(/* @vite-ignore */ blobUrl)).default;
+  } catch {
+    /* Some module loaders (Node's) refuse blob: URLs; a data: URL
+     * carries the same source there. */
+    try {
+      const dataUrl = 'data:text/javascript;base64,' +
+        bytesToBase64(textEncoder.encode(asset.glue));
+      factory = (await import(/* @vite-ignore */ dataUrl)).default;
+    } catch (err) {
+      throw new TinycError(
+        `tinyc: cannot build the compiler factory from ${envelopeUrl}: ${err.message}`);
+    }
+  } finally {
+    URL.revokeObjectURL(blobUrl);
   }
   if (typeof factory !== 'function') {
-    throw new TinycError(`tinyc: Emscripten glue ${glueUrl} does not default-export a module factory`);
+    throw new TinycError(
+      `tinyc: compiler glue in ${envelopeUrl} does not default-export a module factory`);
   }
+  const wasmBytes = base64ToBytes(asset.wasm);
   return factory({
     print: (text) => io.out(text + '\n'),
     printErr: (text) => io.err(text + '\n'),
-    locateFile: (path, prefix) =>
-      wasmUrl && path.endsWith('.wasm') ? wasmUrl : prefix + path,
+    /* The glue's own instantiation override: it hands us the
+     * import object and takes the instance back, so the module
+     * bytes come from the envelope and the glue never fetches. */
+    instantiateWasm: (imports, success) => {
+      WebAssembly.instantiate(wasmBytes, imports).then(
+        ({ instance }) => success(instance));
+      return {};
+    },
+    locateFile: (path, prefix) => prefix + path,
   });
 }
 
@@ -3500,13 +3642,21 @@ async function loadTargetModule(target, options, io) {
     if (typeof options.loadModule === 'function') {
       return options.loadModule(target, {
         ...files,
-        wasmUrl: options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl),
-        glueUrl: options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl),
+        envelopeUrl: assetUrl(files.envelopeFile, options.baseUrl),
       });
     }
-    const glueUrl = options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl);
-    const wasmUrl = options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl);
-    return createModuleFromGlue(glueUrl, wasmUrl, io);
+    /* The compiler's own bytes go through the §14 transport like
+     * every other byte the package loads from its origin: the
+     * compiler asset envelope is the only shipped form — under
+     * fetch it is read as text and parsed, under the script
+     * transport it is injected and read back from the registry,
+     * and either way the module is built from the envelope's glue
+     * text and bytes. Explicit module sources (the loadModule hook
+     * above, or options.module / createModule / wasmExports, which
+     * resolveNative handles before this) bypass the transport. */
+    const transport = createTransport(options.transport);
+    const envelopeUrl = assetUrl(files.envelopeFile, options.baseUrl);
+    return createModuleFromAssetEnvelope(transport, envelopeUrl, target, io);
   })();
   targetModuleCache.set(target, promise);
   promise.catch(() => {
@@ -3526,9 +3676,9 @@ async function resolveNative(options, io, target) {
         options.wasmUrl && path.endsWith('.wasm') ? options.wasmUrl : prefix + path,
     });
   }
-  // Default: the per-target module file (options.loadModule when
-  // given, otherwise the shipped glue tcc-<target>.mjs), cached and
-  // loaded lazily by loadTargetModule.
+  // Default: the per-target module envelope (options.loadModule
+  // when given, otherwise the shipped tcc-<target>.tinyc.js),
+  // cached and loaded lazily by loadTargetModule.
   return loadTargetModule(target, options, io);
 }
 
@@ -3541,7 +3691,7 @@ export async function loadSysrootManifest(target = DEFAULT_TARGET) {
   return SYSROOT_MANIFESTS[target];
 }
 
-async function loadSysroot(instance, sysrootOpt) {
+async function loadSysroot(instance, sysrootOpt, transportOption) {
   if (!sysrootOpt) return;
   let manifest;
   let baseUrl = './sysroot/';
@@ -3561,13 +3711,40 @@ async function loadSysroot(instance, sysrootOpt) {
     ? baseUrl
     : assetUrl(baseUrl);
   const entries = [...(manifest.includeFiles ?? []), ...(manifest.libFiles ?? [])];
+  /* The sysroot files are compiler assets: they travel through the
+   * §14 transport as one envelope file sitting in the sysroot base
+   * directory, next to the files it replaces — under fetch it is
+   * read as text and parsed, under the script transport it is
+   * injected and read back from the registry, and either way each
+   * entry's bytes come out of the envelope, keyed by the entry's
+   * manifest source. The envelope is retrieved at most once per
+   * load. A fetchImpl handed in by the caller stays authoritative
+   * for the fetch side. */
+  const transport = createTransport(
+    sysrootOpt?.transport ?? transportOption ?? (fetchImpl ? 'fetch' : undefined));
+  let envelope = null;
+  let envelopeUrl = null;
   for (const entry of entries) {
     if (entry.binary && !includeBinaries) continue;
     // Already in the virtual FS — persisted by an earlier load of
     // this target and restored from the store — is not fetched again.
     if (instance.fs.hasFile(entry.path)) continue;
-    const url = entry.url ?? new URL(entry.source, baseHref).href;
-    await instance.fs.addFileFromUrl(entry.path, url, { fetchImpl });
+    if (!envelope) {
+      envelopeUrl = new URL(
+        `sysroot-${instance.target}.tinyc.js`, baseHref).href;
+      envelope = await retrieveAsset(
+        transport, envelopeUrl, `sysroot-${instance.target}`, fetchImpl);
+      if (!envelope || typeof envelope.files !== 'object' || !envelope.files) {
+        throw new TinycError(
+          `tinyc: asset envelope at ${envelopeUrl} carries no sysroot for target "${instance.target}"`);
+      }
+    }
+    const b64 = envelope.files[entry.source];
+    if (typeof b64 !== 'string') {
+      throw new TinycError(
+        `tinyc: sysroot file "${entry.source}" is missing from the asset envelope at ${envelopeUrl}`);
+    }
+    await instance.fs.addFile(entry.path, base64ToBytes(b64));
   }
   if (manifest.includeDir) instance.fs.registerIncludeDir(manifest.includeDir);
 }
@@ -3698,15 +3875,17 @@ async function tryMountOpfsBackend(native, bridge) {
  *    target       one of SUPPORTED_TARGETS; default "wasm32-wasi".
  *                 Only the wasm32 target can run compiled output in
  *                 the browser; every other target compiles to files.
- *    wasmUrl      URL of this target's tcc-<target>.wasm (the glue
- *                 tcc-<target>.mjs is loaded alongside), or inject a
- *                 module with module / createModule / wasmExports /
- *                 loadModule instead
- *    baseUrl      directory URL the per-target glue/wasm files
+ *    baseUrl      directory URL the per-target asset envelopes
  *                 resolve against; default is the directory of
  *                 index.mjs (module build) or of tinyc-web.js
- *                 (script bundle). wasmUrl / glueUrl override
- *                 individual files
+ *                 (script bundle)
+ *    transport    "auto" | "fetch" | "script": how the package's
+ *                 own asset envelopes (the compiler module and the
+ *                 sysroot) are retrieved; default "auto" — the
+ *                 script transport in a file: context, fetch
+ *                 otherwise. Or inject a module with module /
+ *                 createModule / wasmExports / loadModule instead
+ *                 of loading the shipped envelope at all
  *    sysroot      true for this target's bundled manifest, or
  *                 { manifest, baseUrl, fetchImpl, includeBinaries }
  *    fsStore      a custom FsStore instance for the virtual FS
@@ -3745,7 +3924,7 @@ export async function loadTinyc(options = {}) {
     instance._fsBackend === 'opfs' ? OPFS_MOUNT_POINT : '';
   if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
 
-  await loadSysroot(instance, options.sysroot);
+  await loadSysroot(instance, options.sysroot, options.transport);
   return instance;
 }
 

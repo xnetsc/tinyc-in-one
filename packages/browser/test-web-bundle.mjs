@@ -149,14 +149,14 @@ test('web bundle: loadTinyc works with an injected mock module', async () => {
   assert.equal(compiled[0][2], 'int answer() { return 42; }');
 });
 
-test('web bundle: default glue/wasm URLs resolve against the script directory', async () => {
+test('web bundle: default envelope URL resolves against the script directory', async () => {
   const page = loadBundle({ scriptSrc: 'https://cdn.example.com/libs/tinyc-web.js' });
   let captured;
   await page.TinycWeb.loadTinyc({
     loadModule: async (target, files) => { captured = files; return makeMock(); },
   });
-  assert.equal(captured.glueUrl, 'https://cdn.example.com/libs/tcc-wasm32-wasi.mjs');
-  assert.equal(captured.wasmUrl, 'https://cdn.example.com/libs/tcc-wasm32-wasi.wasm');
+  assert.equal(captured.envelopeFile, 'tcc-wasm32-wasi.tinyc.js');
+  assert.equal(captured.envelopeUrl, 'https://cdn.example.com/libs/tcc-wasm32-wasi.tinyc.js');
 });
 
 test('web bundle: without a script URL, URLs fall back to the page directory', async () => {
@@ -165,27 +165,15 @@ test('web bundle: without a script URL, URLs fall back to the page directory', a
   await page.TinycWeb.loadTinyc({
     loadModule: async (target, files) => { captured = files; return makeMock(); },
   });
-  assert.equal(captured.glueUrl, 'https://example.com/app/tcc-wasm32-wasi.mjs');
-  assert.equal(captured.wasmUrl, 'https://example.com/app/tcc-wasm32-wasi.wasm');
+  assert.equal(captured.envelopeUrl, 'https://example.com/app/tcc-wasm32-wasi.tinyc.js');
 });
 
-test('web bundle: baseUrl overrides the base; wasmUrl overrides a single file', async () => {
+test('web bundle: baseUrl overrides the envelope base', async () => {
   const page = loadBundle({ scriptSrc: 'https://cdn.example.com/libs/tinyc-web.js' });
   let captured;
   await page.TinycWeb.loadTinyc({
     baseUrl: 'https://other.example/x',
     loadModule: async (target, files) => { captured = files; return makeMock(); },
   });
-  assert.equal(captured.glueUrl, 'https://other.example/x/tcc-wasm32-wasi.mjs');
-  assert.equal(captured.wasmUrl, 'https://other.example/x/tcc-wasm32-wasi.wasm');
-
-  const page2 = loadBundle({ scriptSrc: 'https://cdn.example.com/libs/tinyc-web.js' });
-  let captured2;
-  await page2.TinycWeb.loadTinyc({
-    baseUrl: 'https://other.example/x/',
-    wasmUrl: 'https://w.example/custom.wasm',
-    loadModule: async (target, files) => { captured2 = files; return makeMock(); },
-  });
-  assert.equal(captured2.glueUrl, 'https://other.example/x/tcc-wasm32-wasi.mjs');
-  assert.equal(captured2.wasmUrl, 'https://w.example/custom.wasm');
+  assert.equal(captured.envelopeUrl, 'https://other.example/x/tcc-wasm32-wasi.tinyc.js');
 });

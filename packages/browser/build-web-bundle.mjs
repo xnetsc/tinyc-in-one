@@ -4,10 +4,11 @@
 // Bundles index.mjs + runtime-shims.mjs + every sysroot-manifests/*.json
 // (statically imported by index.mjs, so the JSON is inlined) into one
 // IIFE file that exposes the package's public API as the global
-// `TinycWeb`. The per-target native files are NOT inlined: the glue
-// tcc-<target>.mjs is loaded with a dynamic import() at runtime and
-// tcc-<target>.wasm is fetched, both resolved relative to the bundle
-// file's own URL (see the "Asset base URL" section in index.mjs).
+// `TinycWeb`. The per-target native files are NOT inlined: each
+// target's asset envelope tcc-<target>.tinyc.js is retrieved at
+// runtime through the package's transport (fetched as text or
+// injected as a script), resolved relative to the bundle file's own
+// URL (see the "Asset base URL" section in index.mjs).
 //
 // Uses esbuild: a locally installed copy when present, otherwise
 // `npx esbuild@0.25.8`. Run directly (node build-web-bundle.mjs) or

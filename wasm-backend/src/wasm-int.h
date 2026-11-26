@@ -58,6 +58,14 @@ typedef struct WFix {
                      offset captured when the fixup was created;
                      -1 when the symbol is resolved by name */
     addr_t value; /* st_value captured at fixup creation when shndx >= 0 */
+    int sym_func; /* the C symbol the fixup was created from is a
+                     function: its type's base kind is VT_FUNC, the
+                     attribute put_extern_sym2 maps to STT_FUNC.
+                     Captured at creation because the symbol itself
+                     is gone by output time, and a symbol referenced
+                     only from address materialisations may never
+                     reach the ELF symtab at all; the dylink output
+                     classifies undefined symbols by this attribute */
 } WFix;
 
 typedef struct WFunc {

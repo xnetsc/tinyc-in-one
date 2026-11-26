@@ -63,6 +63,41 @@ $TCC -nostdlib -I include -o tests/test-sse.wasm tests/test-sse.c; stage_rc $? "
 echo "== SSE/SSE2 assertions =="
 node tests/run-sse.mjs tests/test-sse.wasm; stage_rc $? "node"
 
+echo "== compile test-datareloc.c (data-section pointer initializers) =="
+$TCC -nostdlib -o tests/test-datareloc.wasm tests/test-datareloc.c; stage_rc $? "compile"
+echo "== datareloc assertions =="
+node tests/run-datareloc.mjs tests/test-datareloc.wasm; stage_rc $? "node"
+
+echo "== dylink data relocations (side + main through the process loader) =="
+node tests/run-datareloc-dylink.mjs; stage_rc $? "node"
+
+echo "== compile test-fpcall.c (calls through function-pointer lvalues) =="
+$TCC -nostdlib -o tests/test-fpcall.wasm tests/test-fpcall.c; stage_rc $? "compile"
+echo "== fpcall assertions =="
+node tests/run-fpcall.mjs tests/test-fpcall.wasm; stage_rc $? "node"
+
+echo "== dylink function-pointer calls (side + main through the process loader) =="
+node tests/run-fpcall-dylink.mjs; stage_rc $? "node"
+
+echo "== dylink data GOT references (static initializers naming imported symbols) =="
+node tests/run-datagot-dylink.mjs; stage_rc $? "node"
+
+echo "== dylink address-only function classification (GOT.func by symbol type) =="
+node tests/run-addronly-dylink.mjs; stage_rc $? "node"
+
+echo "== compile test-varargs.c (variadic definitions and calls) =="
+$TCC -nostdlib -I include -I ../vendor-tinycc/include -o tests/test-varargs.wasm tests/test-varargs.c; stage_rc $? "compile"
+echo "== varargs assertions =="
+node tests/run-varargs.mjs tests/test-varargs.wasm; stage_rc $? "node"
+
+echo "== compile test-varargs-printf.c (imported variadic / shim ABI) =="
+$TCC -nostdlib -I include -I ../vendor-tinycc/include -o tests/test-varargs-printf.wasm tests/test-varargs-printf.c; stage_rc $? "compile"
+echo "== varargs printf assertions =="
+node tests/run-varargs-printf.mjs tests/test-varargs-printf.wasm; stage_rc $? "node"
+
+echo "== dylink variadic calls (stdio shims through the process loader) =="
+node tests/run-varargs-dylink.mjs; stage_rc $? "node"
+
 if [ "$FAIL" -eq 0 ]; then
     echo "regression result: PASS"
 else

@@ -5,9 +5,13 @@
 # script does not install anything; without emcc it exits with an
 # error. See README.md.
 #
-# Output: tcc-<target>.mjs (ES6 MODULARIZE factory) + tcc-<target>.wasm,
-# next to this script, which is exactly what index.mjs loads for that
-# target (glue file tcc-<target>.mjs, wasm file tcc-<target>.wasm).
+# Output: the asset envelope tcc-<target>.tinyc.js, next to this
+# script — the only per-target file the package ships and the one
+# index.mjs loads (see build-asset-envelopes.mjs). The emcc run
+# below first emits the intermediate pair tcc-<target>.mjs (ES6
+# MODULARIZE factory) + tcc-<target>.wasm; the envelope step at the
+# end of this script packs that pair into the envelope and is the
+# build's finishing step.
 #
 # What is being built: the dual-form TCC - the libtcc sources plus
 # tcc.c, so the module exports both the fine-grained tcc_* API and
@@ -231,3 +235,15 @@ emcc $CORE_SRC \
     -o "tcc-$TARGET.mjs"
 
 echo "built: tcc-$TARGET.mjs + tcc-$TARGET.wasm (target: $TARGET)"
+
+# The compiler asset envelope (design §14): the glue text and the
+# module bytes as one classic script registering them in
+# __TINYC_ASSET_REGISTRY__. This envelope is the shipped form of
+# the compiler module — the only per-target asset file the package
+# carries — and loadTinyc retrieves it through the same transport
+# as library unit files under both protocols (fetch reads it as
+# text, file: injects it as a script), so no standalone .wasm/.mjs
+# pair is ever served. The sysroot envelope is built by the same
+# script wherever the served sysroot is assembled (see
+# build-asset-envelopes.mjs).
+node "$(dirname "$0")/build-asset-envelopes.mjs" --target "$TARGET" --compiler-only

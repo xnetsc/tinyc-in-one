@@ -34,6 +34,36 @@ import {
 } from './index.mjs';
 import { TinycWorker } from './worker.mjs';
 
+/** The asset envelope file's text form, exactly as
+ *  build-asset-envelopes.mjs writes it. */
+function envelopeText(key, payload) {
+  return (
+    'globalThis.__TINYC_ASSET_REGISTRY__ ??= Object.create(null);\n' +
+    `globalThis.__TINYC_ASSET_REGISTRY__[${JSON.stringify(key)}] = ` +
+    `${JSON.stringify(payload)};\n`
+  );
+}
+
+/** A fetch stub serving one sysroot envelope whose every manifest
+ *  entry carries the bytes 'asset-bytes'. Records requested URLs
+ *  in `fetched` when given. */
+async function sysrootEnvelopeFetch(target, fetched) {
+  const manifest = await loadSysrootManifest(target);
+  const b64 = Buffer.from('asset-bytes').toString('base64');
+  const files = {};
+  for (const e of [...(manifest.includeFiles ?? []), ...(manifest.libFiles ?? [])]) {
+    files[e.source] = b64;
+  }
+  return async (url) => {
+    if (fetched) fetched.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      text: async () => envelopeText(`sysroot-${target}`, { files }),
+    };
+  };
+}
+
 // ---------------------------------------------------------------------
 // Mock native module: same export names as libtcc.h, JS values pass
 // through as-is (mock mode in the bridge). Records every call.
@@ -268,13 +298,10 @@ test('vfs store: removeFile and clear stay deleted across instances', async () =
 test('vfs store: a second load of the same target sysroot fetches nothing', async () => {
   const backing = new Map();
   let fetches = 0;
-  const fetchImpl = async () => {
+  const serve = await sysrootEnvelopeFetch('x86_64-windows');
+  const fetchImpl = async (url) => {
     fetches += 1;
-    return {
-      ok: true,
-      status: 200,
-      arrayBuffer: async () => new TextEncoder().encode('asset-bytes').buffer,
-    };
+    return serve(url);
   };
   const opts = () => ({
     target: 'x86_64-windows',
@@ -291,6 +318,7 @@ test('vfs store: a second load of the same target sysroot fetches nothing', asyn
   assert.equal(fetches, afterFirst); // every entry was a store hit
   assert.ok(second.fs.hasFile('/sysroot/include/stddef.h'));
   assert.ok(second.fs.hasFile('/sysroot/lib/libtcc1.a'));
+  delete globalThis.__TINYC_ASSET_REGISTRY__;
 });
 
 test('vfs store: sync read of a restored-but-uncached file names the async read', async () => {
@@ -945,8 +973,7 @@ test('targets: registry lists the supported targets, wasm32-wasi is the default'
     assert.equal(isRunnableTarget(t), false, t);
   }
   assert.deepEqual(targetModuleFiles('aarch64-linux-gnu'), {
-    wasmFile: 'tcc-aarch64-linux-gnu.wasm',
-    glueFile: 'tcc-aarch64-linux-gnu.mjs',
+    envelopeFile: 'tcc-aarch64-linux-gnu.tinyc.js',
   });
 });
 
@@ -988,13 +1015,13 @@ test('targets: module files load lazily, per target, at most once', async () => 
   clearTargetModuleCache();
   const loads = [];
   const loadModule = async (target, files) => {
-    loads.push([target, files.wasmFile, files.glueFile]);
+    loads.push([target, files.envelopeFile]);
     return makeMock();
   };
   const one = await loadTinyc({ target: 'x86_64-windows', loadModule });
   assert.equal(one.target, 'x86_64-windows');
   assert.deepEqual(loads, [[
-    'x86_64-windows', 'tcc-x86_64-windows.wasm', 'tcc-x86_64-windows.mjs',
+    'x86_64-windows', 'tcc-x86_64-windows.tinyc.js',
   ]]);
   // Same target again: served from the per-target cache, no reload.
   await loadTinyc({ target: 'x86_64-windows', loadModule });
@@ -1653,31 +1680,221 @@ test('sysroot: outputs field matches the target format family', () => {
   }
 });
 
-test('sysroot: loading a target sysroot fetches that target\'s lib and registers its include dir', async () => {
+test('sysroot: loading a target sysroot retrieves its envelope and registers its include dir', async () => {
   const fetched = [];
-  const fetchImpl = async (url) => {
-    fetched.push(String(url));
-    return {
-      ok: true,
-      status: 200,
-      arrayBuffer: async () => new TextEncoder().encode('asset-bytes').buffer,
-    };
-  };
+  const fetchImpl = await sysrootEnvelopeFetch('x86_64-windows', fetched);
   const mock = makeMock();
   const tinyc = await loadTinyc({
     target: 'x86_64-windows',
     wasmExports: mock,
     sysroot: { fetchImpl, includeBinaries: true },
   });
-  assert.ok(fetched.some((u) => u.endsWith('/sysroot/include/stddef.h')), fetched.join(','));
-  assert.ok(
-    fetched.some((u) => u.endsWith('/sysroot/lib/x86_64-windows/libtcc1.a')),
-    fetched.join(',')
-  );
+  // The whole sysroot arrives as one envelope file, retrieved once.
+  assert.deepEqual(fetched.length, 1);
+  assert.ok(fetched[0].endsWith('/sysroot/sysroot-x86_64-windows.tinyc.js'),
+    fetched.join(','));
   assert.ok(tinyc.fs.hasFile('/sysroot/lib/libtcc1.a'));
   assert.ok(tinyc.fs.hasFile('/sysroot/include/stddef.h'));
   const state = tinyc.createState();
   const inc = callsNamed(mock, 'tcc_add_include_path').map((c) => c[2]);
   assert.ok(inc.includes('/sysroot/include'));
   state.delete();
+  delete globalThis.__TINYC_ASSET_REGISTRY__;
+});
+
+// ---------------------------------------------------------------------
+// Compiler asset envelopes (design §14): the compiler module and
+// the sysroot ship only as envelope files that register their
+// payload in __TINYC_ASSET_REGISTRY__. The script transport injects
+// them; the fetch transport reads the same files as text and parses
+// the payload out without executing it.
+// ---------------------------------------------------------------------
+
+/** A document stub whose script elements "load" by running the
+ *  given register callback (the envelope file's side effect) and
+ *  then firing onload. */
+function stubScriptDocument(register) {
+  const doc = {
+    createElement: () => ({}),
+    head: {
+      appendChild: (el) => {
+        register(el.src);
+        queueMicrotask(() => el.onload && el.onload());
+        el.remove = () => {};
+      },
+    },
+  };
+  return doc;
+}
+
+test('assets: sysroot loads from its envelope under the script transport', async () => {
+  const headerBytes = new TextEncoder().encode('#define FROM_ENVELOPE 1\n');
+  const b64 = Buffer.from(headerBytes).toString('base64');
+  const prevDocument = globalThis.document;
+  globalThis.document = stubScriptDocument(() => {
+    const registry = (globalThis.__TINYC_ASSET_REGISTRY__ ??= Object.create(null));
+    registry['sysroot-wasm32-wasi'] = { files: { 'include/x.h': b64 } };
+  });
+  try {
+    const tinyc = await loadTinyc({
+      wasmExports: makeMock(),
+      fsStore: makeFakeFsStore(new Map()),
+      sysroot: {
+        transport: 'script',
+        manifest: {
+          includeDir: '/sysroot/include',
+          includeFiles: [{ path: '/sysroot/include/x.h', source: 'include/x.h' }],
+          libFiles: [],
+        },
+      },
+    });
+    assert.equal(
+      tinyc.fs.readTextFile('/sysroot/include/x.h'),
+      '#define FROM_ENVELOPE 1\n');
+  } finally {
+    globalThis.document = prevDocument;
+    delete globalThis.__TINYC_ASSET_REGISTRY__;
+  }
+});
+
+test('assets: a sysroot file missing from the envelope is a named load failure', async () => {
+  const prevDocument = globalThis.document;
+  globalThis.document = stubScriptDocument(() => {
+    const registry = (globalThis.__TINYC_ASSET_REGISTRY__ ??= Object.create(null));
+    registry['sysroot-wasm32-wasi'] = { files: {} };
+  });
+  try {
+    await assert.rejects(
+      loadTinyc({
+        wasmExports: makeMock(),
+        fsStore: makeFakeFsStore(new Map()),
+        sysroot: {
+          transport: 'script',
+          manifest: {
+            includeDir: '/sysroot/include',
+            includeFiles: [{ path: '/sysroot/include/x.h', source: 'include/x.h' }],
+            libFiles: [],
+          },
+        },
+      }),
+      /sysroot file "include\/x\.h" is missing from the asset envelope/);
+  } finally {
+    globalThis.document = prevDocument;
+    delete globalThis.__TINYC_ASSET_REGISTRY__;
+  }
+});
+
+test('assets: the compiler module loads from its envelope under the script transport', async () => {
+  const mock = makeMock();
+  let factoryOpts = null;
+  const glue = `export default function factory(opts) {
+    globalThis.__ENVELOPE_FACTORY_OPTS__ = opts;
+    return globalThis.__ENVELOPE_MOCK__;
+  }`;
+  globalThis.__ENVELOPE_MOCK__ = mock;
+  const prevDocument = globalThis.document;
+  globalThis.document = stubScriptDocument(() => {
+    const registry = (globalThis.__TINYC_ASSET_REGISTRY__ ??= Object.create(null));
+    registry['tcc-riscv64-linux-gnu'] = {
+      glue,
+      wasm: Buffer.from([0, 97, 115, 109]).toString('base64'),
+    };
+  });
+  try {
+    const tinyc = await loadTinyc({
+      target: 'riscv64-linux-gnu',
+      transport: 'script',
+      fsStore: makeFakeFsStore(new Map()),
+    });
+    assert.equal(tinyc.target, 'riscv64-linux-gnu');
+    factoryOpts = globalThis.__ENVELOPE_FACTORY_OPTS__;
+    assert.equal(typeof factoryOpts.instantiateWasm, 'function');
+    assert.equal(typeof factoryOpts.print, 'function');
+  } finally {
+    globalThis.document = prevDocument;
+    delete globalThis.__TINYC_ASSET_REGISTRY__;
+    delete globalThis.__ENVELOPE_MOCK__;
+    delete globalThis.__ENVELOPE_FACTORY_OPTS__;
+    clearTargetModuleCache();
+  }
+});
+
+test('assets: sysroot loads from its envelope under the fetch transport', async () => {
+  const headerBytes = new TextEncoder().encode('#define FROM_ENVELOPE 1\n');
+  const b64 = Buffer.from(headerBytes).toString('base64');
+  const fetched = [];
+  const fetchImpl = async (url) => {
+    fetched.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      text: async () => envelopeText(
+        'sysroot-wasm32-wasi', { files: { 'include/x.h': b64 } }),
+    };
+  };
+  try {
+    const tinyc = await loadTinyc({
+      wasmExports: makeMock(),
+      fsStore: makeFakeFsStore(new Map()),
+      sysroot: {
+        fetchImpl,
+        manifest: {
+          includeDir: '/sysroot/include',
+          includeFiles: [{ path: '/sysroot/include/x.h', source: 'include/x.h' }],
+          libFiles: [],
+        },
+      },
+    });
+    assert.equal(
+      tinyc.fs.readTextFile('/sysroot/include/x.h'),
+      '#define FROM_ENVELOPE 1\n');
+    // One request, for the envelope itself — never one per file.
+    assert.equal(fetched.length, 1);
+    assert.ok(fetched[0].endsWith('sysroot/sysroot-wasm32-wasi.tinyc.js'),
+      fetched[0]);
+  } finally {
+    delete globalThis.__TINYC_ASSET_REGISTRY__;
+  }
+});
+
+test('assets: the compiler module loads from its envelope under the fetch transport', async () => {
+  const mock = makeMock();
+  const glue = `export default function factory(opts) {
+    globalThis.__ENVELOPE_FACTORY_OPTS__ = opts;
+    return globalThis.__ENVELOPE_MOCK__;
+  }`;
+  globalThis.__ENVELOPE_MOCK__ = mock;
+  const fetched = [];
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      text: async () => envelopeText('tcc-riscv64-linux-gnu', {
+        glue,
+        wasm: Buffer.from([0, 97, 115, 109]).toString('base64'),
+      }),
+    };
+  };
+  try {
+    const tinyc = await loadTinyc({
+      target: 'riscv64-linux-gnu',
+      transport: 'fetch',
+      fsStore: makeFakeFsStore(new Map()),
+    });
+    assert.equal(tinyc.target, 'riscv64-linux-gnu');
+    const factoryOpts = globalThis.__ENVELOPE_FACTORY_OPTS__;
+    assert.equal(typeof factoryOpts.instantiateWasm, 'function');
+    assert.equal(typeof factoryOpts.print, 'function');
+    assert.equal(fetched.length, 1);
+    assert.ok(fetched[0].endsWith('tcc-riscv64-linux-gnu.tinyc.js'),
+      fetched[0]);
+  } finally {
+    globalThis.fetch = prevFetch;
+    delete globalThis.__TINYC_ASSET_REGISTRY__;
+    delete globalThis.__ENVELOPE_MOCK__;
+    delete globalThis.__ENVELOPE_FACTORY_OPTS__;
+    clearTargetModuleCache();
+  }
 });

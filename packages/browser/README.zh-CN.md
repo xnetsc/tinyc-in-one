@@ -11,8 +11,8 @@
 TCC 的一份构建只有一个代码生成目标，所以本包每个目标带一份 WASM 模块、每个目标跑一次 `build.sh`：
 
 ```
-TARGET=x86_64-linux-gnu ./build.sh   # emits tcc-x86_64-linux-gnu.mjs + tcc-x86_64-linux-gnu.wasm
-TARGET=aarch64-linux-gnu ./build.sh  # emits tcc-aarch64-linux-gnu.mjs + tcc-aarch64-linux-gnu.wasm
+TARGET=x86_64-linux-gnu ./build.sh   # 产出 tcc-x86_64-linux-gnu.tinyc.js（出货的资产信封）
+TARGET=aarch64-linux-gnu ./build.sh  # 产出 tcc-aarch64-linux-gnu.tinyc.js
 ```
 
 每个模块导出 libtcc 的 `tcc_*` API 加一个主入口（内核提供时是 `tinyc_main`，否则是 `main`；胶水优先用 `tinyc_main`、回退到 `main`）。八个通用目标编上游 TCC 树。`wasm32-wasi` 模块由项目自己的 WebAssembly 代码生成后端构建（仓库根的 `wasm-backend/` 树）：`build.sh` 的该分支用后端的 `wasm-gen.c` / `wasm-link.c` 源码与其补丁组装上游树，然后与其它目标一样用 emcc 编译。
@@ -41,7 +41,7 @@ const tinyc = await loadTinyc({ target: 'x86_64-linux-gnu', sysroot: true });
 | `arm64-apple-darwin` | macOS arm64 Mach-O | 不能 |
 | `x86_64-apple-darwin` | macOS x86-64 Mach-O | 不能 |
 
-目标的模块（`tcc-<target>.wasm` / `tcc-<target>.mjs`）按需加载——只取请求目标的那一份，每个页面至多取一次。不同目标的实例可共存；每个实例有自己的虚拟文件系统与自己的 sysroot 清单（`sysroot-manifests/<target>.json`；顶层的 `sysroot-manifest.json` 是缺省目标的清单）。未知目标会被拒绝，并列出支持的清单。
+目标的模块以一份资产信封文件出货（`tcc-<target>.tinyc.js`：胶水源码加模块字节），按需加载——只取请求目标的那一份信封，每个页面至多取一次。不同目标的实例可共存；每个实例有自己的虚拟文件系统与自己的 sysroot 清单（`sysroot-manifests/<target>.json`；顶层的 `sysroot-manifest.json` 是缺省目标的清单）。未知目标会被拒绝，并列出支持的清单。
 
 `sysroot: true` 把该目标自带的头文件集合（TCC 自带头：`float.h`、`stdarg.h`、`stddef.h`、`stdbool.h`、`tcclib.h`，以及该目标清单里的其余头）加载进虚拟文件系统的 `/sysroot/include` 并注册为 include 目录。自定义清单可以以 `{ manifest, baseUrl }` 传入。
 
@@ -165,7 +165,7 @@ const blob = tinyc.exportBlob('/out/prog.exe');   // Blob, e.g. for a download l
 </script>
 ```
 
-按目标分的原生文件不在 bundle 里：对请求的目标，胶水以动态 `import()` 加载 `tcc-<target>.mjs` 并取 `tcc-<target>.wasm`，两者都相对 bundle 文件自身的 URL 解析——用上面的 CDN 地址时，它们自动来自同一个 `tinyc-web@0.1.0` 包前缀。自托管时，把 `tcc-<target>.mjs` 与 `tcc-<target>.wasm` 放在与 `tinyc-web.js` 相同的目录。`loadTinyc({ baseUrl })` 改对另一个目录解析；`wasmUrl` / `glueUrl` 各覆盖一个文件。sysroot 清单已内联进 bundle，所以它们不需要取 JSON 文件。
+按目标分的原生文件不在 bundle 里：对请求的目标，资产信封 `tcc-<target>.tinyc.js` 经本包的传输层取回（以文本 fetch，或在 `file:` 上下文里以脚本注入），相对 bundle 文件自身的 URL 解析——用上面的 CDN 地址时，它自动来自同一个 `tinyc-web@0.1.0` 包前缀。自托管时，把 `tcc-<target>.tinyc.js` 放在与 `tinyc-web.js` 相同的目录。`loadTinyc({ baseUrl })` 改对另一个目录解析。sysroot 清单已内联进 bundle，所以它们不需要取 JSON 文件。
 
 `tinyc-web.js` 由模块源码以以下命令重新生成：
 
@@ -267,4 +267,4 @@ npm test          # node --test test.mjs
 npm run test:web  # node --test test-web-bundle.mjs
 ```
 
-该套件在 Node 里对着一个注入的 mock 模块跑胶水逻辑，该 mock 实现 `tcc_*` 名字：从字符串、`Blob`/`File` 与 URL 来源摄入虚拟 FS，include 目录注册到达 `tcc_add_include_path`，在 Emscripten 接线点与经错误回调两条路上的 IO 路由，`callMain` 的 argv 组装，缺失导出错误，目标注册表（两个目标共存、虚拟文件系统隔离、按目标懒加载），非 wasm32 目标上的 run 守卫与 wasm32 run 路径，产物导出，以及各目标 sysroot 清单。run 路径还用真实手工汇编的 wasm 模块额外测过（`test.mjs` 里的字节数组，每个都附 WAT 描述）：一个函数式的 `add` 导出，一个经 WASI `fd_write` 垫片写出并经 `proc_exit` 退出的 `_start` 模块，WASI argv 垫片，缺省 libc 垫片（`printf` 格式化进 IO、`memcpy`、`malloc`/`free` 堆复用、`options.imports` 覆盖一个缺省垫片），以及自定义垫片面——带确切清单的缺失导入诊断、带 `ctx.readCString` 的实例级注册、对实例注册的单次运行覆盖、`unregisterShim`、`callMain -run` 的垫片转发、包级注册，与 `TinycWorker.registerShim` 的边界错误。第二个套件（`test-web-bundle.mjs`）重新构建 `tinyc-web.js`，把它作为经典脚本加载进一个打扮成浏览器页面的 Node `vm` 上下文（假的 `document.currentScript` 与 `location`），并核对：`TinycWeb` 全局与模块构建的导出清单、脚本场景的 base-URL 规则（脚本目录、页面目录回退、`baseUrl`/`wasmUrl` 覆盖）、内联的各目标 sysroot 清单，以及 bundle 内的 mock 模块与手写 wasm run 路径。
+该套件在 Node 里对着一个注入的 mock 模块跑胶水逻辑，该 mock 实现 `tcc_*` 名字：从字符串、`Blob`/`File` 与 URL 来源摄入虚拟 FS，include 目录注册到达 `tcc_add_include_path`，在 Emscripten 接线点与经错误回调两条路上的 IO 路由，`callMain` 的 argv 组装，缺失导出错误，目标注册表（两个目标共存、虚拟文件系统隔离、按目标懒加载），非 wasm32 目标上的 run 守卫与 wasm32 run 路径，产物导出，以及各目标 sysroot 清单。run 路径还用真实手工汇编的 wasm 模块额外测过（`test.mjs` 里的字节数组，每个都附 WAT 描述）：一个函数式的 `add` 导出，一个经 WASI `fd_write` 垫片写出并经 `proc_exit` 退出的 `_start` 模块，WASI argv 垫片，缺省 libc 垫片（`printf` 格式化进 IO、`memcpy`、`malloc`/`free` 堆复用、`options.imports` 覆盖一个缺省垫片），以及自定义垫片面——带确切清单的缺失导入诊断、带 `ctx.readCString` 的实例级注册、对实例注册的单次运行覆盖、`unregisterShim`、`callMain -run` 的垫片转发、包级注册，与 `TinycWorker.registerShim` 的边界错误。第二个套件（`test-web-bundle.mjs`）重新构建 `tinyc-web.js`，把它作为经典脚本加载进一个打扮成浏览器页面的 Node `vm` 上下文（假的 `document.currentScript` 与 `location`），并核对：`TinycWeb` 全局与模块构建的导出清单、脚本场景的 base-URL 规则（脚本目录、页面目录回退、`baseUrl` 覆盖）、内联的各目标 sysroot 清单，以及 bundle 内的 mock 模块与手写 wasm run 路径。

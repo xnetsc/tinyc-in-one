@@ -1932,7 +1932,7 @@ var TinycWeb = (() => {
     return Boolean(TARGETS[target]?.runnable);
   }
   function targetModuleFiles(target) {
-    return { wasmFile: `tcc-${target}.wasm`, glueFile: `tcc-${target}.mjs` };
+    return { envelopeFile: `tcc-${target}.tinyc.js` };
   }
   function assertKnownTarget(target) {
     if (!Object.hasOwn(TARGETS, target)) {
@@ -3635,6 +3635,14 @@ ${src}`;
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
+  function bytesToBase64(bytes) {
+    let bin = "";
+    const CHUNK = 32768;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+  }
   var DYLINK_REGISTRY = "__TINYC_DYLINK_REGISTRY__";
   function parseManifestEnvelope(text, where) {
     const start = text.indexOf("{");
@@ -3684,6 +3692,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       bssSize: manifest.bss_size | 0,
       tableSize: manifest.table_size | 0,
       needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
+      dataGotFunc: Array.isArray(manifest.data_got_func) ? manifest.data_got_func.map(String) : [],
       exports: (Array.isArray(manifest.exports) ? manifest.exports : []).map((e) => ({ name: String(e.name), kind: e.kind | 0, value: e.value | 0 }))
     };
     if (!(meta.memSize > 0)) {
@@ -3777,6 +3786,70 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         return parseManifestEnvelope(text, url);
       }
     };
+  }
+  var ASSET_REGISTRY = "__TINYC_ASSET_REGISTRY__";
+  function assetRegistry() {
+    return globalThis[ASSET_REGISTRY] ??= /* @__PURE__ */ Object.create(null);
+  }
+  async function retrieveAsset(transport, url, key, fetchImpl) {
+    const registry = assetRegistry();
+    if (registry[key] !== void 0) return registry[key];
+    if (transport.kind === "fetch") {
+      let text;
+      try {
+        const response = await (fetchImpl ?? globalThis.fetch)(url);
+        if (!response.ok) {
+          throw new TinycError(
+            `tinyc: cannot load asset "${key}" from ${url}: HTTP ${response.status}`
+          );
+        }
+        text = await response.text();
+      } catch (err) {
+        if (err instanceof TinycError) throw err;
+        throw new TinycError(
+          `tinyc: cannot load asset "${key}" from ${url}: ${err.message}`
+        );
+      }
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start < 0 || end <= start) {
+        throw new TinycError(
+          `tinyc: asset envelope at ${url} is not in the envelope form`
+        );
+      }
+      let payload;
+      try {
+        payload = JSON.parse(text.slice(start, end + 1));
+      } catch (err) {
+        throw new TinycError(
+          `tinyc: asset envelope at ${url} does not parse: ${err.message}`
+        );
+      }
+      registry[key] = payload;
+      return payload;
+    }
+    const doc = globalThis.document;
+    if (!doc?.createElement || typeof doc.createElement !== "function") {
+      throw new TinycError(
+        `tinyc: the script transport needs a page main thread; cannot retrieve ${url}`
+      );
+    }
+    await new Promise((resolve, reject) => {
+      const el = doc.createElement("script");
+      el.src = url;
+      el.onload = () => {
+        el.remove();
+        resolve();
+      };
+      el.onerror = () => {
+        el.remove();
+        reject(new TinycError(
+          `tinyc: cannot load asset "${key}" from ${url} (script transport)`
+        ));
+      };
+      doc.head.appendChild(el);
+    });
+    return registry[key] ?? null;
   }
   function canonicalModulePath(path, baseDir = "/sysroot") {
     if (typeof path !== "string" || path.length === 0) {
@@ -4368,7 +4441,18 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         }
         unresolvedOther.push(key);
       }
-      return { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther };
+      const unresolvedDataGotFunc = [];
+      for (const name of record.meta.dataGotFunc ?? []) {
+        const entry = this._got.get(`func:${name}`);
+        if (!entry || !entry.filled) unresolvedDataGotFunc.push(name);
+      }
+      return {
+        imports,
+        unresolvedFunctions,
+        unresolvedGotMem,
+        unresolvedOther,
+        unresolvedDataGotFunc
+      };
     }
     /** A GOT value for a not-yet-filled entry, in the §5 order:
      *  shim layer (functions only), global table, requester closure. */
@@ -4467,10 +4551,21 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         const wasmModule = lib.wasmModule ?? new WebAssembly.Module(lib.bodyBytes);
         record.wasmModule = wasmModule;
         record.importTypes = parseImportTypes(lib.bodyBytes);
-        const { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther } = this._buildImports(record, wasmModule);
+        const {
+          imports,
+          unresolvedFunctions,
+          unresolvedGotMem,
+          unresolvedOther,
+          unresolvedDataGotFunc
+        } = this._buildImports(record, wasmModule);
         if (unresolvedGotMem.length > 0) {
           throw new TinycDylinkError(
             `tinyc: cannot load "${canonical}": unresolved variable(s) ${unresolvedGotMem.map((n) => `"${n}"`).join(", ")} (GOT.mem references bind eagerly)`
+          );
+        }
+        if (unresolvedDataGotFunc.length > 0) {
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedDataGotFunc.map((n) => `"${n}"`).join(", ")} (GOT.func references from static data bind eagerly)`
           );
         }
         if (flags & RTLD_NOW && unresolvedFunctions.length > 0) {
@@ -4859,25 +4954,60 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
   function clearTargetModuleCache() {
     targetModuleCache.clear();
   }
-  async function createModuleFromGlue(glueUrl, wasmUrl, io) {
+  async function createModuleFromAssetEnvelope(transport, envelopeUrl, target, io) {
+    const asset = await retrieveAsset(
+      transport,
+      envelopeUrl,
+      `tcc-${target}`
+    );
+    if (!asset || typeof asset.glue !== "string" || typeof asset.wasm !== "string") {
+      throw new TinycError(
+        `tinyc: asset envelope at ${envelopeUrl} carries no compiler module for target "${target}"`
+      );
+    }
     let factory;
+    const blobUrl = URL.createObjectURL(
+      new Blob([asset.glue], { type: "text/javascript" })
+    );
     try {
       factory = (await import(
         /* @vite-ignore */
-        glueUrl
+        blobUrl
       )).default;
     } catch {
-      throw new TinycError(
-        `tinyc: the Emscripten glue ${glueUrl} could not be loaded. Build it with build.sh, or pass module / createModule / wasmExports / loadModule.`
-      );
+      try {
+        const dataUrl = "data:text/javascript;base64," + bytesToBase64(textEncoder2.encode(asset.glue));
+        factory = (await import(
+          /* @vite-ignore */
+          dataUrl
+        )).default;
+      } catch (err) {
+        throw new TinycError(
+          `tinyc: cannot build the compiler factory from ${envelopeUrl}: ${err.message}`
+        );
+      }
+    } finally {
+      URL.revokeObjectURL(blobUrl);
     }
     if (typeof factory !== "function") {
-      throw new TinycError(`tinyc: Emscripten glue ${glueUrl} does not default-export a module factory`);
+      throw new TinycError(
+        `tinyc: compiler glue in ${envelopeUrl} does not default-export a module factory`
+      );
     }
+    const wasmBytes = base64ToBytes(asset.wasm);
     return factory({
       print: (text) => io.out(text + "\n"),
       printErr: (text) => io.err(text + "\n"),
-      locateFile: (path, prefix) => wasmUrl && path.endsWith(".wasm") ? wasmUrl : prefix + path
+      /* The glue's own instantiation override: it hands us the
+       * import object and takes the instance back, so the module
+       * bytes come from the envelope and the glue never fetches. */
+      instantiateWasm: (imports, success) => {
+        WebAssembly.instantiate(wasmBytes, imports).then(
+          ({ instance }) => success(instance)
+        );
+        return {};
+      },
+      locateFile: (path, prefix) => prefix + path
     });
   }
   async function loadTargetModule(target, options, io) {
@@ -4888,13 +5018,12 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       if (typeof options.loadModule === "function") {
         return options.loadModule(target, {
           ...files,
-          wasmUrl: options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl),
-          glueUrl: options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl)
+          envelopeUrl: assetUrl(files.envelopeFile, options.baseUrl)
         });
       }
-      const glueUrl = options.glueUrl ?? assetUrl(files.glueFile, options.baseUrl);
-      const wasmUrl = options.wasmUrl ?? assetUrl(files.wasmFile, options.baseUrl);
-      return createModuleFromGlue(glueUrl, wasmUrl, io);
+      const transport = createTransport(options.transport);
+      const envelopeUrl = assetUrl(files.envelopeFile, options.baseUrl);
+      return createModuleFromAssetEnvelope(transport, envelopeUrl, target, io);
     })();
     targetModuleCache.set(target, promise);
     promise.catch(() => {
@@ -4918,7 +5047,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     assertKnownTarget(target);
     return SYSROOT_MANIFESTS[target];
   }
-  async function loadSysroot(instance, sysrootOpt) {
+  async function loadSysroot(instance, sysrootOpt, transportOption) {
     if (!sysrootOpt) return;
     let manifest;
     let baseUrl = "./sysroot/";
@@ -4936,11 +5065,38 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     }
     const baseHref = /^[a-z][a-z0-9+.-]*:/i.test(baseUrl) ? baseUrl : assetUrl(baseUrl);
     const entries = [...manifest.includeFiles ?? [], ...manifest.libFiles ?? []];
+    const transport = createTransport(
+      sysrootOpt?.transport ?? transportOption ?? (fetchImpl ? "fetch" : void 0)
+    );
+    let envelope = null;
+    let envelopeUrl = null;
     for (const entry of entries) {
       if (entry.binary && !includeBinaries) continue;
       if (instance.fs.hasFile(entry.path)) continue;
-      const url = entry.url ?? new URL(entry.source, baseHref).href;
-      await instance.fs.addFileFromUrl(entry.path, url, { fetchImpl });
+      if (!envelope) {
+        envelopeUrl = new URL(
+          `sysroot-${instance.target}.tinyc.js`,
+          baseHref
+        ).href;
+        envelope = await retrieveAsset(
+          transport,
+          envelopeUrl,
+          `sysroot-${instance.target}`,
+          fetchImpl
+        );
+        if (!envelope || typeof envelope.files !== "object" || !envelope.files) {
+          throw new TinycError(
+            `tinyc: asset envelope at ${envelopeUrl} carries no sysroot for target "${instance.target}"`
+          );
+        }
+      }
+      const b64 = envelope.files[entry.source];
+      if (typeof b64 !== "string") {
+        throw new TinycError(
+          `tinyc: sysroot file "${entry.source}" is missing from the asset envelope at ${envelopeUrl}`
+        );
+      }
+      await instance.fs.addFile(entry.path, base64ToBytes(b64));
     }
     if (manifest.includeDir) instance.fs.registerIncludeDir(manifest.includeDir);
   }
@@ -5022,7 +5178,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     instance._fsBackend = await tryMountOpfsBackend(native, bridge);
     bridge.moduleFsPrefix = instance._fsBackend === "opfs" ? OPFS_MOUNT_POINT : "";
     if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
-    await loadSysroot(instance, options.sysroot);
+    await loadSysroot(instance, options.sysroot, options.transport);
     return instance;
   }
   var index_default = loadTinyc;

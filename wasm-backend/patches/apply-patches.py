@@ -406,6 +406,94 @@ PATCHES = [
      "#if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_WASM32\n"
      "#define gen_cvt_ftoi1 gen_cvt_ftoi",
      1),
+    # 29. tccgen.c: __builtin_va_start / __builtin_va_arg cases for
+    #     the wasm target (the builtin switch has per-target cases
+    #     only).  va_start mirrors the riscv64 case (the backend's
+    #     gen_va_start pushes the area pointer, vstore assigns it);
+    #     va_arg mirrors the arm64 case except the result type is
+    #     left to gen_va_arg, which reports the promoted type for
+    #     a float argument.
+    ("tccgen.c",
+     "    case TOK_builtin_va_arg: {\n"
+     "\tparse_builtin_params(0, \"et\");\n"
+     "\ttype = vtop->type;\n"
+     "\tvpop();\n"
+     "        //xx check types\n"
+     "        gen_va_arg(&type);\n"
+     "        vtop->type = type;\n"
+     "        break;\n"
+     "    }\n"
+     "#endif",
+     "    case TOK_builtin_va_arg: {\n"
+     "\tparse_builtin_params(0, \"et\");\n"
+     "\ttype = vtop->type;\n"
+     "\tvpop();\n"
+     "        //xx check types\n"
+     "        gen_va_arg(&type);\n"
+     "        vtop->type = type;\n"
+     "        break;\n"
+     "    }\n"
+     "#endif\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    case TOK_builtin_va_start:\n"
+     "        parse_builtin_params(0, \"ee\");\n"
+     "        r = vtop->r & VT_VALMASK;\n"
+     "        if (r == VT_LLOCAL)\n"
+     "            r = VT_LOCAL;\n"
+     "        if (r != VT_LOCAL)\n"
+     "            tcc_error(\"__builtin_va_start expects a local variable\");\n"
+     "        gen_va_start();\n"
+     "        vstore();\n"
+     "        break;\n"
+     "    case TOK_builtin_va_arg: {\n"
+     "        parse_builtin_params(0, \"et\");\n"
+     "        type = vtop->type;\n"
+     "        vpop();\n"
+     "        gen_va_arg(&type);\n"
+     "        break;\n"
+     "    }\n"
+     "#endif",
+     1),
+    # 30. tcctok.h: the va_start/va_arg builtin tokens are defined
+    #     per target; add both to the existing wasm branch (which
+    #     patch 10 added for the vector builtin tokens).
+    ("tcctok.h",
+     "#elif defined TCC_TARGET_WASM32\n"
+     "     DEF(TOK_wasm_vop1, \"__builtin_wasm_vop1\")",
+     "#elif defined TCC_TARGET_WASM32\n"
+     "     DEF(TOK_builtin_va_start, \"__builtin_va_start\")\n"
+     "     DEF(TOK_builtin_va_arg, \"__builtin_va_arg\")\n"
+     "     DEF(TOK_wasm_vop1, \"__builtin_wasm_vop1\")",
+     1),
+    # 31. include/tccdefs.h: without a wasm branch the va_list
+    #     predefs fall through to the i386 macros, which define
+    #     __builtin_va_start/__builtin_va_arg as pointer arithmetic
+    #     over the named-parameter area - a layout this backend
+    #     does not have (parameters live in wasm locals, variadic
+    #     arguments in a caller-materialised area).  Give the wasm
+    #     target a plain pointer va_list and no macros, so the
+    #     builtins reach gen_va_start/gen_va_arg; va_copy is a
+    #     plain pointer copy under this layout.
+    ("include/tccdefs.h",
+     "#else /* __i386__ */\n"
+     "    typedef char *__builtin_va_list;",
+     "#elif defined __wasm32__\n"
+     "    typedef char *__builtin_va_list;\n"
+     "    #define __builtin_va_copy(dest, src) ((dest) = (src))\n"
+     "#else /* __i386__ */\n"
+     "    typedef char *__builtin_va_list;",
+     1),
+    # 32. conftest.c (the c2str tool): the platform-macro table
+    #     has no __wasm32__ entry, so a column-1 `#elif defined
+    #     __wasm32__' in tccdefs.h survives conversion unmapped
+    #     and the host compiler drops the branch when embedding
+    #     the predefs.  Map it to TCC_TARGET_WASM32 like the
+    #     other targets.
+    ("conftest.c",
+     "    \"__riscv\",              \"TCC_TARGET_RISCV64\",\n",
+     "    \"__riscv\",              \"TCC_TARGET_RISCV64\",\n"
+     "    \"__wasm32__\",           \"TCC_TARGET_WASM32\",\n",
+     1),
 ]
 
 for fname, old, new, count in PATCHES:
