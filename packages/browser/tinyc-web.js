@@ -24,13 +24,19 @@ var TinycWeb = (() => {
     DEFAULT_TARGET: () => DEFAULT_TARGET,
     IndexedDbFsStore: () => IndexedDbFsStore,
     MemoryFsStore: () => MemoryFsStore,
+    RTLD_GLOBAL: () => RTLD_GLOBAL,
+    RTLD_LAZY: () => RTLD_LAZY,
+    RTLD_LOCAL: () => RTLD_LOCAL,
+    RTLD_NOW: () => RTLD_NOW,
     SUPPORTED_TARGETS: () => SUPPORTED_TARGETS,
     TARGETS: () => TARGETS,
     TCC_OUTPUT: () => TCC_OUTPUT,
     Tinyc: () => Tinyc,
+    TinycDylinkError: () => TinycDylinkError,
     TinycError: () => TinycError,
     TinycMissingExportError: () => TinycMissingExportError,
     TinycMissingImportError: () => TinycMissingImportError,
+    TinycProcess: () => TinycProcess,
     TinycRunNotSupportedError: () => TinycRunNotSupportedError,
     TinycState: () => TinycState,
     VFS_CACHE_MAX_BYTES: () => VFS_CACHE_MAX_BYTES,
@@ -41,6 +47,7 @@ var TinycWeb = (() => {
     clearTargetModuleCache: () => clearTargetModuleCache,
     createDefaultIO: () => createDefaultIO,
     createFsStore: () => createFsStore,
+    createProcess: () => createProcess,
     default: () => index_default,
     flushIO: () => flushIO,
     getLoadedTargets: () => getLoadedTargets,
@@ -69,6 +76,10 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -138,6 +149,10 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -220,6 +235,10 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
       },
@@ -300,6 +319,10 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -382,6 +405,10 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
       },
@@ -462,6 +489,10 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -547,6 +578,10 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
       },
@@ -631,6 +666,10 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
       },
@@ -712,6 +751,10 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -826,8 +869,7 @@ var TinycWeb = (() => {
       u8()[ptr + bytes.length] = 0;
       return bytes.length;
     };
-    let heapTop = 0;
-    let freeHead = 0;
+    const allocState = options.allocatorState ?? { heapTop: 0, freeHead: 0 };
     const moduleAllocator = () => {
       const ex = holder?.instance?.exports;
       return ex && typeof ex.malloc === "function" ? ex : null;
@@ -847,7 +889,7 @@ var TinycWeb = (() => {
     function rawMalloc(size) {
       size = Math.max(8, size + 7 & ~7);
       let prev = 0;
-      let cur = freeHead;
+      let cur = allocState.freeHead;
       while (cur) {
         const csize = readU32(cur);
         const cnext = readU32(cur + 4);
@@ -858,10 +900,10 @@ var TinycWeb = (() => {
             writeU32(rem + 4, cnext);
             writeU32(cur, size);
             if (prev) writeU32(prev + 4, rem);
-            else freeHead = rem;
+            else allocState.freeHead = rem;
           } else {
             if (prev) writeU32(prev + 4, cnext);
-            else freeHead = cnext;
+            else allocState.freeHead = cnext;
           }
           writeU32(cur + 4, ALLOC_USED);
           return cur + 8;
@@ -869,21 +911,30 @@ var TinycWeb = (() => {
         prev = cur;
         cur = cnext;
       }
-      if (!heapTop) heapTop = heapBase;
-      const header = heapTop;
+      if (!allocState.heapTop) allocState.heapTop = heapBase;
+      const header = allocState.heapTop;
       const end = header + 8 + size;
       if (!ensureCapacity(end)) return 0;
       writeU32(header, size);
       writeU32(header + 4, ALLOC_USED);
-      heapTop = end;
+      allocState.heapTop = end;
       return header + 8;
     }
     function rawFree(ptr) {
       if (!ptr) return;
       const header = ptr - 8;
       if (readU32(header + 4) !== ALLOC_USED) return;
-      writeU32(header + 4, freeHead);
-      freeHead = header;
+      writeU32(header + 4, allocState.freeHead);
+      allocState.freeHead = header;
+    }
+    function reserveStatic(size, align = 16) {
+      if (!allocState.heapTop) allocState.heapTop = heapBase;
+      const base = allocState.heapTop + (align - 1) & ~(align - 1);
+      const end = base + size;
+      if (!ensureCapacity(end))
+        throw new Error(`tinyc: cannot grow linear memory to reserve ${size} bytes at ${base}`);
+      allocState.heapTop = end;
+      return base;
     }
     function malloc(size) {
       const own = moduleAllocator();
@@ -1167,7 +1218,7 @@ var TinycWeb = (() => {
       return 0;
     }
     function exit(code) {
-      const table = holder?.instance?.exports?.__indirect_function_table;
+      const table = options.processTable ?? holder?.instance?.exports?.__indirect_function_table;
       if (table && typeof table.get === "function") {
         for (let i = atexitHandlers.length - 1; i >= 0; i--) {
           try {
@@ -1216,13 +1267,13 @@ var TinycWeb = (() => {
         stdinPos += take;
         got += take;
       }
-      const result = new Uint8Array(got);
+      const result2 = new Uint8Array(got);
       let at = 0;
       for (const p of parts) {
-        result.set(p, at);
+        result2.set(p, at);
         at += p.length;
       }
-      return result;
+      return result2;
     }
     function makeVa(vaPtr) {
       let cur = vaPtr;
@@ -1663,7 +1714,12 @@ var TinycWeb = (() => {
       clock: () => Math.floor(performance.now() * 1e3),
       difftime: (a, b) => a - b
     };
-    return { env };
+    const result = { env };
+    Object.defineProperty(result, "reserveStatic", {
+      value: reserveStatic,
+      enumerable: false
+    });
+    return result;
   }
 
   // vfs-store.mjs
@@ -2977,10 +3033,27 @@ ${src}`;
         throw new TinycRunNotSupportedError(this._instance.target);
       }
       const outputPath = options.outputPath ?? DEFAULT_RUN_OUTPUT;
+      if (this._instance._dylinkOptionOk()) this.setOptions("-wasm-dylink=main");
       this.setOutputType(TCC_OUTPUT.EXE);
       this.outputFile(outputPath);
       const bytes = this._instance.exportFile(outputPath);
       const io = normalizeIO(options.io, this.io);
+      if (isDylinkUnit(bytes)) {
+        const proc = this._instance.createProcess({
+          io,
+          args: [outputPath, ...args.map(String)],
+          env: options.env,
+          stdin: options.stdin,
+          shims: options.shims,
+          imports: options.imports
+        });
+        const result2 = proc.runMainModule(bytes, { path: outputPath });
+        flushIO(io);
+        if (result2 && typeof result2 === "object" && "exitCode" in result2) {
+          return result2.exitCode;
+        }
+        return result2;
+      }
       const result = runWasmModuleSync(bytes, {
         args: [outputPath, ...args.map(String)],
         entry: options.entry,
@@ -3331,9 +3404,29 @@ ${src}`;
       if (!src) {
         throw new TinycError('tinyc: callMain: "-run" must be followed by a source file');
       }
-      const rc = this.callMain([...compileArgs, "-o", DEFAULT_RUN_OUTPUT, src]);
+      const dylink = this._dylinkOptionOk();
+      const rc = this.callMain([
+        ...compileArgs,
+        ...dylink ? ["-wasm-dylink=main"] : [],
+        "-o",
+        DEFAULT_RUN_OUTPUT,
+        src
+      ]);
       if (rc !== 0) return rc;
       const bytes = this.exportFile(DEFAULT_RUN_OUTPUT);
+      if (dylink && isDylinkUnit(bytes)) {
+        const proc = this.createProcess({
+          io: this._io,
+          args: [src, ...progArgs],
+          shims: options.shims,
+          imports: options.imports,
+          stdin: options.stdin
+        });
+        const result2 = proc.runMainModule(bytes, { path: DEFAULT_RUN_OUTPUT });
+        flushIO(this._io);
+        if (typeof result2 === "number") return result2;
+        return result2?.exitCode ?? 0;
+      }
       const result = runWasmModuleSync(bytes, {
         args: [src, ...progArgs],
         shims: options.shims,
@@ -3346,6 +3439,37 @@ ${src}`;
       flushIO(this._io);
       if (typeof result === "number") return result;
       return result?.exitCode ?? 0;
+    }
+    /** True when this instance's compiler accepts the
+     *  -wasm-dylink=main option: probed once per instance on a
+     *  throwaway state. A compiler without the option rejects it;
+     *  the run paths then keep their standalone form. A product is
+     *  only run as a dylink main module when it actually is a
+     *  dylink unit file, which the run paths check on the bytes
+     *  themselves. */
+    _dylinkOptionOk() {
+      if (this._dylinkOk !== void 0) return this._dylinkOk;
+      let ok = false;
+      try {
+        const probe = this.createState();
+        try {
+          probe.setOptions("-wasm-dylink=main");
+          ok = true;
+        } catch {
+          ok = false;
+        }
+        probe.delete();
+      } catch {
+        ok = false;
+      }
+      this._dylinkOk = ok;
+      return ok;
+    }
+    /** Create a dylink process attached to this instance: libraries
+     *  resolve in this instance's virtual FS and the instance's
+     *  registered shims apply to its modules. */
+    createProcess(options = {}) {
+      return new TinycProcess({ ...options, tinyc: this });
     }
     /** Fine-grained mode: create a TCCState, pre-loaded with the
      *  virtual FS include directories (registration order, ahead of
@@ -3381,6 +3505,1353 @@ ${src}`;
       }
     }
   };
+  var TinycDylinkError = class extends TinycError {
+    constructor(message) {
+      super(message);
+      this.name = "TinycDylinkError";
+    }
+  };
+  var RTLD_LAZY = 1;
+  var RTLD_NOW = 2;
+  var RTLD_GLOBAL = 4;
+  var RTLD_LOCAL = 8;
+  var RTLD_KNOWN = RTLD_LAZY | RTLD_NOW | RTLD_GLOBAL | RTLD_LOCAL;
+  var SHA256_K = [
+    1116352408,
+    1899447441,
+    3049323471,
+    3921009573,
+    961987163,
+    1508970993,
+    2453635748,
+    2870763221,
+    3624381080,
+    310598401,
+    607225278,
+    1426881987,
+    1925078388,
+    2162078206,
+    2614888103,
+    3248222580,
+    3835390401,
+    4022224774,
+    264347078,
+    604807628,
+    770255983,
+    1249150122,
+    1555081692,
+    1996064986,
+    2554220882,
+    2821834349,
+    2952996808,
+    3210313671,
+    3336571891,
+    3584528711,
+    113926993,
+    338241895,
+    666307205,
+    773529912,
+    1294757372,
+    1396182291,
+    1695183700,
+    1986661051,
+    2177026350,
+    2456956037,
+    2730485921,
+    2820302411,
+    3259730800,
+    3345764771,
+    3516065817,
+    3600352804,
+    4094571909,
+    275423344,
+    430227734,
+    506948616,
+    659060556,
+    883997877,
+    958139571,
+    1322822218,
+    1537002063,
+    1747873779,
+    1955562222,
+    2024104815,
+    2227730452,
+    2361852424,
+    2428436474,
+    2756734187,
+    3204031479,
+    3329325298
+  ];
+  function sha256Hex(bytes) {
+    const rotr = (x, n) => x >>> n | x << 32 - n;
+    let h0 = 1779033703, h1 = 3144134277, h2 = 1013904242, h3 = 2773480762;
+    let h4 = 1359893119, h5 = 2600822924, h6 = 528734635, h7 = 1541459225;
+    const bitLen = bytes.length * 8;
+    const padded = new Uint8Array(bytes.length + 9 + 63 >> 6 << 6);
+    padded.set(bytes);
+    padded[bytes.length] = 128;
+    const pv = new DataView(padded.buffer);
+    pv.setUint32(padded.length - 4, bitLen >>> 0);
+    pv.setUint32(padded.length - 8, Math.floor(bitLen / 2 ** 32));
+    const w = new Int32Array(64);
+    for (let block = 0; block < padded.length; block += 64) {
+      for (let t = 0; t < 16; t++) w[t] = pv.getInt32(block + t * 4);
+      for (let t = 16; t < 64; t++) {
+        const s0 = rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ w[t - 15] >>> 3;
+        const s1 = rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ w[t - 2] >>> 10;
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1 | 0;
+      }
+      let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+      for (let t = 0; t < 64; t++) {
+        const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        const ch = e & f ^ ~e & g;
+        const t1 = h + s1 + ch + SHA256_K[t] + w[t] | 0;
+        const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        const maj = a & b ^ a & c ^ b & c;
+        const t2 = s0 + maj | 0;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1 | 0;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2 | 0;
+      }
+      h0 = h0 + a | 0;
+      h1 = h1 + b | 0;
+      h2 = h2 + c | 0;
+      h3 = h3 + d | 0;
+      h4 = h4 + e | 0;
+      h5 = h5 + f | 0;
+      h6 = h6 + g | 0;
+      h7 = h7 + h | 0;
+    }
+    return [h0, h1, h2, h3, h4, h5, h6, h7].map((x) => (x >>> 0).toString(16).padStart(8, "0")).join("");
+  }
+  function base64ToBytes(b64) {
+    const bin = atob(String(b64).replace(/\s+/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  var DYLINK_REGISTRY = "__TINYC_DYLINK_REGISTRY__";
+  function parseManifestEnvelope(text, where) {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      throw new TinycDylinkError(
+        `tinyc: manifest at ${where} is not in the envelope form`
+      );
+    }
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch (err) {
+      throw new TinycDylinkError(
+        `tinyc: manifest at ${where} does not parse: ${err.message}`
+      );
+    }
+  }
+  function manifestEnvelopeText(canonical, manifest) {
+    return `globalThis.${DYLINK_REGISTRY} ??= Object.create(null);
+globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(manifest)};
+`;
+  }
+  function manifestToLibrary(manifest, canonical) {
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      throw new TinycDylinkError(`tinyc: manifest for "${canonical}" is not an object`);
+    }
+    if (manifest.version !== 1) {
+      throw new TinycDylinkError(
+        `tinyc: manifest for "${canonical}" has unsupported version ${manifest.version}`
+      );
+    }
+    if (typeof manifest.body !== "string") {
+      throw new TinycDylinkError(`tinyc: manifest for "${canonical}" carries no body`);
+    }
+    const bodyBytes = base64ToBytes(manifest.body);
+    if (typeof manifest.hash === "string" && sha256Hex(bodyBytes) !== manifest.hash) {
+      throw new TinycDylinkError(
+        `tinyc: manifest for "${canonical}": body fails its recorded SHA-256 hash`
+      );
+    }
+    const meta = {
+      version: 1,
+      flavor: manifest.flavor | 0,
+      memSize: manifest.mem_size | 0,
+      memAlign: manifest.mem_align || 16,
+      bssOff: manifest.bss_off | 0,
+      bssSize: manifest.bss_size | 0,
+      tableSize: manifest.table_size | 0,
+      needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
+      exports: (Array.isArray(manifest.exports) ? manifest.exports : []).map((e) => ({ name: String(e.name), kind: e.kind | 0, value: e.value | 0 }))
+    };
+    if (!(meta.memSize > 0)) {
+      throw new TinycDylinkError(
+        `tinyc: manifest for "${canonical}" has an invalid layout (mem_size)`
+      );
+    }
+    return { meta, bodyBytes };
+  }
+  function libraryFromBytes(canonical, bytes) {
+    const manifest = parseManifestEnvelope(textDecoder2.decode(bytes), `"${canonical}"`);
+    const lib = manifestToLibrary(manifest, canonical);
+    lib.manifest = manifest;
+    return lib;
+  }
+  function isDylinkUnit(bytes) {
+    try {
+      libraryFromBytes("/probe", bytes);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function createTransport(option) {
+    let kind = option ?? "auto";
+    if (kind === "auto") {
+      kind = "fetch";
+      try {
+        if (typeof location !== "undefined" && location.protocol === "file:" && typeof document !== "undefined") {
+          kind = "script";
+        }
+      } catch {
+      }
+    }
+    if (kind !== "fetch" && kind !== "script") {
+      throw new TinycError(
+        `tinyc: transport must be "auto", "fetch" or "script", not "${option}"`
+      );
+    }
+    return {
+      kind,
+      /** Retrieve the manifest object served at `url` for the library
+       *  whose canonical path (and registry key) is `canonical`. */
+      async retrieveManifest(url, canonical) {
+        if (kind === "script") {
+          const reg = globalThis[DYLINK_REGISTRY];
+          if (reg && reg[canonical] !== void 0) return reg[canonical];
+          if (typeof document === "undefined" || !document.head) {
+            throw new TinycDylinkError(
+              `tinyc: the script transport needs a page main thread; cannot retrieve ${url}`
+            );
+          }
+          const before = new Set(Object.keys(globalThis[DYLINK_REGISTRY] ?? {}));
+          await new Promise((resolve, reject) => {
+            const el = document.createElement("script");
+            el.src = url;
+            el.async = true;
+            el.onload = () => {
+              el.remove();
+              resolve();
+            };
+            el.onerror = () => {
+              el.remove();
+              reject(new TinycDylinkError(
+                `tinyc: cannot load library "${canonical}" from ${url} (script transport)`
+              ));
+            };
+            document.head.appendChild(el);
+          });
+          const registry = globalThis[DYLINK_REGISTRY] ?? {};
+          if (registry[canonical] !== void 0) return registry[canonical];
+          const fresh = Object.keys(registry).filter((k) => !before.has(k));
+          if (fresh.length === 1) {
+            registry[canonical] = registry[fresh[0]];
+            return registry[canonical];
+          }
+          throw new TinycDylinkError(
+            `tinyc: manifest at ${url} did not register "${canonical}"`
+          );
+        }
+        let text;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          text = await res.text();
+        } catch (err) {
+          throw new TinycDylinkError(
+            `tinyc: cannot load library "${canonical}" from ${url}: ${err.message}`
+          );
+        }
+        return parseManifestEnvelope(text, url);
+      }
+    };
+  }
+  function canonicalModulePath(path, baseDir = "/sysroot") {
+    if (typeof path !== "string" || path.length === 0) {
+      throw new TinycDylinkError("tinyc: module path must be a non-empty string");
+    }
+    return path.startsWith("/") ? normalizeVfsPath(path) : normalizeVfsPath(`${baseDir}/${path}`);
+  }
+  function vfsDirname(p) {
+    const i = p.lastIndexOf("/");
+    return i <= 0 ? "/" : p.slice(0, i);
+  }
+  var VALTYPE_NAMES = {
+    127: "i32",
+    126: "i64",
+    125: "f32",
+    124: "f64",
+    123: "v128",
+    112: "funcref",
+    111: "externref"
+  };
+  function parseImportTypes(bytes) {
+    const out = /* @__PURE__ */ new Map();
+    if (bytes.length < 8) return out;
+    let p = 8;
+    const uleb = () => {
+      let v = 0, s = 0;
+      for (; ; ) {
+        const c = bytes[p++];
+        v += (c & 127) * 2 ** s;
+        if (!(c & 128)) return v;
+        s += 7;
+      }
+    };
+    const str = () => {
+      const n = uleb();
+      const t = textDecoder2.decode(bytes.subarray(p, p + n));
+      p += n;
+      return t;
+    };
+    let types = [];
+    while (p < bytes.length) {
+      const id = bytes[p++];
+      const size = uleb();
+      const end = p + size;
+      if (id === 1) {
+        const n = uleb();
+        for (let i = 0; i < n; i++) {
+          p++;
+          const np = uleb();
+          const params = [];
+          for (let j = 0; j < np; j++) params.push(VALTYPE_NAMES[bytes[p++]] ?? "i32");
+          const nr = uleb();
+          const results = [];
+          for (let j = 0; j < nr; j++) results.push(VALTYPE_NAMES[bytes[p++]] ?? "i32");
+          types.push({ params, results });
+        }
+      } else if (id === 2) {
+        const n = uleb();
+        for (let i = 0; i < n; i++) {
+          const m = str();
+          const name = str();
+          const kind = bytes[p++];
+          if (kind === 0) {
+            const t = types[uleb()];
+            if (t) out.set(`${m}.${name}`, t);
+          } else if (kind === 1 || kind === 3) {
+            p++;
+            if (kind === 3) p++;
+          } else if (kind === 2) {
+            p++;
+            if (bytes[p - 1] & 1) p++;
+          }
+        }
+      }
+      p = end;
+    }
+    return out;
+  }
+  var VALTYPE_BYTES = { i32: 127, i64: 126, f32: 125, f64: 124, v128: 123, funcref: 112, externref: 111 };
+  var DEFAULT_CALL_TYPE = { params: ["i32", "i32", "i32", "i32"], results: ["i32"] };
+  function ulebBytes(v) {
+    const out = [];
+    do {
+      let c = v % 128;
+      v = Math.floor(v / 128);
+      if (v) c |= 128;
+      out.push(c);
+    } while (v);
+    return out;
+  }
+  function makeWrapperFunction(jsFn, type) {
+    const section = (id, body) => [id, ...ulebBytes(body.length), ...body];
+    const vec = (items) => [...ulebBytes(items.length), ...items.flat()];
+    const typeBody = [
+      96,
+      ...vec(type.params.map((t) => [VALTYPE_BYTES[t] ?? 127])),
+      ...vec(type.results.map((t) => [VALTYPE_BYTES[t] ?? 127]))
+    ];
+    const name = (s) => [...ulebBytes(s.length), ...[...s].map((c) => c.charCodeAt(0))];
+    const importBody = [...name("t"), ...name("f"), 0, 0];
+    const codeBody = [
+      0,
+      // no locals
+      ...type.params.flatMap((_, i) => [32, ...ulebBytes(i)]),
+      16,
+      0,
+      // call 0
+      11
+    ];
+    const bytes = new Uint8Array([
+      0,
+      97,
+      115,
+      109,
+      1,
+      0,
+      0,
+      0,
+      ...section(1, vec([typeBody])),
+      ...section(2, vec([importBody])),
+      ...section(3, vec([[0]])),
+      ...section(7, vec([[...name("w"), 0, 1]])),
+      ...section(10, vec([[...ulebBytes(codeBody.length), ...codeBody]]))
+    ]);
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { t: { f: jsFn } });
+    return inst.exports.w;
+  }
+  var NULL_STUB_FN = (() => {
+    const bytes = new Uint8Array([
+      0,
+      97,
+      115,
+      109,
+      1,
+      0,
+      0,
+      0,
+      1,
+      4,
+      1,
+      96,
+      0,
+      0,
+      3,
+      2,
+      1,
+      0,
+      7,
+      5,
+      1,
+      1,
+      116,
+      0,
+      0,
+      10,
+      5,
+      1,
+      3,
+      0,
+      0,
+      11
+    ]);
+    return new WebAssembly.Instance(new WebAssembly.Module(bytes), {}).exports.t;
+  })();
+  var TinycProcess = class {
+    constructor(options = {}) {
+      this._tinyc = options.tinyc ?? null;
+      this._readModule = typeof options.readModule === "function" ? options.readModule : null;
+      this._baseUrl = options.baseUrl ?? null;
+      if (this._baseUrl !== null && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(this._baseUrl)) {
+        const contextBase = SCRIPT_DIR_HREF ?? MODULE_URL ?? PAGE_DIR_HREF;
+        if (contextBase) {
+          try {
+            this._baseUrl = new URL(dirHref(this._baseUrl), contextBase).href;
+          } catch {
+          }
+        }
+      }
+      this._transport = createTransport(options.transport);
+      this._args = (options.args ?? []).map(String);
+      this.memory = new WebAssembly.Memory({ initial: 1 });
+      this.table = new WebAssembly.Table({ element: "anyfunc", initial: 2 });
+      this.table.set(1, NULL_STUB_FN);
+      this._tableFree = 2;
+      this._holder = { memory: this.memory, instance: null };
+      this._allocatorState = { heapTop: 1024, freeHead: 0 };
+      this._io = options.io ? normalizeIO(options.io) : null;
+      this._byteIO = this._io ? textIOToByteIO(this._io) : createDefaultByteIO();
+      this._wasi = createWasiShim(
+        { args: this._args, env: options.env ?? {}, stdin: options.stdin },
+        this._holder,
+        this._byteIO
+      );
+      const def = createDefaultShims({
+        io: this._byteIO,
+        holder: this._holder,
+        stdin: options.stdin,
+        heapBase: 1024,
+        allocatorState: this._allocatorState,
+        processTable: this.table
+      });
+      this._defaultEnv = def.env;
+      this._reserveStatic = def.reserveStatic;
+      this._shimsOption = options.shims ?? null;
+      this._importsOption = options.imports ?? null;
+      this._modules = /* @__PURE__ */ new Map();
+      this._handles = /* @__PURE__ */ new Map();
+      this._nextHandle = 1;
+      this._globalSymbols = /* @__PURE__ */ new Map();
+      this._got = /* @__PURE__ */ new Map();
+      this._stubSlots = /* @__PURE__ */ new Map();
+      this._shimSlots = /* @__PURE__ */ new Map();
+      this._wrapperSlots = /* @__PURE__ */ new Map();
+      this._libraries = /* @__PURE__ */ new Map();
+      this._libraryErrors = /* @__PURE__ */ new Map();
+      this._loadOrder = [];
+      this._main = null;
+      this._dlerror = null;
+      this._ended = false;
+    }
+    /** The process's main module record, or null. */
+    get mainModule() {
+      return this._main;
+    }
+    /** The transport kind in use: "fetch" or "script". */
+    get transportKind() {
+      return this._transport.kind;
+    }
+    // -- memory / table frontiers -------------------------------------
+    _ensureMemory(end) {
+      const have = this.memory.buffer.byteLength;
+      if (have < end) this.memory.grow(Math.ceil((end - have) / 65536));
+    }
+    _allocTable(n) {
+      const base = this._tableFree;
+      if (this.table.length < base + n) this.table.grow(base + n - this.table.length);
+      this._tableFree = base + n;
+      return base;
+    }
+    _allocTableSlot(fn) {
+      const slot = this._allocTable(1);
+      this.table.set(slot, fn);
+      return slot;
+    }
+    _reserveForModule(meta, isMain) {
+      if (isMain) {
+        this._ensureMemory(meta.memSize);
+        if (this._allocatorState.heapTop < meta.memSize) {
+          this._allocatorState.heapTop = meta.memSize;
+        }
+        return 0;
+      }
+      return this._reserveStatic(meta.memSize, meta.memAlign || 16);
+    }
+    // -- dlerror --------------------------------------------------------
+    _setDlerror(message) {
+      this._dlerror = String(message);
+      const bytes = textEncoder2.encode(this._dlerror.slice(0, 253));
+      const m = new Uint8Array(this.memory.buffer);
+      m.set(bytes, 256);
+      m[256 + bytes.length] = 0;
+    }
+    _takeDlerrorPtr() {
+      if (this._dlerror == null) return 0;
+      this._dlerror = null;
+      return 256;
+    }
+    _readCString(ptr, max = 1 << 16) {
+      const m = new Uint8Array(this.memory.buffer);
+      let end = ptr;
+      while (end < m.length && end - ptr < max && m[end] !== 0) end++;
+      return textDecoder2.decode(m.subarray(ptr, end));
+    }
+    // -- library resolution (design §13) --------------------------------
+    /** A library from local sources only — the resolved cache, the
+     *  script registry, the attached instance's virtual FS, the
+     *  readModule callback. A local file that fails its integrity
+     *  check counts as absent; the reason is remembered for error
+     *  messages. Returns null when nothing usable is local. */
+    _libraryLocal(canonical) {
+      const cached = this._libraries.get(canonical);
+      if (cached) return cached;
+      let lib = null;
+      const reg = globalThis[DYLINK_REGISTRY];
+      if (reg && reg[canonical] !== void 0) {
+        try {
+          lib = manifestToLibrary(reg[canonical], canonical);
+          lib.manifest = reg[canonical];
+        } catch (err) {
+          this._libraryErrors.set(canonical, err.message);
+        }
+      }
+      if (!lib && this._tinyc?.fs.hasFile(canonical)) {
+        let bytes = null;
+        try {
+          bytes = this._tinyc.fs.readFile(canonical);
+        } catch {
+          bytes = null;
+        }
+        if (bytes) {
+          try {
+            lib = libraryFromBytes(canonical, bytes);
+          } catch (err) {
+            this._libraryErrors.set(canonical, err.message);
+          }
+        }
+      }
+      if (!lib && this._readModule) {
+        const bytes = this._readModule(canonical);
+        if (bytes) {
+          try {
+            lib = libraryFromBytes(canonical, bytes);
+          } catch (err) {
+            this._libraryErrors.set(canonical, err.message);
+          }
+        }
+      }
+      if (lib) {
+        this._libraries.set(canonical, lib);
+        this._libraryErrors.delete(canonical);
+      }
+      return lib;
+    }
+    /** A library, retrieving its manifest through the transport when
+     *  no usable copy is local; a retrieval is written back into the
+     *  virtual FS, best-effort. */
+    async _libraryFetched(canonical) {
+      const local = this._libraryLocal(canonical);
+      if (local) return local;
+      const origin = canonical.startsWith("/sysroot/") ? canonical.slice("/sysroot/".length) : canonical.replace(/^\//, "");
+      const url = assetUrl(origin, this._baseUrl ?? void 0);
+      let manifest;
+      try {
+        manifest = await this._transport.retrieveManifest(url, canonical);
+      } catch (err) {
+        const why = this._libraryErrors.get(canonical);
+        if (why) {
+          throw new TinycDylinkError(`${err.message} (the local copy is unusable: ${why})`);
+        }
+        throw err;
+      }
+      const lib = manifestToLibrary(manifest, canonical);
+      lib.manifest = manifest;
+      this._libraries.set(canonical, lib);
+      this._libraryErrors.delete(canonical);
+      if (this._tinyc) {
+        try {
+          this._tinyc.fs.addFileSync(
+            canonical,
+            manifestEnvelopeText(canonical, manifest)
+          );
+        } catch {
+        }
+      }
+      return lib;
+    }
+    /** Resolve the whole needed closure of a root library through
+     *  _libraryFetched, so the synchronous load below never waits. */
+    async _prefetchClosure(rootCanonical) {
+      const seen = /* @__PURE__ */ new Set();
+      const walk = async (canonical) => {
+        if (seen.has(canonical)) return;
+        seen.add(canonical);
+        const lib = await this._libraryFetched(canonical);
+        for (const need of lib.meta.needed) {
+          await walk(canonicalModulePath(need, vfsDirname(canonical)));
+        }
+      };
+      await walk(rootCanonical);
+    }
+    // -- symbols --------------------------------------------------------
+    _gotEntry(kind, name) {
+      const key = `${kind}:${name}`;
+      let e = this._got.get(key);
+      if (!e) {
+        e = {
+          global: new WebAssembly.Global({ value: "i32", mutable: true }, 0),
+          filled: false,
+          definer: null
+        };
+        if (kind === "func") e.global.value = this._stubSlot(name);
+        this._got.set(key, e);
+      }
+      return e;
+    }
+    /** A table slot holding a wasm wrapper of a JS function (the
+     *  table accepts only wasm functions), typed for the calls the
+     *  process's modules make through it. */
+    _jsFunctionSlot(fn, type) {
+      const typeKey = `${type.params.join(",")}->${type.results.join(",")}`;
+      let byType = this._wrapperSlots.get(fn);
+      if (!byType) {
+        byType = /* @__PURE__ */ new Map();
+        this._wrapperSlots.set(fn, byType);
+      }
+      let slot = byType.get(typeKey);
+      if (slot === void 0) {
+        slot = this._allocTableSlot(makeWrapperFunction(fn, type));
+        byType.set(typeKey, slot);
+      }
+      return slot;
+    }
+    _stubSlot(name) {
+      let slot = this._stubSlots.get(name);
+      if (slot === void 0) {
+        const trap = () => {
+          throw new Error(`tinyc: call to unresolved function "${name}"`);
+        };
+        slot = this._jsFunctionSlot(trap, DEFAULT_CALL_TYPE);
+        this._stubSlots.set(name, slot);
+      }
+      return slot;
+    }
+    _shimSlot(name, fn, requester = null) {
+      let slot = this._shimSlots.get(name);
+      if (slot === void 0) {
+        let type = requester?.importTypes?.get(`env.${name}`) ?? null;
+        if (!type) {
+          for (const rec of this._modules.values()) {
+            type = rec.importTypes?.get(`env.${name}`) ?? null;
+            if (type) break;
+          }
+        }
+        slot = this._jsFunctionSlot(fn, type ?? DEFAULT_CALL_TYPE);
+        this._shimSlots.set(name, slot);
+      }
+      return slot;
+    }
+    /** Fill a GOT entry from a definition, first-wins: an entry that
+     *  already holds a definition keeps it. */
+    _fillGot(kind, name, value, definer) {
+      const e = this._gotEntry(kind, name);
+      if (!e.filled) {
+        e.global.value = value;
+        e.filled = true;
+        e.definer = definer;
+      }
+    }
+    _registerGlobals(record) {
+      for (const [name, e] of record.exports) {
+        if (!this._globalSymbols.has(name)) {
+          this._globalSymbols.set(name, { kind: e.kind, value: e.value, record });
+        }
+      }
+      record.global = true;
+    }
+    _withdrawGlobals(record) {
+      for (const [name, e] of this._globalSymbols) {
+        if (e.record === record) this._globalSymbols.delete(name);
+      }
+      for (const [name, e] of record.exports) {
+        const entry = this._got.get(`${e.kind === 0 ? "func" : "mem"}:${name}`);
+        if (entry && entry.definer === record) {
+          entry.global.value = e.kind === 0 ? this._stubSlot(name) : 0;
+          entry.filled = false;
+          entry.definer = null;
+        }
+      }
+      record.global = false;
+    }
+    /** Modules a requester has opened and not yet closed. */
+    _openedBy(requester) {
+      const out = [];
+      for (const rec of this._modules.values()) {
+        if ((rec.handleHolders.get(requester) ?? 0) > 0) out.push(rec);
+      }
+      return out;
+    }
+    /** A record's visibility closure (design §9.4): itself, its
+     *  needed closure transitively, and — for a module loaded by a
+     *  runtime dlopen — its requester's exports, the requester's
+     *  closure and the modules the requester has open. */
+    _closureRecords(record) {
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      const visit = (rec) => {
+        if (!rec || seen.has(rec)) return;
+        seen.add(rec);
+        out.push(rec);
+        for (const dep of rec.neededRecords) visit(dep);
+        if (rec.scopeFrom) {
+          visit(rec.scopeFrom);
+          for (const dep of this._openedBy(rec.scopeFrom)) visit(dep);
+        }
+      };
+      visit(record);
+      return out;
+    }
+    _lookupClosure(name, record, includeSelf) {
+      const records = this._closureRecords(record);
+      for (const rec of records) {
+        if (!includeSelf && rec === record) continue;
+        const e = rec.exports.get(name);
+        if (e) return { record: rec, entry: e };
+      }
+      return null;
+    }
+    /** The callable for a function symbol provided by a module:
+     *  the exported function itself when the definer is
+     *  instantiated, a call-time forwarding stub while it is still
+     *  in flight (a dependency cycle). */
+    _functionValue(record, name, requester) {
+      const fn = record.instance?.exports?.[name];
+      if (typeof fn === "function") return fn;
+      return (...args) => {
+        const f = record.instance?.exports?.[name];
+        if (typeof f !== "function") {
+          throw new Error(
+            `tinyc: call to "${name}" of "${record.canonical}", which is not instantiated yet (imported by "${requester.canonical}")`
+          );
+        }
+        return f(...args);
+      };
+    }
+    // -- import assembly --------------------------------------------------
+    _buildImports(record, wasmModule) {
+      const imports = {};
+      const provided = /* @__PURE__ */ new Map();
+      const put = (m, n, v) => {
+        (imports[m] ??= {})[n] = v;
+        provided.set(`${m}.${n}`, v);
+      };
+      for (const [name, fn] of Object.entries(this._wasi)) {
+        put("wasi_snapshot_preview1", name, fn);
+      }
+      for (const [name, fn] of Object.entries(this._defaultEnv)) {
+        put("env", name, fn);
+      }
+      const dl = this._dlfcnFor(record);
+      for (const [name, fn] of Object.entries(dl)) put("env", name, fn);
+      const ctx = createShimContext(this._holder, this._byteIO);
+      for (const layer of [globalShimRegistry, this._tinyc?._shims, this._shimsOption]) {
+        if (!layer) continue;
+        for (const [key, fn] of shimEntriesOf(layer)) {
+          const { module: mn, name } = splitShimKey(key);
+          put(mn, name, (...a) => fn(ctx, ...a));
+        }
+      }
+      for (const [mn, fns] of Object.entries(this._importsOption ?? {})) {
+        for (const [name, v] of Object.entries(fns)) put(mn, name, v);
+      }
+      put("env", "memory", this.memory);
+      put("env", "__indirect_function_table", this.table);
+      put(
+        "env",
+        "__memory_base",
+        new WebAssembly.Global({ value: "i32", mutable: false }, record.memoryBase)
+      );
+      put(
+        "env",
+        "__table_base",
+        new WebAssembly.Global({ value: "i32", mutable: false }, record.tableBase)
+      );
+      const unresolvedFunctions = [];
+      const unresolvedGotMem = [];
+      const unresolvedOther = [];
+      for (const imp of WebAssembly.Module.imports(wasmModule)) {
+        const key = `${imp.module}.${imp.name}`;
+        if (imp.kind === "global" && (imp.module === "GOT.func" || imp.module === "GOT.mem")) {
+          const kind = imp.module === "GOT.func" ? "func" : "mem";
+          const entry = this._gotEntry(kind, imp.name);
+          if (!entry.filled) {
+            const hit = this._resolveGot(kind, imp.name, record, provided);
+            if (hit) this._fillGot(kind, imp.name, hit.value, hit.definer);
+            else if (kind === "mem") unresolvedGotMem.push(imp.name);
+          }
+          put(imp.module, imp.name, entry.global);
+          continue;
+        }
+        if (provided.has(key)) continue;
+        if (imp.kind === "function") {
+          const g = this._globalSymbols.get(imp.name);
+          if (g && g.kind === 0) {
+            put(imp.module, imp.name, this._functionValue(g.record, imp.name, record));
+            continue;
+          }
+          const hit = this._lookupClosure(imp.name, record, false);
+          if (hit && hit.entry.kind === 0) {
+            put(imp.module, imp.name, this._functionValue(hit.record, imp.name, record));
+            continue;
+          }
+          unresolvedFunctions.push(imp.name);
+          put(imp.module, imp.name, () => {
+            throw new Error(
+              `tinyc: call to unresolved function "${imp.name}" imported by "${record.canonical}"`
+            );
+          });
+          continue;
+        }
+        unresolvedOther.push(key);
+      }
+      return { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther };
+    }
+    /** A GOT value for a not-yet-filled entry, in the §5 order:
+     *  shim layer (functions only), global table, requester closure. */
+    _resolveGot(kind, name, record, provided) {
+      const wantKind = kind === "func" ? 0 : 1;
+      if (kind === "func") {
+        const shim = provided.get(`env.${name}`);
+        if (typeof shim === "function") {
+          return { value: this._shimSlot(name, shim, record), definer: "shim" };
+        }
+      }
+      const g = this._globalSymbols.get(name);
+      if (g && g.kind === wantKind) return { value: g.value, definer: g.record };
+      const hit = this._lookupClosure(name, record, false);
+      if (hit && hit.entry.kind === wantKind) {
+        return { value: hit.entry.value, definer: hit.record };
+      }
+      return null;
+    }
+    // -- the load procedure (design §9) -----------------------------------
+    /** Load (or re-reference) a module by canonical path.
+     *  opts: { flags, requester, runtimeEdge, hostEdge, isMain, lib }.
+     *  Reference accounting: the call itself is one reference — a
+     *  needed edge, a dlopen handle reference, or the process's main
+     *  reference. Throws TinycDylinkError on failure, with the
+     *  partial load rolled back. */
+    _loadModule(canonical, opts = {}) {
+      const flags = opts.flags ?? RTLD_LOCAL;
+      const requester = opts.requester ?? null;
+      const holderKey = opts.runtimeEdge || opts.hostEdge ? requester ?? "host" : null;
+      const existing = this._modules.get(canonical);
+      if (existing) {
+        existing.refcount++;
+        if (holderKey !== null) {
+          existing.handleHolders.set(
+            holderKey,
+            (existing.handleHolders.get(holderKey) ?? 0) + 1
+          );
+        }
+        if (flags & RTLD_GLOBAL && !existing.global) {
+          this._registerGlobals(existing);
+        }
+        return existing;
+      }
+      if (this._ended) {
+        throw new TinycDylinkError("tinyc: the process has ended");
+      }
+      const lib = opts.lib ?? this._libraryLocal(canonical);
+      if (!lib) {
+        const why = this._libraryErrors.get(canonical);
+        throw new TinycDylinkError(why ? `tinyc: cannot load "${canonical}": ${why}` : `tinyc: cannot load "${canonical}": not present locally (a host loadModule call retrieves it from the base URL first)`);
+      }
+      const meta = lib.meta;
+      const record = {
+        canonical,
+        meta,
+        lib,
+        handle: this._nextHandle++,
+        state: "loading",
+        memoryBase: 0,
+        tableBase: 0,
+        instance: null,
+        wasmModule: null,
+        exports: /* @__PURE__ */ new Map(),
+        neededRecords: [],
+        handleHolders: /* @__PURE__ */ new Map(),
+        scopeFrom: opts.runtimeEdge ? requester : null,
+        refcount: 1,
+        global: false,
+        isMain: Boolean(opts.isMain)
+      };
+      if (holderKey !== null) record.handleHolders.set(holderKey, 1);
+      this._modules.set(canonical, record);
+      this._handles.set(record.handle, record);
+      try {
+        record.memoryBase = this._reserveForModule(meta, record.isMain);
+        record.tableBase = this._allocTable(meta.tableSize);
+        for (const e of meta.exports) {
+          if (record.exports.has(e.name)) continue;
+          const value = e.kind === 0 ? record.tableBase + e.value : record.memoryBase + e.value;
+          record.exports.set(e.name, { kind: e.kind, value });
+        }
+        for (const [name, e] of record.exports) {
+          this._fillGot(e.kind === 0 ? "func" : "mem", name, e.value, record);
+        }
+        if (flags & RTLD_GLOBAL || record.isMain) this._registerGlobals(record);
+        const childFlags = flags & RTLD_NOW ? RTLD_NOW : RTLD_LAZY;
+        for (const need of meta.needed) {
+          const depCanonical = canonicalModulePath(need, vfsDirname(canonical));
+          const dep = this._loadModule(depCanonical, {
+            flags: childFlags,
+            requester: record
+          });
+          record.neededRecords.push(dep);
+        }
+        const wasmModule = lib.wasmModule ?? new WebAssembly.Module(lib.bodyBytes);
+        record.wasmModule = wasmModule;
+        record.importTypes = parseImportTypes(lib.bodyBytes);
+        const { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther } = this._buildImports(record, wasmModule);
+        if (unresolvedGotMem.length > 0) {
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${canonical}": unresolved variable(s) ${unresolvedGotMem.map((n) => `"${n}"`).join(", ")} (GOT.mem references bind eagerly)`
+          );
+        }
+        if (flags & RTLD_NOW && unresolvedFunctions.length > 0) {
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedFunctions.map((n) => `"${n}"`).join(", ")} under RTLD_NOW`
+          );
+        }
+        if (unresolvedOther.length > 0) {
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${canonical}": unsupported import(s) ` + unresolvedOther.join(", ")
+          );
+        }
+        let instance;
+        try {
+          instance = new WebAssembly.Instance(wasmModule, imports);
+        } catch (err) {
+          throw new TinycDylinkError(
+            `tinyc: cannot instantiate "${canonical}": ${err.message}`
+          );
+        }
+        record.instance = instance;
+        if (typeof instance.exports.__tinyc_dylink_init !== "function" || typeof instance.exports.__tinyc_dylink_fini !== "function") {
+          throw new TinycDylinkError(
+            `tinyc: module "${canonical}" does not export __tinyc_dylink_init/__tinyc_dylink_fini; it is not a loadable dylink module`
+          );
+        }
+        record.state = "initializing";
+        let rc;
+        try {
+          rc = instance.exports.__tinyc_dylink_init(record.handle);
+        } catch (err) {
+          throw new TinycDylinkError(
+            `tinyc: initialization of "${canonical}" trapped: ${err.message}`
+          );
+        }
+        if (rc !== 0) {
+          throw new TinycDylinkError(
+            `tinyc: initialization of "${canonical}" failed: its DllMain returned FALSE`
+          );
+        }
+        record.state = "loaded";
+        this._loadOrder.push(record);
+        return record;
+      } catch (err) {
+        this._rollbackLoad(record);
+        throw err;
+      }
+    }
+    /** Undo a failed load: release the references the record took,
+     *  withdraw its registrations, discard the record. Its memory
+     *  region and table slots are retired, never reused. */
+    _rollbackLoad(record) {
+      const deps = record.neededRecords;
+      record.neededRecords = [];
+      for (let i = deps.length - 1; i >= 0; i--) this._releaseRef(deps[i]);
+      this._withdrawGlobals(record);
+      this._modules.delete(record.canonical);
+      this._handles.delete(record.handle);
+      record.state = "discarded";
+    }
+    _releaseRef(record) {
+      record.refcount--;
+      if (record.refcount > 0 || record.isMain) return;
+      this._closeModule(record);
+    }
+    /** Close a module whose count reached zero (design §8/§9.5):
+     *  finalize, withdraw its symbols, then release its own
+     *  references — needed edges in reverse order, then the modules
+     *  it had opened. The instance and its regions persist. */
+    _closeModule(record) {
+      if (record.state === "loaded") {
+        record.state = "closed";
+        try {
+          record.instance.exports.__tinyc_dylink_fini(record.handle, 0);
+        } catch (err) {
+          this._setDlerror(
+            `tinyc: finalizer of "${record.canonical}" trapped: ${err.message}`
+          );
+        }
+      }
+      this._withdrawGlobals(record);
+      this._modules.delete(record.canonical);
+      this._handles.delete(record.handle);
+      const li = this._loadOrder.indexOf(record);
+      if (li >= 0) this._loadOrder.splice(li, 1);
+      const deps = record.neededRecords;
+      record.neededRecords = [];
+      for (let i = deps.length - 1; i >= 0; i--) this._releaseRef(deps[i]);
+      for (const dep of this._openedBy(record)) {
+        const n = dep.handleHolders.get(record) ?? 0;
+        dep.handleHolders.delete(record);
+        for (let i = 0; i < n; i++) this._releaseRef(dep);
+      }
+    }
+    // -- dlfcn --------------------------------------------------------------
+    _dlsym(handle, name) {
+      if (!handle) {
+        const g = this._globalSymbols.get(name);
+        if (g) return g.value;
+        this._setDlerror(
+          `tinyc: dlsym: symbol "${name}" not found in the global scope`
+        );
+        return 0;
+      }
+      const record = this._handles.get(handle);
+      if (!record) {
+        this._setDlerror(`tinyc: dlsym: unknown handle ${handle}`);
+        return 0;
+      }
+      const own = record.exports.get(name);
+      if (own) return own.value;
+      const hit = this._lookupClosure(name, record, false);
+      if (hit) return hit.entry.value;
+      this._setDlerror(
+        `tinyc: dlsym: symbol "${name}" not found in "${record.canonical}" or its dependency closure`
+      );
+      return 0;
+    }
+    _consumeHolder(record, requester) {
+      const holders = record.handleHolders;
+      const key = requester ?? "host";
+      if ((holders.get(key) ?? 0) > 0) {
+        const n = holders.get(key) - 1;
+        if (n === 0) holders.delete(key);
+        else holders.set(key, n);
+        return true;
+      }
+      for (const [k, n] of holders) {
+        if (n > 0) {
+          if (n === 1) holders.delete(k);
+          else holders.set(k, n - 1);
+          return true;
+        }
+      }
+      return false;
+    }
+    _dlclose(handle, requester) {
+      const record = this._handles.get(handle);
+      if (!record) {
+        this._setDlerror(`tinyc: dlclose: unknown handle ${handle}`);
+        return -1;
+      }
+      if (record.isMain) {
+        this._consumeHolder(record, requester);
+        return 0;
+      }
+      if (!this._consumeHolder(record, requester)) {
+        this._setDlerror(
+          `tinyc: dlclose: handle ${handle} ("${record.canonical}") has no outstanding dlopen reference`
+        );
+        return -1;
+      }
+      this._releaseRef(record);
+      return 0;
+    }
+    /** The dlfcn shim set for one requesting module: its dlopen
+     *  calls carry the requester for scoping and edge accounting. */
+    _dlfcnFor(requester) {
+      const proc = this;
+      return {
+        dlopen(pathPtr, flags) {
+          flags = flags | 0;
+          if (pathPtr === 0) {
+            if (proc._main) return proc._main.handle;
+            proc._setDlerror("tinyc: dlopen(NULL): the process has no main module");
+            return 0;
+          }
+          const bad = flags & ~RTLD_KNOWN;
+          if (bad) {
+            proc._setDlerror(
+              `tinyc: dlopen: unsupported flag bit(s) 0x${(bad >>> 0).toString(16)}`
+            );
+            return 0;
+          }
+          const path = proc._readCString(pathPtr);
+          let canonical;
+          try {
+            canonical = canonicalModulePath(path, "/sysroot");
+          } catch (err) {
+            proc._setDlerror(err.message);
+            return 0;
+          }
+          try {
+            const rec = proc._loadModule(canonical, {
+              flags,
+              requester,
+              runtimeEdge: true
+            });
+            return rec.handle;
+          } catch (err) {
+            proc._setDlerror(err.message);
+            return 0;
+          }
+        },
+        dlsym(handle, namePtr) {
+          return proc._dlsym(handle | 0, proc._readCString(namePtr));
+        },
+        dlclose(handle) {
+          return proc._dlclose(handle | 0, requester);
+        },
+        dlerror() {
+          return proc._takeDlerrorPtr();
+        }
+      };
+    }
+    // -- host surface -------------------------------------------------------
+    /** Load a library and its whole needed closure, retrieving
+     *  manifests through the transport where no usable copy is
+     *  local. Returns the module's handle. */
+    async loadModule(path, flags = RTLD_LOCAL) {
+      if (this._ended) throw new TinycDylinkError("tinyc: the process has ended");
+      const canonical = canonicalModulePath(path, "/sysroot");
+      await this._prefetchClosure(canonical);
+      const rec = this._loadModule(canonical, { flags, hostEdge: true });
+      return rec.handle;
+    }
+    /** Synchronous dlopen: the library and its closure must already
+     *  be local (see loadModule for the retrieving form). Returns
+     *  the handle; throws TinycDylinkError on failure. */
+    dlopen(path, flags = RTLD_LAZY) {
+      const canonical = canonicalModulePath(path, "/sysroot");
+      return this._loadModule(canonical, { flags, hostEdge: true }).handle;
+    }
+    /** The handle of an already-loaded module by path, or 0. */
+    moduleHandle(path) {
+      const rec = this._modules.get(canonicalModulePath(path, "/sysroot"));
+      return rec ? rec.handle : 0;
+    }
+    dlsym(handle, name) {
+      const value = this._dlsym(handle, name);
+      if (value === 0) {
+        const msg = this._dlerror ?? "tinyc: dlsym failed";
+        this._dlerror = null;
+        throw new TinycDylinkError(msg);
+      }
+      return value;
+    }
+    dlclose(handle) {
+      const rc = this._dlclose(handle, null);
+      if (rc !== 0) {
+        const msg = this._dlerror ?? "tinyc: dlclose failed";
+        this._dlerror = null;
+        throw new TinycDylinkError(msg);
+      }
+      return 0;
+    }
+    /** Call an exported function of a loaded module by handle and
+     *  name — the host counterpart of a guest function pointer. */
+    callExport(handle, name, ...args) {
+      const record = this._handles.get(handle);
+      if (!record?.instance) {
+        throw new TinycDylinkError(`tinyc: callExport: unknown handle ${handle}`);
+      }
+      const fn = record.instance.exports[name];
+      if (typeof fn !== "function") {
+        throw new TinycDylinkError(
+          `tinyc: module "${record.canonical}" does not export "${name}"`
+        );
+      }
+      return fn(...args);
+    }
+    /** Read a variable exported by a loaded module, as an i32. */
+    readExportI32(handle, name) {
+      const record = this._handles.get(handle);
+      if (!record) throw new TinycDylinkError(`tinyc: readExportI32: unknown handle ${handle}`);
+      const e = record.exports.get(name);
+      if (!e || e.kind !== 1) {
+        throw new TinycDylinkError(
+          `tinyc: module "${record.canonical}" does not export variable "${name}"`
+        );
+      }
+      return new DataView(this.memory.buffer).getInt32(e.value, true);
+    }
+    writeExportI32(handle, name, value) {
+      const record = this._handles.get(handle);
+      if (!record) throw new TinycDylinkError(`tinyc: writeExportI32: unknown handle ${handle}`);
+      const e = record.exports.get(name);
+      if (!e || e.kind !== 1) {
+        throw new TinycDylinkError(
+          `tinyc: module "${record.canonical}" does not export variable "${name}"`
+        );
+      }
+      new DataView(this.memory.buffer).setInt32(e.value, value | 0, true);
+    }
+    /** Load raw module bytes as the process's main module and run
+     *  it: the product of a dylink-main compile, whose exports enter
+     *  the global symbol table. The entry is options.entry when
+     *  given, else _start, else main(argc, argv) with the process's
+     *  args. Running the main module ends the process: every loaded
+     *  module is finalized in reverse load order. Returns the
+     *  entry's return value, or { exitCode } for a _start main. */
+    runMainModule(bytes, options = {}) {
+      if (this._main) {
+        throw new TinycDylinkError("tinyc: this process already has a main module");
+      }
+      if (this._modules.size > 0) {
+        throw new TinycDylinkError(
+          "tinyc: a main module must be the first module loaded into a process"
+        );
+      }
+      const canonical = canonicalModulePath(options.path ?? "/a.out", "/");
+      const lib = libraryFromBytes(canonical, bytes);
+      this._libraries.set(canonical, lib);
+      const record = this._loadModule(canonical, {
+        flags: RTLD_GLOBAL | RTLD_NOW,
+        isMain: true,
+        lib
+      });
+      this._main = record;
+      this._holder.instance = record.instance;
+      const exports = record.instance.exports;
+      let result;
+      try {
+        if (options.entry !== void 0) {
+          const fn = exports[options.entry];
+          if (typeof fn !== "function") {
+            throw new TinycDylinkError(
+              `tinyc: main module does not export "${options.entry}"`
+            );
+          }
+          result = fn(...options.callArgs ?? []);
+        } else if (typeof exports._start === "function") {
+          exports._start();
+          result = { exitCode: 0 };
+        } else if (typeof exports.main === "function") {
+          result = { exitCode: this._callMain(record, options) };
+        } else {
+          throw new TinycDylinkError(
+            "tinyc: main module exports neither _start nor main"
+          );
+        }
+      } catch (err) {
+        if (err instanceof WasiExit || err instanceof ShimExit) {
+          result = { exitCode: err.exitCode };
+        } else {
+          this._teardown();
+          throw err;
+        }
+      }
+      this._teardown();
+      if (this._io) flushIO(this._io);
+      return result;
+    }
+    _callMain(record, options) {
+      const args = (options.args ?? this._args).map(String);
+      const strBytes = args.map((a) => textEncoder2.encode(a + "\0"));
+      const total = strBytes.reduce((n, b) => n + b.length, 0) + (args.length + 1) * 4;
+      const block = this._reserveStatic(total, 4);
+      const m = new Uint8Array(this.memory.buffer);
+      const dv = new DataView(this.memory.buffer);
+      let sp = block + (args.length + 1) * 4;
+      args.forEach((a, i) => {
+        dv.setUint32(block + i * 4, sp, true);
+        m.set(strBytes[i], sp);
+        sp += strBytes[i].length;
+      });
+      dv.setUint32(block + args.length * 4, 0, true);
+      return record.instance.exports.main(args.length, block);
+    }
+    /** End the process: finalize every loaded module in reverse
+     *  load order with the reserved flag set (process ending). */
+    _teardown() {
+      if (this._ended) return;
+      this._ended = true;
+      for (let i = this._loadOrder.length - 1; i >= 0; i--) {
+        const rec = this._loadOrder[i];
+        if (rec.state !== "loaded") continue;
+        rec.state = "closed";
+        try {
+          rec.instance.exports.__tinyc_dylink_fini(rec.handle, 1);
+        } catch {
+        }
+      }
+    }
+    dispose() {
+      this._teardown();
+    }
+  };
+  function createProcess(options = {}) {
+    return new TinycProcess(options);
+  }
   var targetModuleCache = /* @__PURE__ */ new Map();
   function getLoadedTargets() {
     return [...targetModuleCache.keys()];

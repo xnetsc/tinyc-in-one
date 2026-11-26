@@ -191,6 +191,7 @@ static void wasm_registry_reset(void)
         for (j = 0; j < f->nfixs; j++)
             tcc_free(f->fixs[j].name);
         tcc_free(f->fixs);
+        tcc_free(f->spfixs);
         wb_free(&f->final_body);
     }
     nb_wfuns = 0;
@@ -249,6 +250,16 @@ static int wasm_sig_intern(WSig *sig)
     if (nb_wsigs >= 128) tcc_error("wasm: too many distinct signatures");
     wsigs[nb_wsigs] = *sig;
     return nb_wsigs++;
+}
+
+int wasm_intern_sig(int nparams, const int *params, int ret)
+{
+    WSig sig;
+    int i;
+    sig.nparams = nparams;
+    sig.ret = ret;
+    for (i = 0; i < nparams; i++) sig.params[i] = params[i];
+    return wasm_sig_intern(&sig);
 }
 
 /* Build a WSig from a TCC function type.  Returns 0 on success. */
@@ -542,18 +553,55 @@ ST_FUNC void o(unsigned int c)
 /* ------------------------------------------------------------------ */
 /* load / store                                                        */
 
+/* Record a $__stack_pointer operand position (in final_body
+   coordinates) for the output stage to patch with the dylink mode's
+   stack-pointer global index. */
+static void wasm_add_spfix(WFunc *f, int pos)
+{
+    if (f->nspfixs >= f->spfixcap) {
+        f->spfixcap = f->spfixcap ? f->spfixcap * 2 : 4;
+        f->spfixs = tcc_realloc(f->spfixs, f->spfixcap * sizeof(int));
+    }
+    f->spfixs[f->nspfixs++] = pos;
+}
+
+/* Emit the materialisation of a symbol's address (+ addend) onto the
+   operand stack.  Standalone: one placeholder i32.const the output
+   stage patches with the absolute address (WFIX_ADDR).  Dylink: the
+   base-relative form — global.get of the base or GOT global the
+   symbol resolves through, an i32.const, and an i32.add — with the
+   two operands patched at output time (WFIX_DYGLOB / WFIX_DYCONST),
+   once the output stage has classified the symbol as defined data,
+   a defined function, an imported function or an imported variable. */
+static void wasm_emit_sym_addr(Sym *sym, int addend)
+{
+    if (tcc_state->wasm_dylink_flavor) {
+        int gpos = wcur.len;
+        we(0x23); we_uleb5(0); /* global.get <patched> */
+        wasm_add_fix(wcur_func, WFIX_DYGLOB, gpos + 1, sym, addend);
+        {
+            int cpos = wcur.len;
+            we(0x41); we_sleb5(0); /* i32.const <patched> */
+            wasm_add_fix(wcur_func, WFIX_DYCONST, cpos + 1, sym, addend);
+        }
+        we(0x6a); /* i32.add */
+        return;
+    }
+    {
+        int pos = wcur.len;
+        we(0x41); we_sleb5(0);
+        wasm_add_fix(wcur_func, WFIX_ADDR, pos + 1, sym, addend);
+    }
+}
+
 /* push the address described by an lvalue SValue onto the wasm stack */
 static void wasm_push_addr(SValue *sv)
 {
     int fr = sv->r, v = fr & VT_VALMASK;
     if (fr & VT_SYM) {
-        /* Placeholder constant; wasm-link patches the sleb operand
-           with (symbol's linear-memory address + addend), where the
-           addend is sv->c.i.  Fixup offsets are relative to wcur and
-           are shifted at epilog when the final body is assembled. */
-        int pos = wcur.len;
-        we(0x41); we_sleb5(0);
-        wasm_add_fix(wcur_func, WFIX_ADDR, pos + 1, sv->sym, (int)sv->c.i);
+        /* The addend is sv->c.i.  Fixup offsets are relative to wcur
+           and are shifted at epilog when the final body is assembled. */
+        wasm_emit_sym_addr(sv->sym, (int)sv->c.i);
         return;
     }
     if (v == VT_LOCAL || v == VT_LLOCAL) {
@@ -1249,9 +1297,7 @@ ST_FUNC void load(int r, SValue *sv)
     switch (v) {
     case VT_CONST:
         if (fr & VT_SYM) {
-            int pos;
-            we(0x41); pos = wcur.len; we_sleb5(0);
-            wasm_add_fix(wcur_func, WFIX_ADDR, pos, sv->sym, (int)sv->c.i);
+            wasm_emit_sym_addr(sv->sym, (int)sv->c.i);
             we_local_set(wloc_reg(r));
             return;
         }
@@ -1824,16 +1870,75 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret,
                  struct returns for the skeleton */
 }
 
+/* Push an i32 SValue (a function pointer, for an indirect call) onto
+   the operand stack.  Argument staging reads argument registers and
+   writes only the scratch locals, REG_FRET and the vector slots, so
+   the function value's home at entry — register, frame slot, memory
+   cell — is still valid when this runs, after the arguments. */
+static void wasm_push_i32_value(SValue *sv)
+{
+    int fr = sv->r, v = fr & VT_VALMASK;
+    if (fr & VT_LVAL) {
+        /* a variable (or cell) holding the pointer: load through it */
+        wasm_push_addr(sv);
+        we(0x28); we(0x02); we(0x00); /* i32.load */
+        return;
+    }
+    if (fr & VT_SYM) {
+        /* a function designator or its address, as a value */
+        wasm_emit_sym_addr(sv->sym, (int)sv->c.i);
+        return;
+    }
+    if (v == VT_CONST) {
+        we_i32_const((int32_t)sv->c.i);
+        return;
+    }
+    if (v < VT_CONST) {
+        we_local_get(wloc_reg(v));
+        return;
+    }
+    tcc_error("wasm: cannot materialise this function pointer for an "
+              "indirect call");
+}
+
 ST_FUNC void gfunc_call(int nb_args)
 {
     SValue *func_sv = &vtop[-nb_args];
-    WFunc *callee;
+    WFunc *callee = NULL;
+    WSig isig;
+    int indirect = !(func_sv->r & VT_SYM);
+    int rettype = -2;
     int i;
-    if (!(func_sv->r & VT_SYM))
-        tcc_error("wasm: indirect calls (function pointers) not implemented "
-                  "in skeleton; call_indirect table is emitted by wasm-link "
-                  "but gen does not emit it yet");
-    if ((func_sv->sym->type.t & VT_INLINE) && !func_sv->sym->c) {
+    if (indirect) {
+        /* Call through a function-pointer value: the signature comes
+           from the pointer's function type (synthesised from the call
+           site for a K&R type, as on the direct path below). */
+        CType *ft = &func_sv->type;
+        if ((ft->t & VT_BTYPE) == VT_PTR && ft->ref)
+            ft = &ft->ref->type;
+        if ((ft->t & VT_BTYPE) != VT_FUNC)
+            tcc_error("wasm: indirect call through a value that is not "
+                      "a function pointer");
+        if (ft->ref && ft->ref->f.func_type == FUNC_OLD) {
+            int i2;
+            if (nb_args > 16)
+                tcc_error("wasm: too many arguments in indirect call");
+            isig.nparams = 0;
+            isig.ret = wasm_type_of(&ft->ref->type);
+            if (isig.ret == -2)
+                tcc_error("wasm: unsupported return type in indirect call");
+            for (i2 = 0; i2 < nb_args; i2++) {
+                int wt = wasm_type_of(&vtop[1 + i2 - nb_args].type);
+                if (wt < 0)
+                    tcc_error("wasm: unsupported argument type in "
+                              "indirect call");
+                isig.params[isig.nparams++] = wt;
+            }
+        } else if (wasm_sig_from_ftype(ft, &isig) != 0)
+            tcc_error("wasm: unsupported function-pointer signature in "
+                      "indirect call");
+        rettype = isig.ret;
+    } else if ((func_sv->sym->type.t & VT_INLINE) && !func_sv->sym->c) {
         /* A static inline callee has no out-of-line body unless it is
            marked used.  Native backends mark it in greloca() when
            they emit the call relocation, and gen_inline_functions()
@@ -1845,37 +1950,40 @@ ST_FUNC void gfunc_call(int nb_args)
            turn into imports. */
         put_extern_sym(func_sv->sym, NULL, 0, 0);
     }
-    if (func_sv->type.ref && func_sv->type.ref->f.func_type == FUNC_OLD) {
-        /* Undeclared (K&R) callee: the frontend's helper functions
-           (memset, memcpy, ... reached through vpush_helper_func)
-           carry func_old_type, whose parameter list is empty, so a
-           signature built from the declared type would consume none
-           of the arguments pushed below.  The only signature
-           information available is this call site: synthesize the
-           signature from the actual arguments. */
-        WSig sig;
-        int i2;
-        if (nb_args > 16)
-            tcc_error("wasm: too many arguments in call to undeclared "
-                      "function '%s'", get_tok_str(func_sv->sym->v, NULL));
-        sig.nparams = 0;
-        sig.ret = wasm_type_of(&func_sv->type.ref->type);
-        if (sig.ret == -2)
-            tcc_error("wasm: unsupported return type in call to "
-                      "undeclared function '%s'",
-                      get_tok_str(func_sv->sym->v, NULL));
-        for (i2 = 0; i2 < nb_args; i2++) {
-            int wt = wasm_type_of(&vtop[1 + i2 - nb_args].type);
-            if (wt < 0)
-                tcc_error("wasm: unsupported argument type in call to "
+    if (!indirect) {
+        if (func_sv->type.ref && func_sv->type.ref->f.func_type == FUNC_OLD) {
+            /* Undeclared (K&R) callee: the frontend's helper functions
+               (memset, memcpy, ... reached through vpush_helper_func)
+               carry func_old_type, whose parameter list is empty, so a
+               signature built from the declared type would consume none
+               of the arguments pushed below.  The only signature
+               information available is this call site: synthesize the
+               signature from the actual arguments. */
+            WSig sig;
+            int i2;
+            if (nb_args > 16)
+                tcc_error("wasm: too many arguments in call to undeclared "
+                          "function '%s'", get_tok_str(func_sv->sym->v, NULL));
+            sig.nparams = 0;
+            sig.ret = wasm_type_of(&func_sv->type.ref->type);
+            if (sig.ret == -2)
+                tcc_error("wasm: unsupported return type in call to "
                           "undeclared function '%s'",
                           get_tok_str(func_sv->sym->v, NULL));
-            sig.params[sig.nparams++] = wt;
-        }
-        callee = wasm_func_intern_sig(func_sv->sym, &sig, 1);
-    } else
-        callee = wasm_func_intern(func_sv->sym, &func_sv->type);
-    if (!callee->defined) callee->is_import = 1;
+            for (i2 = 0; i2 < nb_args; i2++) {
+                int wt = wasm_type_of(&vtop[1 + i2 - nb_args].type);
+                if (wt < 0)
+                    tcc_error("wasm: unsupported argument type in call to "
+                              "undeclared function '%s'",
+                              get_tok_str(func_sv->sym->v, NULL));
+                sig.params[sig.nparams++] = wt;
+            }
+            callee = wasm_func_intern_sig(func_sv->sym, &sig, 1);
+        } else
+            callee = wasm_func_intern(func_sv->sym, &func_sv->type);
+        if (!callee->defined) callee->is_import = 1;
+        rettype = callee->rettype;
+    }
     if (nb_args > 40)
         tcc_error("wasm: more than 40 call arguments not implemented in skeleton");
     /* Spill every vstack value below the function+args group that
@@ -1949,8 +2057,15 @@ ST_FUNC void gfunc_call(int nb_args)
             we_local_get(wloc_scratch(i));
         }
     }
-    /* call with a padded placeholder index, patched at output */
-    {
+    if (indirect) {
+        /* the callee value goes onto the operand stack last, above
+           the staged arguments; call_indirect pops it after them and
+           the engine checks it against the declared signature */
+        wasm_push_i32_value(func_sv);
+        we(0x11); we_uleb(wasm_sig_intern(&isig)); we_uleb(0);
+        /* call_indirect, table 0 */
+    } else {
+        /* call with a padded placeholder index, patched at output */
         int pos = wcur.len;
         we(0x10); we_uleb5(0); /* call */
         wasm_add_fix(wcur_func, WFIX_CALL, pos + 1, func_sv->sym, 0);
@@ -1959,9 +2074,9 @@ ST_FUNC void gfunc_call(int nb_args)
        consume function + args; tccgen then pushes the return value
        itself, expecting it in REG_IRET / REG_FRET. */
     vtop -= nb_args + 1;
-    if (callee->rettype == WT_V128)
+    if (rettype == WT_V128)
         we_local_set(wloc_vec(0)); /* vector return value: slot 0 */
-    else if (callee->rettype == WT_I64) {
+    else if (rettype == WT_I64) {
         /* split the i64 result into the REG_IRET/REG_IRE2 pair */
         we_local_set(wloc_i64());
         we_local_get(wloc_i64());
@@ -1973,13 +2088,13 @@ ST_FUNC void gfunc_call(int nb_args)
         we(0xa7); /* i32.wrap_i64 */
         we_local_set(wloc_reg(REG_IRE2));
     }
-    else if (callee->rettype == WT_F32) {
+    else if (rettype == WT_F32) {
         we(0xbb); /* f64.promote_f32: float registers hold f64 */
         we_local_set(wloc_reg(REG_FRET));
     }
-    else if (callee->rettype == WT_F64)
+    else if (rettype == WT_F64)
         we_local_set(wloc_reg(REG_FRET));
-    else if (callee->rettype != -1)
+    else if (rettype != -1)
         we_local_set(wloc_reg(REG_IRET));
 }
 
@@ -2070,16 +2185,34 @@ ST_FUNC void gfunc_epilog(void)
     /* prolog bytes: $fp = $sp_old; $sp -= frame
        global.get $sp ; local.set scratch0   (save old sp in scratch 0)
        global.get $sp ; i32.const frame ; i32.sub ; global.set $sp
-       local.get scratch0 ; local.set $fp */
+       local.get scratch0 ; local.set $fp
+       In dylink mode the $sp operands are padded placeholders whose
+       final_body positions are recorded for the output stage, which
+       patches them with the mode's stack-pointer global index (the
+       imported globals occupy the low indices there). */
     wb_init(&pro);
-    wb_putc(&pro, 0x23); wb_uleb(&pro, 0);                 /* global.get $sp */
-    wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_scratch(0));   /* local.set save */
-    wb_putc(&pro, 0x23); wb_uleb(&pro, 0);
-    wb_putc(&pro, 0x41); wb_sleb5(&pro, frame);            /* i32.const frame */
-    wb_putc(&pro, 0x6b);                                   /* i32.sub */
-    wb_putc(&pro, 0x24); wb_uleb(&pro, 0);                 /* global.set $sp */
-    wb_putc(&pro, 0x20); wb_uleb(&pro, wloc_scratch(0));   /* local.get save */
-    wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_fp());         /* local.set $fp */
+    {
+        int dylink = tcc_state->wasm_dylink_flavor != 0;
+        int pro_sp[3], npro_sp = 0, k;
+        wb_putc(&pro, 0x23);                            /* global.get $sp */
+        if (dylink) { pro_sp[npro_sp++] = pro.len; wb_uleb5(&pro, 0); }
+        else wb_uleb(&pro, 0);
+        wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_scratch(0)); /* local.set save */
+        wb_putc(&pro, 0x23);                            /* global.get $sp */
+        if (dylink) { pro_sp[npro_sp++] = pro.len; wb_uleb5(&pro, 0); }
+        else wb_uleb(&pro, 0);
+        wb_putc(&pro, 0x41); wb_sleb5(&pro, frame);     /* i32.const frame */
+        wb_putc(&pro, 0x6b);                            /* i32.sub */
+        wb_putc(&pro, 0x24);                            /* global.set $sp */
+        if (dylink) { pro_sp[npro_sp++] = pro.len; wb_uleb5(&pro, 0); }
+        else wb_uleb(&pro, 0);
+        wb_putc(&pro, 0x20); wb_uleb(&pro, wloc_scratch(0)); /* local.get save */
+        wb_putc(&pro, 0x21); wb_uleb(&pro, wloc_fp());  /* local.set $fp */
+        /* pro lands in final_body right after the 2-byte $exit block
+           header written by the assembly below */
+        for (k = 0; k < npro_sp; k++)
+            wasm_add_spfix(wcur_func, pro_sp[k] + 2);
+    }
 
     /* ---- basic-block dispatch assembly -----------------------------
        Blocks start at offset 0, at the end of the stream (an empty
@@ -2187,7 +2320,11 @@ ST_FUNC void gfunc_epilog(void)
         wb_putc(&final, 0x0b); /* end $exit */
         /* restore stack pointer and fetch the return value */
         wb_putc(&final, 0x20); wb_uleb(&final, wloc_fp());
-        wb_putc(&final, 0x24); wb_uleb(&final, 0);    /* global.set $sp */
+        wb_putc(&final, 0x24);    /* global.set $sp */
+        if (tcc_state->wasm_dylink_flavor) {
+            wasm_add_spfix(wcur_func, final.len);
+            wb_uleb5(&final, 0);
+        } else wb_uleb(&final, 0);
         if (wcur_func->rettype == WT_V128) {
             wb_putc(&final, 0x20); wb_uleb(&final, wloc_vec(0));
         } else if (wcur_func->rettype == WT_F32) {

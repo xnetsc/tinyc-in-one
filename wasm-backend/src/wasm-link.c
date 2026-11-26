@@ -160,6 +160,779 @@ static int wasm_sym_addr(TCCState *s, const char *name, addr_t *out)
     return 0;
 }
 
+/* ---- dylink output ---------------------------------------------------
+ *
+ * The loadable flavors (s->wasm_dylink_flavor: 1 = main, 2 = side).
+ * The module imports its memory, table and bases and materialises
+ * addresses base-relative (the generator emitted WFIX_DYGLOB /
+ * WFIX_DYCONST pairs for them); it exports synthesized
+ * __tinyc_dylink_init / __tinyc_dylink_fini functions.  The output
+ * file is the dylink unit file: a JS envelope holding the metadata
+ * object and the module bytes as base64 — the same form a
+ * translated library takes; the module bytes carry no second copy
+ * of the metadata.  The local layout (section bases, the 64 KiB
+ * stack span) is the standalone layout; only the module's relation
+ * to its environment differs. */
+
+/* SHA-256 (FIPS 180-4), one-shot over an in-memory buffer: the
+   unit file records the hash of the module bytes it carries. */
+static void dy_sha256(const unsigned char *data, size_t len,
+                      unsigned char out[32])
+{
+    static const uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
+        0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+        0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
+        0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
+        0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+        0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+        0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+        0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    };
+    uint32_t h[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
+    uint64_t bits = (uint64_t)len * 8;
+    size_t total = ((len + 9 + 63) / 64) * 64, off;
+    for (off = 0; off < total; off += 64) {
+        uint32_t w[64];
+        int t;
+        for (t = 0; t < 16; t++) {
+            uint32_t v = 0;
+            int j;
+            for (j = 0; j < 4; j++) {
+                size_t at = off + t * 4 + j;
+                unsigned char c;
+                if (at < len) c = data[at];
+                else if (at == len) c = 0x80;
+                else if (at >= total - 8)
+                    c = (unsigned char)(bits >> (8 * (total - 1 - at)));
+                else c = 0;
+                v = (v << 8) | c;
+            }
+            w[t] = v;
+        }
+        for (t = 16; t < 64; t++) {
+            uint32_t s0 = ((w[t-15] >> 7) | (w[t-15] << 25)) ^
+                          ((w[t-15] >> 18) | (w[t-15] << 14)) ^ (w[t-15] >> 3);
+            uint32_t s1 = ((w[t-2] >> 17) | (w[t-2] << 15)) ^
+                          ((w[t-2] >> 19) | (w[t-2] << 13)) ^ (w[t-2] >> 10);
+            w[t] = w[t-16] + s0 + w[t-7] + s1;
+        }
+        {
+            uint32_t a=h[0], b=h[1], c=h[2], d=h[3],
+                     e=h[4], f=h[5], g=h[6], hh=h[7];
+            for (t = 0; t < 64; t++) {
+                uint32_t s1 = ((e >> 6) | (e << 26)) ^
+                              ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
+                uint32_t ch = (e & f) ^ (~e & g);
+                uint32_t t1 = hh + s1 + ch + k[t] + w[t];
+                uint32_t s0 = ((a >> 2) | (a << 30)) ^
+                              ((a >> 13) | (a << 19)) ^ ((a >> 22) | (a << 10));
+                uint32_t mj = (a & b) ^ (a & c) ^ (b & c);
+                hh = g; g = f; f = e; e = d + t1;
+                d = c; c = b; b = a; a = t1 + s0 + mj;
+            }
+            h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d;
+            h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+        }
+    }
+    for (off = 0; off < 8; off++) {
+        out[off*4]   = (unsigned char)(h[off] >> 24);
+        out[off*4+1] = (unsigned char)(h[off] >> 16);
+        out[off*4+2] = (unsigned char)(h[off] >> 8);
+        out[off*4+3] = (unsigned char)(h[off]);
+    }
+}
+
+static void dy_b64(WBuf *out, const unsigned char *data, size_t len)
+{
+    static const char tab[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t i;
+    for (i = 0; i < len; i += 3) {
+        uint32_t v = (uint32_t)data[i] << 16;
+        int rem = (int)(len - i);
+        if (rem > 1) v |= (uint32_t)data[i+1] << 8;
+        if (rem > 2) v |= data[i+2];
+        wb_putc(out, tab[(v >> 18) & 63]);
+        wb_putc(out, tab[(v >> 12) & 63]);
+        wb_putc(out, rem > 1 ? tab[(v >> 6) & 63] : '=');
+        wb_putc(out, rem > 2 ? tab[v & 63] : '=');
+    }
+}
+
+/* a JSON string literal, quoted and escaped */
+static void dy_json_str(WBuf *out, const char *s)
+{
+    wb_putc(out, '"');
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\') { wb_putc(out, '\\'); wb_putc(out, c); }
+        else if (c < 0x20) {
+            char tmp[8];
+            snprintf(tmp, sizeof tmp, "\\u%04x", c);
+            wb_write(out, tmp, (int)strlen(tmp));
+        } else wb_putc(out, c);
+    }
+    wb_putc(out, '"');
+}
+
+static void dy_json_num(WBuf *out, unsigned long long v)
+{
+    char tmp[24];
+    snprintf(tmp, sizeof tmp, "%llu", v);
+    wb_write(out, tmp, (int)strlen(tmp));
+}
+
+#define DY_DEFDATA 1 /* defined data: __memory_base + local address */
+#define DY_DEFFUNC 2 /* defined function: __table_base + defined order */
+#define DY_GOTFUNC 3 /* undefined function: GOT.func global + addend */
+#define DY_GOTMEM  4 /* undefined variable: GOT.mem global + addend */
+
+typedef struct DyGot {
+    const char *name; /* borrowed: owned by the fixup that named it */
+    int kind;         /* DY_GOTFUNC or DY_GOTMEM */
+    int gindex;       /* index of the imported GOT global */
+} DyGot;
+
+typedef struct DyVar {
+    const char *name; /* borrowed: symtab string storage */
+    addr_t value;     /* module-local address */
+} DyVar;
+
+static int wasm_find_wfunc(const char *name, int want_defined)
+{
+    int i;
+    for (i = 0; i < nb_wfuns; i++)
+        if (!strcmp(wfuns[i].name, name) &&
+            (!want_defined || wfuns[i].defined))
+            return i;
+    return -1;
+}
+
+/* index of a defined function among the module's defined functions */
+static int wasm_defined_order(int wf)
+{
+    int i, n = 0;
+    for (i = 0; i < wf; i++)
+        if (wfuns[i].defined) n++;
+    return n;
+}
+
+/* Symtab lookup by name: the hash hit when there is one, else a
+   linear scan preferring a defined entry (local symbols are not in
+   the hash).  Returns the symtab index or -1. */
+static int wasm_symtab_find(const char *name)
+{
+    int idx = find_elf_sym(symtab_section, name);
+    int i, nb, undef = -1;
+    if (idx > 0) return idx;
+    nb = symtab_section->data_offset / sizeof(ElfSym);
+    for (i = 1; i < nb; i++) {
+        ElfSym *cand = &((ElfSym *)symtab_section->data)[i];
+        const char *cand_name;
+        if (!cand->st_name) continue;
+        cand_name = (const char *)symtab_section->link->data + cand->st_name;
+        if (strcmp(cand_name, name)) continue;
+        if (cand->st_shndx != SHN_UNDEF) return i;
+        if (undef < 0) undef = i;
+    }
+    return undef;
+}
+
+/* Classify the symbol a WFIX_DYGLOB/WFIX_DYCONST pair refers to.
+   Returns a DY_* kind and stores the module-local value (data
+   address or defined-function order) in *local; 0 when the symbol
+   cannot be resolved at output time. */
+static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
+{
+    int idx, wf;
+    ElfSym *es;
+    if (x->shndx >= 0) {
+        if (x->shndx >= s->nb_sections || wsec_base[x->shndx] == (addr_t)-1)
+            return 0;
+        *local = wsec_base[x->shndx] + x->value;
+        return DY_DEFDATA;
+    }
+    idx = wasm_symtab_find(x->name);
+    if (idx > 0) {
+        es = &((ElfSym *)symtab_section->data)[idx];
+        if (es->st_shndx != SHN_UNDEF && es->st_shndx < s->nb_sections) {
+            Section *sec = s->sections[es->st_shndx];
+            if (sec->name && !strcmp(sec->name, ".text")) {
+                wf = wasm_find_wfunc(x->name, 1);
+                if (wf < 0) return 0;
+                *local = wasm_defined_order(wf);
+                return DY_DEFFUNC;
+            }
+            if (wsec_base[es->st_shndx] != (addr_t)-1) {
+                *local = wsec_base[es->st_shndx] + es->st_value;
+                return DY_DEFDATA;
+            }
+            return 0; /* defined in a section the layout does not place */
+        }
+        return ELFW(ST_TYPE)(es->st_info) == STT_FUNC ? DY_GOTFUNC : DY_GOTMEM;
+    }
+    /* no symtab entry: a registered (imported) function is a
+       function; anything else is treated as a variable */
+    if (wasm_find_wfunc(x->name, 0) >= 0) return DY_GOTFUNC;
+    return DY_GOTMEM;
+}
+
+static int wasm_dy_got(DyGot *gots, int ngots, int kind, const char *name)
+{
+    int i;
+    for (i = 0; i < ngots; i++)
+        if (gots[i].kind == kind && !strcmp(gots[i].name, name))
+            return gots[i].gindex;
+    return -1;
+}
+
+/* The function names recorded in a section's relocation array
+   (.init_array / .fini_array entries, in declaration order).
+   Returns a tcc_malloc'd array of borrowed name pointers. */
+static const char **wasm_array_entries(TCCState *s, const char *secname,
+                                       int *out_n)
+{
+    Section *sec = NULL;
+    const char **names;
+    int i, n;
+    *out_n = 0;
+    for (i = 1; i < s->nb_sections; i++)
+        if (s->sections[i]->name && !strcmp(s->sections[i]->name, secname)) {
+            sec = s->sections[i];
+            break;
+        }
+    if (!sec || !sec->reloc) return NULL;
+    n = sec->reloc->data_offset / sizeof(ElfW_Rel);
+    if (!n) return NULL;
+    names = tcc_malloc(n * sizeof(char *));
+    for (i = 0; i < n; i++) {
+        ElfW_Rel *r = &((ElfW_Rel *)sec->reloc->data)[i];
+        ElfSym *es = &((ElfSym *)symtab_section->data)[ELFW(R_SYM)(r->r_info)];
+        names[i] = (const char *)symtab_section->link->data + es->st_name;
+    }
+    *out_n = n;
+    return names;
+}
+
+/* Look a load hook up among the defined functions and check its
+   signature.  Returns the wfuns index, -1 when absent, -2 when
+   defined with the wrong signature. */
+static int wasm_dy_hook(const char *name, int nparams, int ret)
+{
+    int wf = wasm_find_wfunc(name, 1), i;
+    WSig *sig;
+    if (wf < 0) return -1;
+    sig = &wsigs[wfuns[wf].sig];
+    if (sig->nparams != nparams || sig->ret != ret) return -2;
+    for (i = 0; i < nparams; i++)
+        if (sig->params[i] != WT_I32) return -2;
+    return wf;
+}
+
+/* Append a synthesized function to the registry, before index
+   assignment, so it takes an ordinary function index. */
+static int wasm_dy_add_synth(const char *name, int sig, int nparams,
+                             int rettype)
+{
+    WFunc *fn;
+    if (nb_wfuns >= 512) return -1;
+    fn = &wfuns[nb_wfuns];
+    memset(fn, 0, sizeof *fn);
+    fn->name = tcc_strdup(name);
+    fn->sig = sig;
+    fn->nparams = nparams;
+    fn->rettype = rettype;
+    fn->defined = 1;
+    fn->final_index = -1;
+    wb_init(&fn->final_body);
+    return nb_wfuns++;
+}
+
+static int wasm_output_dylink(TCCState *s, const char *filename)
+{
+    WBuf mod, pay;
+    FILE *f;
+    int i, j, nimports = 0, ndefined = 0, total;
+    addr_t data_end = 1024, sp_init, mem_bytes, img_end = 0;
+    addr_t bss_off = 0, bss_size = 0;
+    int init_wf, fini_wf;
+    int hook_init, hook_fini, hook_dll;
+    const char **ctors = NULL, **dtors = NULL;
+    int nctors = 0, ndtors = 0;
+    DyGot *gots = NULL;
+    int ngots = 0, gotcap = 0, sp_gindex;
+    DyVar *vars = NULL;
+    int nvars = 0, varcap = 0;
+    int rc = 0;
+
+    if (wasm_find_wfunc("__tinyc_dylink_init", 0) >= 0 ||
+        wasm_find_wfunc("__tinyc_dylink_fini", 0) >= 0)
+        return tcc_error_noabort("wasm: '__tinyc_dylink_init' and "
+            "'__tinyc_dylink_fini' are reserved in dylink mode");
+    {
+        int p1[1] = { WT_I32 }, p2[2] = { WT_I32, WT_I32 };
+        init_wf = wasm_dy_add_synth("__tinyc_dylink_init",
+                                    wasm_intern_sig(1, p1, WT_I32), 1, WT_I32);
+        fini_wf = wasm_dy_add_synth("__tinyc_dylink_fini",
+                                    wasm_intern_sig(2, p2, -1), 2, -1);
+    }
+    if (init_wf < 0 || fini_wf < 0)
+        return tcc_error_noabort("wasm: too many functions");
+
+    /* ---- assign final function indices: imports first ------------- */
+    for (i = 0; i < nb_wfuns; i++) {
+        if (wfuns[i].defined) continue;
+        wfuns[i].is_import = 1;
+        wfuns[i].final_index = nimports++;
+    }
+    for (i = 0; i < nb_wfuns; i++) {
+        if (!wfuns[i].defined) continue;
+        wfuns[i].final_index = nimports + ndefined++;
+    }
+    total = nimports + ndefined;
+
+    /* ---- lay out static data sections in linear memory ------------ */
+    wsec_base = tcc_mallocz(s->nb_sections * sizeof(addr_t));
+    for (i = 0; i < s->nb_sections; i++) wsec_base[i] = (addr_t)-1;
+    for (i = 1; i < s->nb_sections; i++) {
+        Section *sec = s->sections[i];
+        const char *nm = sec->name;
+        if (!nm) continue;
+        if (!strcmp(nm, ".rodata") || !strncmp(nm, ".rodata.", 8) ||
+            !strcmp(nm, ".data") || !strncmp(nm, ".data.", 6) ||
+            !strcmp(nm, ".bss")) {
+            data_end = (data_end + 15) & -16;
+            wsec_base[i] = data_end;
+            data_end += sec->data_offset;
+            if (!strcmp(nm, ".bss")) {
+                bss_off = wsec_base[i];
+                bss_size = sec->data_offset;
+            } else if (sec->sh_type != SHT_NOBITS &&
+                       wsec_base[i] + sec->data_offset > img_end)
+                img_end = wsec_base[i] + sec->data_offset;
+        }
+    }
+    sp_init = ((data_end + 15) & -16) + 65536; /* 64 KiB C stack */
+    mem_bytes = (sp_init + 65535) & -65536;
+
+    /* ---- load hooks ------------------------------------------------- */
+    hook_init = wasm_dy_hook("_init", 0, -1);
+    if (hook_init == -2) {
+        rc = tcc_error_noabort("wasm: dylink load hook '_init' must "
+                               "have signature 'void _init(void)'");
+        goto out;
+    }
+    hook_fini = wasm_dy_hook("_fini", 0, -1);
+    if (hook_fini == -2) {
+        rc = tcc_error_noabort("wasm: dylink load hook '_fini' must "
+                               "have signature 'void _fini(void)'");
+        goto out;
+    }
+    hook_dll = wasm_dy_hook("DllMain", 3, WT_I32);
+    if (hook_dll == -2) {
+        rc = tcc_error_noabort("wasm: dylink load hook 'DllMain' must "
+                               "have signature 'int DllMain(int, int, int)'");
+        goto out;
+    }
+    ctors = wasm_array_entries(s, ".init_array", &nctors);
+    dtors = wasm_array_entries(s, ".fini_array", &ndtors);
+    for (i = 0; i < nctors; i++)
+        if (wasm_find_wfunc(ctors[i], 1) < 0) {
+            rc = tcc_error_noabort("wasm: constructor '%s' in .init_array "
+                                   "is not a defined function", ctors[i]);
+            goto out;
+        }
+    for (i = 0; i < ndtors; i++)
+        if (wasm_find_wfunc(dtors[i], 1) < 0) {
+            rc = tcc_error_noabort("wasm: destructor '%s' in .fini_array "
+                                   "is not a defined function", dtors[i]);
+            goto out;
+        }
+
+    /* ---- classify address materialisations, collect GOT globals ---- */
+    for (i = 0; i < nb_wfuns; i++) {
+        WFunc *fn = &wfuns[i];
+        if (!fn->defined) continue;
+        for (j = 0; j < fn->nfixs; j++) {
+            WFix *x = &fn->fixs[j];
+            addr_t local;
+            int kind;
+            if (x->kind == WFIX_CALL) continue;
+            if (x->kind != WFIX_DYGLOB || j + 1 >= fn->nfixs ||
+                fn->fixs[j + 1].kind != WFIX_DYCONST) {
+                rc = tcc_error_noabort("wasm: unpaired dylink address "
+                                       "fixup in function '%s'", fn->name);
+                goto out;
+            }
+            kind = wasm_dy_classify(s, x, &local);
+            if (!kind) {
+                rc = tcc_error_noabort("wasm: cannot resolve address "
+                                       "of '%s'", x->name);
+                goto out;
+            }
+            if ((kind == DY_GOTFUNC || kind == DY_GOTMEM) &&
+                wasm_dy_got(gots, ngots, kind, x->name) < 0) {
+                if (ngots >= gotcap) {
+                    gotcap = gotcap ? gotcap * 2 : 16;
+                    gots = tcc_realloc(gots, gotcap * sizeof(DyGot));
+                }
+                gots[ngots].name = x->name;
+                gots[ngots].kind = kind;
+                gots[ngots].gindex = 2 + ngots;
+                ngots++;
+            }
+            j++; /* the DYCONST half is classified with its DYGLOB */
+        }
+    }
+    sp_gindex = 2 + ngots;
+
+    /* ---- collect the exported variables for the metadata ---------- */
+    {
+        int nb_syms = symtab_section->data_offset / sizeof(ElfSym);
+        for (i = 1; i < nb_syms; i++) {
+            ElfSym *es = &((ElfSym *)symtab_section->data)[i];
+            const char *nm;
+            int bind, dup = 0, k;
+            if (!es->st_name) continue;
+            bind = ELFW(ST_BIND)(es->st_info);
+            if (bind != STB_GLOBAL && bind != STB_WEAK) continue;
+            if (es->st_shndx == SHN_UNDEF || es->st_shndx >= s->nb_sections)
+                continue;
+            if (wsec_base[es->st_shndx] == (addr_t)-1) continue;
+            if (ELFW(ST_TYPE)(es->st_info) == STT_FUNC) continue;
+            nm = (const char *)symtab_section->link->data + es->st_name;
+            for (k = 0; k < nvars; k++)
+                if (!strcmp(vars[k].name, nm)) { dup = 1; break; }
+            if (dup) continue;
+            if (nvars >= varcap) {
+                varcap = varcap ? varcap * 2 : 16;
+                vars = tcc_realloc(vars, varcap * sizeof(DyVar));
+            }
+            vars[nvars].name = nm;
+            vars[nvars].value = wsec_base[es->st_shndx] + es->st_value;
+            nvars++;
+        }
+    }
+
+    /* ---- assemble the synthesized init/fini bodies ------------------ */
+    {
+        WBuf *b = &wfuns[init_wf].final_body;
+        wb_putc(b, 0x23); wb_uleb(b, 0);         /* global.get __memory_base */
+        wb_putc(b, 0x41); wb_sleb(b, (int32_t)sp_init);
+        wb_putc(b, 0x6a);                        /* i32.add */
+        wb_putc(b, 0x24); wb_uleb(b, sp_gindex); /* global.set $sp */
+        if (bss_size) {
+            wb_putc(b, 0x23); wb_uleb(b, 0);
+            wb_putc(b, 0x41); wb_sleb(b, (int32_t)bss_off);
+            wb_putc(b, 0x6a);
+            wb_putc(b, 0x41); wb_putc(b, 0x00);  /* fill value 0 */
+            wb_putc(b, 0x41); wb_sleb(b, (int32_t)bss_size);
+            wb_putc(b, 0xfc); wb_putc(b, 0x0b); wb_putc(b, 0x00); /* memory.fill */
+        }
+        if (hook_init >= 0) {
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[hook_init].final_index);
+        }
+        for (i = 0; i < nctors; i++) {
+            int wf = wasm_find_wfunc(ctors[i], 1);
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[wf].final_index);
+        }
+        if (hook_dll >= 0) {
+            wb_putc(b, 0x20); wb_uleb(b, 0);     /* local.get handle */
+            wb_putc(b, 0x41); wb_putc(b, 0x01);  /* reason: process attach */
+            wb_putc(b, 0x41); wb_putc(b, 0x00);  /* reserved */
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[hook_dll].final_index);
+            wb_putc(b, 0x45);                    /* i32.eqz */
+            wb_putc(b, 0x04); wb_putc(b, 0x40);  /* if */
+            wb_putc(b, 0x41); wb_putc(b, 0x01);  /* i32.const 1 */
+            wb_putc(b, 0x0f);                    /* return */
+            wb_putc(b, 0x0b);                    /* end if */
+        }
+        wb_putc(b, 0x41); wb_putc(b, 0x00);      /* i32.const 0 */
+        wb_putc(b, 0x0b);                        /* end function */
+    }
+    {
+        WBuf *b = &wfuns[fini_wf].final_body;
+        if (hook_dll >= 0) {
+            wb_putc(b, 0x20); wb_uleb(b, 0);     /* local.get handle */
+            wb_putc(b, 0x41); wb_putc(b, 0x00);  /* reason: process detach */
+            wb_putc(b, 0x20); wb_uleb(b, 1);     /* local.get reserved */
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[hook_dll].final_index);
+            wb_putc(b, 0x1a);                    /* drop */
+        }
+        for (i = ndtors - 1; i >= 0; i--) {
+            int wf = wasm_find_wfunc(dtors[i], 1);
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[wf].final_index);
+        }
+        if (hook_fini >= 0) {
+            wb_putc(b, 0x10); wb_uleb(b, wfuns[hook_fini].final_index);
+        }
+        wb_putc(b, 0x0b);                        /* end function */
+    }
+
+    /* ---- patch fixups in every defined function body ----------------- */
+    for (i = 0; i < nb_wfuns; i++) {
+        WFunc *fn = &wfuns[i];
+        if (!fn->defined) continue;
+        for (j = 0; j < fn->nfixs; j++) {
+            WFix *x = &fn->fixs[j];
+            if (x->kind == WFIX_CALL) {
+                WFunc *callee = NULL;
+                int k;
+                for (k = 0; k < nb_wfuns; k++)
+                    if (!strcmp(wfuns[k].name, x->name)) { callee = &wfuns[k]; break; }
+                if (!callee) {
+                    rc = tcc_error_noabort("wasm: call to unknown "
+                                           "function '%s'", x->name);
+                    goto out;
+                }
+                wb_patch_uleb5(&fn->final_body, x->pos, callee->final_index);
+            } else if (x->kind == WFIX_DYGLOB) {
+                WFix *y = &fn->fixs[j + 1];
+                addr_t local = 0;
+                int kind = wasm_dy_classify(s, x, &local);
+                int gindex;
+                if (kind == DY_DEFDATA) gindex = 0;
+                else if (kind == DY_DEFFUNC) gindex = 1;
+                else gindex = wasm_dy_got(gots, ngots, kind, x->name);
+                wb_patch_uleb5(&fn->final_body, x->pos, (uint32_t)gindex);
+                wb_patch_sleb5(&fn->final_body, y->pos,
+                               (int32_t)((kind == DY_GOTFUNC ||
+                                          kind == DY_GOTMEM)
+                                         ? x->addend
+                                         : local + x->addend));
+                j++;
+            } else {
+                rc = tcc_error_noabort("wasm: unexpected fixup in dylink "
+                                       "output for '%s'", x->name);
+                goto out;
+            }
+        }
+        for (j = 0; j < fn->nspfixs; j++)
+            wb_patch_uleb5(&fn->final_body, fn->spfixs[j],
+                           (uint32_t)sp_gindex);
+    }
+
+    wb_init(&mod);
+    wb_write(&mod, "\0asm\x01\0\0\0", 8);
+
+    /* ---- type section (1) ------------------------------------------- */
+    wb_init(&pay);
+    wb_uleb(&pay, nb_wsigs);
+    for (i = 0; i < nb_wsigs; i++) {
+        wb_putc(&pay, 0x60);
+        wb_uleb(&pay, wsigs[i].nparams);
+        for (j = 0; j < wsigs[i].nparams; j++) wb_putc(&pay, wsigs[i].params[j]);
+        if (wsigs[i].ret < 0) wb_uleb(&pay, 0);
+        else { wb_uleb(&pay, 1); wb_putc(&pay, wsigs[i].ret); }
+    }
+    sec_begin(&mod, 1, &pay); wb_free(&pay);
+
+    /* ---- import section (2) ------------------------------------------ */
+    wb_init(&pay);
+    wb_uleb(&pay, nimports + 4 + ngots);
+    for (i = 0; i < nb_wfuns; i++) {
+        if (wfuns[i].defined) continue;
+        wb_name(&pay, wasm_import_module(wfuns[i].name));
+        wb_name(&pay, wfuns[i].name);
+        wb_putc(&pay, 0x00); /* func */
+        wb_uleb(&pay, wfuns[i].sig);
+    }
+    wb_name(&pay, "env"); wb_name(&pay, "memory");
+    wb_putc(&pay, 0x02); /* memory */
+    wb_putc(&pay, 0x00); /* limits: min only */
+    wb_uleb(&pay, mem_bytes / 65536);
+    wb_name(&pay, "env"); wb_name(&pay, "__indirect_function_table");
+    wb_putc(&pay, 0x01); /* table */
+    wb_putc(&pay, 0x70); /* funcref */
+    wb_putc(&pay, 0x00);
+    wb_uleb(&pay, ndefined); /* the module's own window in the table */
+    wb_name(&pay, "env"); wb_name(&pay, "__memory_base");
+    wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32); wb_putc(&pay, 0x00); /* immutable */
+    wb_name(&pay, "env"); wb_name(&pay, "__table_base");
+    wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32); wb_putc(&pay, 0x00); /* immutable */
+    for (i = 0; i < ngots; i++) {
+        wb_name(&pay, gots[i].kind == DY_GOTFUNC ? "GOT.func" : "GOT.mem");
+        wb_name(&pay, gots[i].name);
+        wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32);
+        wb_putc(&pay, 0x01); /* mutable: one shared Global per symbol,
+                                filled and updated by the linker */
+    }
+    sec_begin(&mod, 2, &pay); wb_free(&pay);
+
+    /* ---- function section (3) ---------------------------------------- */
+    wb_init(&pay);
+    wb_uleb(&pay, ndefined);
+    for (i = 0; i < nb_wfuns; i++)
+        if (wfuns[i].defined) wb_uleb(&pay, wfuns[i].sig);
+    sec_begin(&mod, 3, &pay); wb_free(&pay);
+
+    /* ---- global section (6): the defined $__stack_pointer ------------ */
+    wb_init(&pay);
+    wb_uleb(&pay, 1);
+    wb_putc(&pay, WT_I32); wb_putc(&pay, 0x01); /* mutable */
+    wb_putc(&pay, 0x41); wb_sleb(&pay, 0); wb_putc(&pay, 0x0b); /* placeholder */
+    sec_begin(&mod, 6, &pay); wb_free(&pay);
+
+    /* ---- export section (7): defined non-static functions ------------- */
+    wb_init(&pay);
+    {
+        int nexp = 0;
+        for (i = 0; i < nb_wfuns; i++)
+            if (wfuns[i].defined && !wfuns[i].is_static) nexp++;
+        wb_uleb(&pay, nexp);
+        for (i = 0; i < nb_wfuns; i++) {
+            if (!wfuns[i].defined || wfuns[i].is_static) continue;
+            wb_name(&pay, wfuns[i].name);
+            wb_putc(&pay, 0x00);
+            wb_uleb(&pay, wfuns[i].final_index);
+        }
+    }
+    sec_begin(&mod, 7, &pay); wb_free(&pay);
+
+    /* ---- element section (9): one segment at __table_base ------------- */
+    wb_init(&pay);
+    wb_uleb(&pay, 1);
+    wb_uleb(&pay, 0); /* active, table 0 */
+    wb_putc(&pay, 0x23); wb_uleb(&pay, 1); wb_putc(&pay, 0x0b); /* global.get */
+    wb_uleb(&pay, ndefined);
+    for (i = 0; i < nb_wfuns; i++)
+        if (wfuns[i].defined) wb_uleb(&pay, wfuns[i].final_index);
+    sec_begin(&mod, 9, &pay); wb_free(&pay);
+
+    /* ---- code section (10) -------------------------------------------- */
+    wb_init(&pay);
+    wb_uleb(&pay, ndefined);
+    for (i = 0; i < nb_wfuns; i++) {
+        WBuf *body;
+        if (!wfuns[i].defined) continue;
+        body = &wfuns[i].final_body;
+        wb_uleb(&pay, body->len + 13);
+        wb_uleb(&pay, 6);
+        wb_uleb(&pay, 8);  wb_putc(&pay, WT_I32);
+        wb_uleb(&pay, 8);  wb_putc(&pay, WT_F64);
+        wb_uleb(&pay, 43); wb_putc(&pay, WT_I32);
+        wb_uleb(&pay, 4);  wb_putc(&pay, 0x7b);
+        wb_uleb(&pay, 2);  wb_putc(&pay, WT_I32);
+        wb_uleb(&pay, 1);  wb_putc(&pay, WT_I64);
+        wb_write(&pay, body->data, body->len);
+    }
+    sec_begin(&mod, 10, &pay); wb_free(&pay);
+
+    /* ---- data section (11): one segment at __memory_base -------------- */
+    if (img_end > 0) {
+        static const unsigned char zeros[1024];
+        WBuf img;
+        wb_init(&img);
+        while (img.len < (int)img_end) {
+            int n = (int)img_end - img.len;
+            if (n > 1024) n = 1024;
+            wb_write(&img, zeros, n);
+        }
+        for (i = 1; i < s->nb_sections; i++) {
+            Section *sec = s->sections[i];
+            if (wsec_base[i] == (addr_t)-1 || sec->data_offset == 0 ||
+                sec->sh_type == SHT_NOBITS) continue;
+            memcpy(img.data + wsec_base[i], sec->data, sec->data_offset);
+        }
+        wb_init(&pay);
+        wb_uleb(&pay, 1);
+        wb_uleb(&pay, 0); /* active, memory 0 */
+        wb_putc(&pay, 0x23); wb_uleb(&pay, 0); wb_putc(&pay, 0x0b);
+        wb_uleb(&pay, img.len);
+        wb_write(&pay, img.data, img.len);
+        sec_begin(&mod, 11, &pay); wb_free(&pay);
+        wb_free(&img);
+    }
+
+    /* ---- the unit file: the metadata object and the base64 body
+       in the JS envelope, keyed by the output name.  The metadata
+       exists only here; the module bytes in `mod` are the body. */
+    {
+        WBuf text;
+        unsigned char digest[32];
+        char hex[65];
+        dy_sha256((const unsigned char *)mod.data, mod.len, digest);
+        for (i = 0; i < 32; i++)
+            snprintf(hex + 2 * i, 3, "%02x", digest[i]);
+        wb_init(&text);
+        wb_write(&text,
+            "globalThis.__TINYC_DYLINK_REGISTRY__ ??= Object.create(null);\n",
+            (int)strlen("globalThis.__TINYC_DYLINK_REGISTRY__ ??= Object.create(null);\n"));
+        wb_write(&text, "globalThis.__TINYC_DYLINK_REGISTRY__[", (int)strlen("globalThis.__TINYC_DYLINK_REGISTRY__["));
+        dy_json_str(&text, filename);
+        wb_write(&text, "] = {", (int)strlen("] = {"));
+        wb_write(&text, "\"version\":1,\"flavor\":", (int)strlen("\"version\":1,\"flavor\":"));
+        dy_json_num(&text, s->wasm_dylink_flavor);
+        wb_write(&text, ",\"mem_size\":", (int)strlen(",\"mem_size\":"));
+        dy_json_num(&text, (uint32_t)sp_init);
+        wb_write(&text, ",\"mem_align\":16,\"bss_off\":", (int)strlen(",\"mem_align\":16,\"bss_off\":"));
+        dy_json_num(&text, (uint32_t)bss_off);
+        wb_write(&text, ",\"bss_size\":", (int)strlen(",\"bss_size\":"));
+        dy_json_num(&text, (uint32_t)bss_size);
+        wb_write(&text, ",\"table_size\":", (int)strlen(",\"table_size\":"));
+        dy_json_num(&text, ndefined);
+        wb_write(&text, ",\"needed\":[", (int)strlen(",\"needed\":["));
+        for (i = 0; i < s->nb_wasm_dylink_needs; i++) {
+            if (i) wb_putc(&text, ',');
+            dy_json_str(&text, s->wasm_dylink_needs[i]);
+        }
+        wb_write(&text, "],\"exports\":[", (int)strlen("],\"exports\":["));
+        {
+            int first = 1;
+            for (i = 0; i < nb_wfuns; i++) {
+                if (!wfuns[i].defined || wfuns[i].is_static ||
+                    i == init_wf || i == fini_wf) continue;
+                if (!first) wb_putc(&text, ',');
+                first = 0;
+                wb_write(&text, "{\"name\":", (int)strlen("{\"name\":"));
+                dy_json_str(&text, wfuns[i].name);
+                wb_write(&text, ",\"kind\":0,\"value\":", (int)strlen(",\"kind\":0,\"value\":"));
+                dy_json_num(&text, wasm_defined_order(i));
+                wb_putc(&text, '}');
+            }
+            for (i = 0; i < nvars; i++) {
+                if (!first) wb_putc(&text, ',');
+                first = 0;
+                wb_write(&text, "{\"name\":", (int)strlen("{\"name\":"));
+                dy_json_str(&text, vars[i].name);
+                wb_write(&text, ",\"kind\":1,\"value\":", (int)strlen(",\"kind\":1,\"value\":"));
+                dy_json_num(&text, (uint32_t)vars[i].value);
+                wb_putc(&text, '}');
+            }
+        }
+        wb_write(&text, "],\"hash\":\"", (int)strlen("],\"hash\":\""));
+        wb_write(&text, hex, 64);
+        wb_write(&text, "\",\"body\":\"", (int)strlen("\",\"body\":\""));
+        dy_b64(&text, (const unsigned char *)mod.data, mod.len);
+        wb_write(&text, "\"};\n", (int)strlen("\"};\n"));
+
+        f = fopen(filename, "wb");
+        if (!f) {
+            wb_free(&text);
+            wb_free(&mod);
+            rc = tcc_error_noabort("wasm: could not write '%s'", filename);
+            goto out;
+        }
+        fwrite(text.data, 1, text.len, f);
+        fclose(f);
+        wb_free(&text);
+    }
+    wb_free(&mod);
+out:
+    tcc_free(gots);
+    tcc_free(ctors);
+    tcc_free(dtors);
+    tcc_free(vars);
+    return rc;
+}
+
 static int wasm_output_module(TCCState *s, const char *filename)
 {
     WBuf mod, pay;
@@ -173,6 +946,8 @@ static int wasm_output_module(TCCState *s, const char *filename)
     if (s->output_type == TCC_OUTPUT_MEMORY)
         return tcc_error_noabort("wasm: -run / in-memory execution not "
                                  "supported for the wasm target");
+    if (s->wasm_dylink_flavor)
+        return wasm_output_dylink(s, filename);
 
     /* ---- assign final function indices: imports first ------------- */
     for (i = 0; i < nb_wfuns; i++) {

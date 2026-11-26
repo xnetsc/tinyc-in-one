@@ -303,6 +303,75 @@ PATCHES = [
      "#endif\n"
      "    /* free sections */",
      1),
+    # 7. tcc.h: TCCState fields for the wasm dylink output flavor
+    #    (-wasm-dylink=main|side) and its recorded dependency list
+    #    (--dylink-need=<path>), wasm builds only.
+    ("tcc.h",
+     "    /* output type, see TCC_OUTPUT_XXX */\n"
+     "    int output_type;",
+     "    /* output type, see TCC_OUTPUT_XXX */\n"
+     "    int output_type;\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    /* wasm dylink output flavor: 0 = standalone, 1 = main, 2 = side */\n"
+     "    int wasm_dylink_flavor;\n"
+     "    /* dependency paths recorded by --dylink-need=, verbatim */\n"
+     "    char **wasm_dylink_needs;\n"
+     "    int nb_wasm_dylink_needs;\n"
+     "#endif",
+     1),
+    # 8. libtcc.c: option ids, table entries and parser handling for
+    #    -wasm-dylink=main|side and --dylink-need=<path> (wasm only).
+    ("libtcc.c",
+     "    TCC_OPTION_install_name,\n"
+     "    TCC_OPTION_compatibility_version ,\n"
+     "    TCC_OPTION_current_version,\n"
+     "};",
+     "    TCC_OPTION_install_name,\n"
+     "    TCC_OPTION_compatibility_version ,\n"
+     "    TCC_OPTION_current_version,\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    TCC_OPTION_wasm_dylink,\n"
+     "    TCC_OPTION_dylink_need,\n"
+     "#endif\n"
+     "};",
+     1),
+    ("libtcc.c",
+     "    { \"traditional\", 0, 0 },\n"
+     "    { NULL, 0, 0 },",
+     "    { \"traditional\", 0, 0 },\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    { \"wasm-dylink\", TCC_OPTION_wasm_dylink, TCC_OPTION_HAS_ARG },\n"
+     "    { \"-dylink-need\", TCC_OPTION_dylink_need, TCC_OPTION_HAS_ARG },\n"
+     "#endif\n"
+     "    { NULL, 0, 0 },",
+     1),
+    ("libtcc.c",
+     "        case TCC_OPTION_pthread:\n"
+     "            s->option_pthread = 1;\n"
+     "            break;",
+     "        case TCC_OPTION_pthread:\n"
+     "            s->option_pthread = 1;\n"
+     "            break;\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "        case TCC_OPTION_wasm_dylink:\n"
+     "            if (*optarg == '=') ++optarg;\n"
+     "            if (!strcmp(optarg, \"main\"))\n"
+     "                s->wasm_dylink_flavor = 1;\n"
+     "            else if (!strcmp(optarg, \"side\"))\n"
+     "                s->wasm_dylink_flavor = 2;\n"
+     "            else\n"
+     "                return tcc_error_noabort(\"invalid -wasm-dylink value '%s' \"\n"
+     "                    \"(expected 'main' or 'side')\", optarg);\n"
+     "            break;\n"
+     "        case TCC_OPTION_dylink_need:\n"
+     "            if (*optarg == '=') ++optarg;\n"
+     "            s->wasm_dylink_needs = tcc_realloc(s->wasm_dylink_needs,\n"
+     "                (s->nb_wasm_dylink_needs + 1) * sizeof(char*));\n"
+     "            s->wasm_dylink_needs[s->nb_wasm_dylink_needs++] =\n"
+     "                tcc_strdup(optarg);\n"
+     "            break;\n"
+     "#endif",
+     1),
     # 6. Makefile: cross-compiler definitions (Makefile:119, 136-137,
     #    171-174, 219).
     ("Makefile",

@@ -39,6 +39,13 @@ typedef struct WSig {
 
 #define WFIX_CALL 1 /* uleb5 at pos := final function index of sym */
 #define WFIX_ADDR 2 /* sleb5 at pos := linear-memory address of sym + addend */
+#define WFIX_DYGLOB 3 /* dylink: uleb5 at pos := index of the global the
+                         address materialises from (a process base or a
+                         GOT global), decided at output time */
+#define WFIX_DYCONST 4 /* dylink: sleb5 at pos := the constant paired with
+                          WFIX_DYGLOB (base-relative offset, canonical
+                          table slot offset, or the bare addend for a
+                          GOT reference) */
 
 typedef struct WFix {
     int pos;      /* offset in the function's final body */
@@ -69,6 +76,11 @@ typedef struct WFunc {
     WBuf final_body;  /* assembled at gfunc_epilog */
     WFix *fixs;
     int nfixs, fixcap;
+    int *spfixs;      /* dylink: positions in final_body of the padded
+                         $__stack_pointer operands the prologue/epilogue
+                         emitted; the output stage patches them with
+                         the mode's stack-pointer global index */
+    int nspfixs, spfixcap;
 } WFunc;
 
 /* function and signature registries, filled by the generator and
@@ -83,5 +95,10 @@ extern int nb_wfuns;
 /* called by the output stage after a module was written: marks the
  * current registry contents as the previous cycle */
 void wasm_registry_note_output(void);
+
+/* intern a signature built from raw wasm value types (WT_*; ret -1
+ * for void) and return its wsigs index.  Used by the output stage
+ * for the synthesized dylink init/fini functions. */
+int wasm_intern_sig(int nparams, const int *params, int ret);
 
 #endif /* WASM_INT_H */

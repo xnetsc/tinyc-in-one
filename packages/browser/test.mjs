@@ -1293,7 +1293,7 @@ test('run: wasm32 target callMain -run compiles then instantiates; native main n
   assert.equal(rc, 7); // the product's proc_exit(7)
   const entries = callsNamed(mock, 'tinyc_main');
   assert.equal(entries.length, 1); // exactly the compile invocation
-  assert.deepEqual(entries[0][2], [VIRTUAL_BIN_PATH, '-o', DEFAULT_RUN_OUTPUT, '/src/prog.c']);
+  assert.deepEqual(entries[0][2], [VIRTUAL_BIN_PATH, '-wasm-dylink=main', '-o', DEFAULT_RUN_OUTPUT, '/src/prog.c']);
   assert.ok(!entries[0][2].includes('-run'));
   assert.equal(outChunks.join(''), 'hello from wasm\n');
 });

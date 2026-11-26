@@ -49,6 +49,12 @@ const ALLOC_USED = 0xa110ce11;
  *   heapBase  start address of the shim allocator's heap region in
  *             linear memory (default 65536). The allocator grows
  *             the memory when it runs out.
+ *   allocatorState  shared { heapTop, freeHead } for the internal
+ *             allocator, so several shim sets (or a process loader)
+ *             bump-allocate from one frontier. Default: private.
+ *   processTable  a WebAssembly.Table that atexit handlers are
+ *             resolved through on exit (a process's shared table);
+ *             default: the running instance's exported table.
  *   args/env  accepted for symmetry with the WASI shim options;
  *             libc shims do not consume argv, and getenv returns
  *             null by design, so neither is read.
@@ -96,8 +102,7 @@ export function createDefaultShims(options = {}) {
   // Block layout: [payloadSize u32][nextOrUsed u32][payload...];
   // the payload pointer handed out is header + 8.
   // ---------------------------------------------------------------
-  let heapTop = 0;
-  let freeHead = 0;
+  const allocState = options.allocatorState ?? { heapTop: 0, freeHead: 0 };
 
   const moduleAllocator = () => {
     const ex = holder?.instance?.exports;
@@ -120,7 +125,7 @@ export function createDefaultShims(options = {}) {
   function rawMalloc(size) {
     size = Math.max(8, (size + 7) & ~7);
     let prev = 0;
-    let cur = freeHead;
+    let cur = allocState.freeHead;
     while (cur) {
       const csize = readU32(cur);
       const cnext = readU32(cur + 4);
@@ -131,9 +136,9 @@ export function createDefaultShims(options = {}) {
           writeU32(rem, csize - size - 8);
           writeU32(rem + 4, cnext);
           writeU32(cur, size);
-          if (prev) writeU32(prev + 4, rem); else freeHead = rem;
+          if (prev) writeU32(prev + 4, rem); else allocState.freeHead = rem;
         } else {
-          if (prev) writeU32(prev + 4, cnext); else freeHead = cnext;
+          if (prev) writeU32(prev + 4, cnext); else allocState.freeHead = cnext;
         }
         writeU32(cur + 4, ALLOC_USED);
         return cur + 8;
@@ -141,13 +146,13 @@ export function createDefaultShims(options = {}) {
       prev = cur;
       cur = cnext;
     }
-    if (!heapTop) heapTop = heapBase;
-    const header = heapTop;
+    if (!allocState.heapTop) allocState.heapTop = heapBase;
+    const header = allocState.heapTop;
     const end = header + 8 + size;
     if (!ensureCapacity(end)) return 0;
     writeU32(header, size);
     writeU32(header + 4, ALLOC_USED);
-    heapTop = end;
+    allocState.heapTop = end;
     return header + 8;
   }
 
@@ -155,8 +160,22 @@ export function createDefaultShims(options = {}) {
     if (!ptr) return;
     const header = ptr - 8;
     if (readU32(header + 4) !== ALLOC_USED) return; // foreign/double free
-    writeU32(header + 4, freeHead);
-    freeHead = header;
+    writeU32(header + 4, allocState.freeHead);
+    allocState.freeHead = header;
+  }
+
+  // Reserve a static region of `size` bytes at the allocator
+  // frontier and return its base address. Used by the process
+  // loader to place a module's static span; the region is never
+  // freed (module memory is retained for the process's life).
+  function reserveStatic(size, align = 16) {
+    if (!allocState.heapTop) allocState.heapTop = heapBase;
+    const base = (allocState.heapTop + (align - 1)) & ~(align - 1);
+    const end = base + size;
+    if (!ensureCapacity(end))
+      throw new Error(`tinyc: cannot grow linear memory to reserve ${size} bytes at ${base}`);
+    allocState.heapTop = end;
+    return base;
   }
 
   function malloc(size) {
@@ -469,7 +488,8 @@ export function createDefaultShims(options = {}) {
     return 0;
   }
   function exit(code) {
-    const table = holder?.instance?.exports?.__indirect_function_table;
+    const table = options.processTable ??
+      holder?.instance?.exports?.__indirect_function_table;
     if (table && typeof table.get === 'function') {
       for (let i = atexitHandlers.length - 1; i >= 0; i--) {
         try {
@@ -1000,5 +1020,10 @@ export function createDefaultShims(options = {}) {
     difftime: (a, b) => a - b,
   };
 
-  return { env };
+  const result = { env };
+  Object.defineProperty(result, 'reserveStatic', {
+    value: reserveStatic,
+    enumerable: false,
+  });
+  return result;
 }

@@ -6,6 +6,10 @@
   "includeDir": "/sysroot/include",
   "includeFiles": [
     {
+      "path": "/sysroot/include/dlfcn.h",
+      "source": "include/dlfcn.h"
+    },
+    {
       "path": "/sysroot/include/float.h",
       "source": "include/float.h"
     },
