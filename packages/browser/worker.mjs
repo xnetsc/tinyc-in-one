@@ -19,7 +19,13 @@
 // TinycWorker (default: console, line-buffered by index.mjs wiring
 // on the worker side is raw chunk forwarding).
 
-import { loadTinyc, normalizeIO, flushIO } from './index.mjs';
+import {
+  loadTinyc, normalizeIO, flushIO,
+  manifestToLibrary, libraryFromBytes, parseImportTypes,
+  makeWrapperFunction, createWasiShim, createShimContext,
+  canonicalModulePath,
+} from './index.mjs';
+import { startThreadWorker } from './threads.mjs';
 
 function shimBoundaryError(method) {
   return new Error(
@@ -227,8 +233,22 @@ if (isDedicatedWorker) {
   };
 
   let initPayload = null;
+  let threadMode = false;
 
   self.addEventListener('message', async (ev) => {
+    // Thread mode (threads design §5.1): a dylink process's
+    // thread worker is booted through this same entry point.
+    // Once booted it never returns to compiler duty.
+    if (ev.data && ev.data.type === 'tinyc-thread-boot') {
+      threadMode = true;
+      startThreadWorker(ev.data, {
+        manifestToLibrary, libraryFromBytes, parseImportTypes,
+        makeWrapperFunction, createWasiShim, createShimContext,
+        canonicalModulePath,
+      }, self);
+      return;
+    }
+    if (threadMode) return;
     const { id, type, payload } = ev.data ?? {};
     if (type === 'init') initPayload = payload;
     const handler = handlers[type];

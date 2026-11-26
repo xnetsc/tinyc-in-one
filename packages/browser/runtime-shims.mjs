@@ -52,6 +52,11 @@ const ALLOC_USED = 0xa110ce11;
  *   allocatorState  shared { heapTop, freeHead } for the internal
  *             allocator, so several shim sets (or a process loader)
  *             bump-allocate from one frontier. Default: private.
+ *   memoryAllocator  process mode: the allocator state lives in
+ *             the memory's reserved header words ([512,516) and
+ *             [516,520)) under the spin lock at [520,524), and the
+ *             returned allocatorState is the accessor view over
+ *             those words. Takes precedence over allocatorState.
  *   processTable  a WebAssembly.Table that atexit handlers are
  *             resolved through on exit (a process's shared table);
  *             default: the running instance's exported table.
@@ -89,7 +94,9 @@ export function createDefaultShims(options = {}) {
     const m = u8();
     let end = ptr;
     while (end < m.length && end - ptr < max && m[end] !== 0) end++;
-    return textDecoder.decode(m.subarray(ptr, end));
+    // Copy before decoding: TextDecoder refuses views over a
+    // shared memory (the real thread tier's workers).
+    return textDecoder.decode(m.slice(ptr, end));
   };
   const writeCStringBytes = (ptr, bytes) => {
     writeBytes(ptr, bytes);
@@ -101,8 +108,50 @@ export function createDefaultShims(options = {}) {
   // Allocator: first-fit free list over [heapBase, memory end).
   // Block layout: [payloadSize u32][nextOrUsed u32][payload...];
   // the payload pointer handed out is header + 8.
+  //
+  // In a process (options.memoryAllocator) the allocator state
+  // does not live in JS: heapTop and freeHead are words of the
+  // process's reserved header span — [512,516) and [516,520) —
+  // because in the real thread tier several workers allocate from
+  // the same state.  Every mutation (rawMalloc, rawFree,
+  // reserveStatic) runs under the spin lock at [520,524): taken
+  // with a compare-exchange, released with a store and a notify,
+  // and never held across a wait.  In the simulated tier the lock
+  // is simply never contended.  Standalone runs keep the state in
+  // a plain JS object, exactly as before.
   // ---------------------------------------------------------------
-  const allocState = options.allocatorState ?? { heapTop: 0, freeHead: 0 };
+  const memoryAllocator = options.memoryAllocator === true;
+  const HDR_HEAP_TOP = 512, HDR_FREE_HEAD = 516, HDR_ALLOC_LOCK = 520;
+  const allocState = memoryAllocator
+    ? {
+        get heapTop() { return dv().getInt32(HDR_HEAP_TOP, true); },
+        set heapTop(v) { dv().setInt32(HDR_HEAP_TOP, v | 0, true); },
+        get freeHead() { return dv().getInt32(HDR_FREE_HEAD, true); },
+        set freeHead(v) { dv().setInt32(HDR_FREE_HEAD, v | 0, true); },
+      }
+    : options.allocatorState ?? { heapTop: 0, freeHead: 0 };
+
+  function allocLock() {
+    if (!memoryAllocator) return;
+    for (;;) {
+      // the view is rebuilt per attempt: growing a non-shared
+      // memory replaces its buffer
+      const words = new Int32Array(memory().buffer);
+      if (Atomics.compareExchange(words, HDR_ALLOC_LOCK / 4, 0, 1) === 0)
+        return;
+    }
+  }
+  function allocUnlock() {
+    if (!memoryAllocator) return;
+    const words = new Int32Array(memory().buffer);
+    Atomics.store(words, HDR_ALLOC_LOCK / 4, 0);
+    Atomics.notify(words, HDR_ALLOC_LOCK / 4, 1);
+  }
+  function withAllocLock(fn) {
+    if (!memoryAllocator) return fn();
+    allocLock();
+    try { return fn(); } finally { allocUnlock(); }
+  }
 
   const moduleAllocator = () => {
     const ex = holder?.instance?.exports;
@@ -122,7 +171,7 @@ export function createDefaultShims(options = {}) {
     }
   }
 
-  function rawMalloc(size) {
+  function rawMallocImpl(size) {
     size = Math.max(8, (size + 7) & ~7);
     let prev = 0;
     let cur = allocState.freeHead;
@@ -156,7 +205,7 @@ export function createDefaultShims(options = {}) {
     return header + 8;
   }
 
-  function rawFree(ptr) {
+  function rawFreeImpl(ptr) {
     if (!ptr) return;
     const header = ptr - 8;
     if (readU32(header + 4) !== ALLOC_USED) return; // foreign/double free
@@ -168,7 +217,7 @@ export function createDefaultShims(options = {}) {
   // frontier and return its base address. Used by the process
   // loader to place a module's static span; the region is never
   // freed (module memory is retained for the process's life).
-  function reserveStatic(size, align = 16) {
+  function reserveStaticImpl(size, align = 16) {
     if (!allocState.heapTop) allocState.heapTop = heapBase;
     const base = (allocState.heapTop + (align - 1)) & ~(align - 1);
     const end = base + size;
@@ -176,6 +225,12 @@ export function createDefaultShims(options = {}) {
       throw new Error(`tinyc: cannot grow linear memory to reserve ${size} bytes at ${base}`);
     allocState.heapTop = end;
     return base;
+  }
+
+  function rawMalloc(size) { return withAllocLock(() => rawMallocImpl(size)); }
+  function rawFree(ptr) { return withAllocLock(() => rawFreeImpl(ptr)); }
+  function reserveStatic(size, align) {
+    return withAllocLock(() => reserveStaticImpl(size, align));
   }
 
   function malloc(size) {
@@ -1023,6 +1078,13 @@ export function createDefaultShims(options = {}) {
   const result = { env };
   Object.defineProperty(result, 'reserveStatic', {
     value: reserveStatic,
+    enumerable: false,
+  });
+  // The allocator state object in use — in a process, the
+  // memory-resident view over the header words, so the loader
+  // reads and writes the same state the shims allocate from.
+  Object.defineProperty(result, 'allocatorState', {
+    value: allocState,
     enumerable: false,
   });
   return result;

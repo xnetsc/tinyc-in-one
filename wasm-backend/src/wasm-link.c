@@ -293,6 +293,20 @@ static void dy_json_num(WBuf *out, unsigned long long v)
 #define DY_DEFFUNC 2 /* defined function: __table_base + defined order */
 #define DY_GOTFUNC 3 /* undefined function: GOT.func global + addend */
 #define DY_GOTMEM  4 /* undefined variable: GOT.mem global + addend */
+#define DY_TLSDEF  5 /* defined __thread variable: __tls_base + offset
+                        in the module's TLS span */
+#define DY_GOTLS   6 /* undefined __thread variable: GOT.tls global
+                        + addend */
+
+/* per-section offset of a TLS section (.tdata/.tbss) within the
+   module's TLS span, or (addr_t)-1 for non-TLS sections; filled by
+   the dylink output's TLS layout pass */
+static addr_t *wtls_base;
+
+static int wasm_is_tls_name(const char *nm)
+{
+    return nm && (!strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"));
+}
 
 typedef struct DyGot {
     const char *name; /* borrowed: owned by the fixup that named it */
@@ -302,7 +316,9 @@ typedef struct DyGot {
 
 typedef struct DyVar {
     const char *name; /* borrowed: symtab string storage */
-    addr_t value;     /* module-local address */
+    addr_t value;     /* module-local address — or, for a TLS
+                         variable, its offset in the TLS span */
+    int is_tls;       /* the variable lives in the TLS span */
 } DyVar;
 
 static int wasm_find_wfunc(const char *name, int want_defined)
@@ -437,6 +453,8 @@ static void wasm_apply_data_relocs(TCCState *s,
                         es->st_name;
                     int is_func =
                         ELFW(ST_TYPE)(es->st_info) == STT_FUNC;
+                    int is_tls =
+                        ELFW(ST_TYPE)(es->st_info) == STT_TLS;
                     int wf;
                     if (!is_func &&
                         (wf = wasm_find_wfunc(name, 0)) >= 0 &&
@@ -444,6 +462,7 @@ static void wasm_apply_data_relocs(TCCState *s,
                         is_func = 1;
                     dy_data_got_add(&glist, &gn, &gcap,
                                     wsec_base[i] + rel->r_offset, name,
+                                    is_tls ? DY_GOTLS :
                                     is_func ? DY_GOTFUNC : DY_GOTMEM,
                                     (int32_t)read32le(sec->data +
                                                       rel->r_offset));
@@ -476,6 +495,24 @@ static void wasm_apply_data_relocs(TCCState *s,
                 } else
                     value = wfuns[wf].final_index;
                 is_func = 1;
+            } else if (glist_out && wasm_is_tls_name(tsec->name)) {
+                /* A data slot initialised with the address of a
+                   __thread variable: the value is per-thread, so
+                   the slot is filled from the symbol's GOT.tls
+                   global by the synthesized init, like an
+                   undefined-symbol reference.  (Standalone output
+                   passes no glist: its layout places the TLS
+                   sections as ordinary data and the generic path
+                   below resolves the slot.) */
+                const char *name =
+                    (const char *)symtab_section->link->data +
+                    es->st_name;
+                dy_data_got_add(&glist, &gn, &gcap,
+                                wsec_base[i] + rel->r_offset, name,
+                                DY_GOTLS,
+                                (int32_t)read32le(sec->data +
+                                                  rel->r_offset));
+                continue;
             } else {
                 if (wsec_base[es->st_shndx] == (addr_t)-1) continue;
                 value = wsec_base[es->st_shndx] + es->st_value;
@@ -527,7 +564,13 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
     int idx, wf;
     ElfSym *es;
     if (x->shndx >= 0) {
-        if (x->shndx >= s->nb_sections || wsec_base[x->shndx] == (addr_t)-1)
+        if (x->shndx >= s->nb_sections)
+            return 0;
+        if (wtls_base && wtls_base[x->shndx] != (addr_t)-1) {
+            *local = wtls_base[x->shndx] + x->value;
+            return DY_TLSDEF;
+        }
+        if (wsec_base[x->shndx] == (addr_t)-1)
             return 0;
         *local = wsec_base[x->shndx] + x->value;
         return DY_DEFDATA;
@@ -543,6 +586,12 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
                 *local = wasm_defined_order(wf);
                 return DY_DEFFUNC;
             }
+            if (wasm_is_tls_name(sec->name)) {
+                if (!wtls_base || wtls_base[es->st_shndx] == (addr_t)-1)
+                    return 0;
+                *local = wtls_base[es->st_shndx] + es->st_value;
+                return DY_TLSDEF;
+            }
             if (wsec_base[es->st_shndx] != (addr_t)-1) {
                 *local = wsec_base[es->st_shndx] + es->st_value;
                 return DY_DEFDATA;
@@ -552,6 +601,8 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
         /* undefined: the symbol's own type decides — the symtab
            attribute when an entry exists, the attribute the fixup
            captured from the C symbol otherwise */
+        if (ELFW(ST_TYPE)(es->st_info) == STT_TLS || x->sym_tls)
+            return DY_GOTLS;
         return (ELFW(ST_TYPE)(es->st_info) == STT_FUNC || x->sym_func)
             ? DY_GOTFUNC : DY_GOTMEM;
     }
@@ -563,6 +614,7 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
        put_extern_sym2 would have written into the symtab — so a
        function goes through GOT.func whether or not anything ever
        called it directly, and a variable through GOT.mem. */
+    if (x->sym_tls) return DY_GOTLS;
     return x->sym_func ? DY_GOTFUNC : DY_GOTMEM;
 }
 
@@ -644,8 +696,11 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     int i, j, nimports = 0, ndefined = 0, total;
     addr_t data_end = 1024, sp_init, mem_bytes, img_end = 0;
     addr_t bss_off = 0, bss_size = 0;
-    int init_wf, fini_wf;
+    int init_wf, fini_wf, swap_wf;
     int hook_init, hook_fini, hook_dll;
+    addr_t tls_size = 0, tls_align = 1;
+    WBuf tls_template;
+    int need_tls_base = 0, tls_gindex = -1;
     const char **ctors = NULL, **dtors = NULL;
     int nctors = 0, ndtors = 0;
     DyGot *gots = NULL;
@@ -658,18 +713,23 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     int ndgots = 0;
     int rc = 0;
 
+    wb_init(&tls_template);
     if (wasm_find_wfunc("__tinyc_dylink_init", 0) >= 0 ||
-        wasm_find_wfunc("__tinyc_dylink_fini", 0) >= 0)
-        return tcc_error_noabort("wasm: '__tinyc_dylink_init' and "
-            "'__tinyc_dylink_fini' are reserved in dylink mode");
+        wasm_find_wfunc("__tinyc_dylink_fini", 0) >= 0 ||
+        wasm_find_wfunc("__tinyc_dylink_swap_sp", 0) >= 0)
+        return tcc_error_noabort("wasm: '__tinyc_dylink_init', "
+            "'__tinyc_dylink_fini' and '__tinyc_dylink_swap_sp' are "
+            "reserved in dylink mode");
     {
         int p1[1] = { WT_I32 }, p2[2] = { WT_I32, WT_I32 };
         init_wf = wasm_dy_add_synth("__tinyc_dylink_init",
                                     wasm_intern_sig(1, p1, WT_I32), 1, WT_I32);
         fini_wf = wasm_dy_add_synth("__tinyc_dylink_fini",
                                     wasm_intern_sig(2, p2, -1), 2, -1);
+        swap_wf = wasm_dy_add_synth("__tinyc_dylink_swap_sp",
+                                    wasm_intern_sig(1, p1, WT_I32), 1, WT_I32);
     }
-    if (init_wf < 0 || fini_wf < 0)
+    if (init_wf < 0 || fini_wf < 0 || swap_wf < 0)
         return tcc_error_noabort("wasm: too many functions");
 
     /* ---- the dylink flavor is a code-generation-time property:
@@ -685,7 +745,8 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
        synthesized init/fini are built here at output time and
        carry no spfixs of their own, so they are excluded. */
     for (i = 0; i < nb_wfuns; i++) {
-        if (!wfuns[i].defined || i == init_wf || i == fini_wf) continue;
+        if (!wfuns[i].defined || i == init_wf || i == fini_wf ||
+            i == swap_wf) continue;
         if (wfuns[i].nspfixs == 0) {
             return tcc_error_noabort("wasm: -wasm-dylink was set after "
                 "compiling; set it before compiling (code generation "
@@ -728,6 +789,46 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     }
     sp_init = ((data_end + 15) & -16) + 65536; /* 64 KiB C stack */
     mem_bytes = (sp_init + 65535) & -65536;
+
+    /* ---- lay out the TLS span (.tdata/.tbss): the sections are
+       not placed in memory at all — the span is a template the
+       loader instantiates once per (thread, module).  The span
+       holds .tdata first (its bytes form the template), then
+       .tbss; each section keeps its declared alignment. ---------- */
+    wtls_base = tcc_mallocz(s->nb_sections * sizeof(addr_t));
+    for (i = 0; i < s->nb_sections; i++) wtls_base[i] = (addr_t)-1;
+    {
+        addr_t tls_end = 0, tdata_end = 0;
+        for (i = 1; i < s->nb_sections; i++) {
+            Section *sec = s->sections[i];
+            int al;
+            if (!sec || !wasm_is_tls_name(sec->name)) continue;
+            al = sec->sh_addralign > 0 ? sec->sh_addralign : 1;
+            if ((addr_t)al > tls_align) tls_align = (addr_t)al;
+            tls_end = (tls_end + (al - 1)) & ~(addr_t)(al - 1);
+            wtls_base[i] = tls_end;
+            tls_end += sec->data_offset;
+            if (!strcmp(sec->name, ".tdata") &&
+                sec->sh_type != SHT_NOBITS && tls_end > tdata_end)
+                tdata_end = tls_end;
+        }
+        tls_size = tls_end;
+        /* the template: the span's initialised prefix (the .tdata
+           bytes, zero in the gaps); .tbss contributes no bytes */
+        if (tdata_end) {
+            while (tls_template.len < (int)tdata_end)
+                wb_putc(&tls_template, 0);
+            for (i = 1; i < s->nb_sections; i++) {
+                Section *sec = s->sections[i];
+                if (!sec || wtls_base[i] == (addr_t)-1 ||
+                    strcmp(sec->name, ".tdata") ||
+                    sec->sh_type == SHT_NOBITS || !sec->data_offset)
+                    continue;
+                memcpy(tls_template.data + wtls_base[i], sec->data,
+                       sec->data_offset);
+            }
+        }
+    }
 
     /* ---- data relocations: patch the slots to module-local values;
        the synthesized init adds the process base at load time.
@@ -790,7 +891,9 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
                                        "of '%s'", x->name);
                 goto out;
             }
-            if ((kind == DY_GOTFUNC || kind == DY_GOTMEM) &&
+            if (kind == DY_TLSDEF) need_tls_base = 1;
+            if ((kind == DY_GOTFUNC || kind == DY_GOTMEM ||
+                 kind == DY_GOTLS) &&
                 wasm_dy_got(gots, ngots, kind, x->name) < 0) {
                 if (ngots >= gotcap) {
                     gotcap = gotcap ? gotcap * 2 : 16;
@@ -817,7 +920,10 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             ngots++;
         }
     }
-    sp_gindex = 2 + ngots;
+    /* the __tls_base import sits after the GOT globals; the
+       defined $__stack_pointer follows it */
+    if (need_tls_base) tls_gindex = 2 + ngots;
+    sp_gindex = 2 + ngots + (need_tls_base ? 1 : 0);
 
     /* ---- collect the exported variables for the metadata ---------- */
     {
@@ -825,13 +931,21 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         for (i = 1; i < nb_syms; i++) {
             ElfSym *es = &((ElfSym *)symtab_section->data)[i];
             const char *nm;
-            int bind, dup = 0, k;
+            int bind, dup = 0, k, is_tls = 0;
+            addr_t value;
             if (!es->st_name) continue;
             bind = ELFW(ST_BIND)(es->st_info);
             if (bind != STB_GLOBAL && bind != STB_WEAK) continue;
             if (es->st_shndx == SHN_UNDEF || es->st_shndx >= s->nb_sections)
                 continue;
-            if (wsec_base[es->st_shndx] == (addr_t)-1) continue;
+            if (wasm_is_tls_name(s->sections[es->st_shndx]->name)) {
+                if (wtls_base[es->st_shndx] == (addr_t)-1) continue;
+                is_tls = 1;
+                value = wtls_base[es->st_shndx] + es->st_value;
+            } else {
+                if (wsec_base[es->st_shndx] == (addr_t)-1) continue;
+                value = wsec_base[es->st_shndx] + es->st_value;
+            }
             if (ELFW(ST_TYPE)(es->st_info) == STT_FUNC) continue;
             nm = (const char *)symtab_section->link->data + es->st_name;
             for (k = 0; k < nvars; k++)
@@ -842,7 +956,8 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
                 vars = tcc_realloc(vars, varcap * sizeof(DyVar));
             }
             vars[nvars].name = nm;
-            vars[nvars].value = wsec_base[es->st_shndx] + es->st_value;
+            vars[nvars].value = value;
+            vars[nvars].is_tls = is_tls;
             nvars++;
         }
     }
@@ -850,6 +965,27 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     /* ---- assemble the synthesized init/fini bodies ------------------ */
     {
         WBuf *b = &wfuns[init_wf].final_body;
+        if (img_end > 1024) {
+            /* the data segment is passive: land the image at
+               __memory_base before anything else.  This runs once,
+               in the main instance — per-worker copies are
+               instantiated but never init'd, so the bytes are
+               applied exactly once.  Only the part past the
+               reserved span is copied: the image's first 1024
+               bytes are zero by construction, and the span itself
+               is the loader's (it holds, among other things, the
+               process allocator's header words), so init must not
+               rewrite it. */
+            wb_putc(b, 0x23); wb_uleb(b, 0);     /* global.get __memory_base */
+            wb_putc(b, 0x41); wb_sleb(b, 1024);
+            wb_putc(b, 0x6a);                    /* i32.add */
+            wb_putc(b, 0x41); wb_sleb(b, 1024);  /* source offset 1024 */
+            wb_putc(b, 0x41); wb_sleb(b, (int32_t)(img_end - 1024));
+            wb_putc(b, 0xfc); wb_putc(b, 0x08);  /* memory.init */
+            wb_uleb(b, 0); wb_putc(b, 0x00);     /* segment 0, memory 0 */
+            wb_putc(b, 0xfc); wb_putc(b, 0x09);  /* data.drop */
+            wb_uleb(b, 0);
+        }
         wb_putc(b, 0x23); wb_uleb(b, 0);         /* global.get __memory_base */
         wb_putc(b, 0x41); wb_sleb(b, (int32_t)sp_init);
         wb_putc(b, 0x6a);                        /* i32.add */
@@ -945,6 +1081,19 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         }
         wb_putc(b, 0x0b);                        /* end function */
     }
+    {
+        /* __tinyc_dylink_swap_sp(new_sp) -> old_sp: install the
+           argument as the module instance's stack pointer and
+           return the previous one.  The scheduler calls it on
+           every context switch; the value is a plain memory
+           address, so the same body serves the main instance and
+           every per-worker copy. */
+        WBuf *b = &wfuns[swap_wf].final_body;
+        wb_putc(b, 0x23); wb_uleb(b, sp_gindex); /* global.get $sp */
+        wb_putc(b, 0x20); wb_putc(b, 0x00);      /* local.get new_sp */
+        wb_putc(b, 0x24); wb_uleb(b, sp_gindex); /* global.set $sp */
+        wb_putc(b, 0x0b);                        /* end function */
+    }
 
     /* ---- patch fixups in every defined function body ----------------- */
     for (i = 0; i < nb_wfuns; i++) {
@@ -970,11 +1119,13 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
                 int gindex;
                 if (kind == DY_DEFDATA) gindex = 0;
                 else if (kind == DY_DEFFUNC) gindex = 1;
+                else if (kind == DY_TLSDEF) gindex = tls_gindex;
                 else gindex = wasm_dy_got(gots, ngots, kind, x->name);
                 wb_patch_uleb5(&fn->final_body, x->pos, (uint32_t)gindex);
                 wb_patch_sleb5(&fn->final_body, y->pos,
                                (int32_t)((kind == DY_GOTFUNC ||
-                                          kind == DY_GOTMEM)
+                                          kind == DY_GOTMEM ||
+                                          kind == DY_GOTLS)
                                          ? x->addend
                                          : local + x->addend));
                 j++;
@@ -1006,7 +1157,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
 
     /* ---- import section (2) ------------------------------------------ */
     wb_init(&pay);
-    wb_uleb(&pay, nimports + 4 + ngots);
+    wb_uleb(&pay, nimports + 4 + ngots + (need_tls_base ? 1 : 0));
     for (i = 0; i < nb_wfuns; i++) {
         if (wfuns[i].defined) continue;
         wb_name(&pay, wasm_import_module(wfuns[i].name));
@@ -1028,11 +1179,19 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     wb_name(&pay, "env"); wb_name(&pay, "__table_base");
     wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32); wb_putc(&pay, 0x00); /* immutable */
     for (i = 0; i < ngots; i++) {
-        wb_name(&pay, gots[i].kind == DY_GOTFUNC ? "GOT.func" : "GOT.mem");
+        wb_name(&pay, gots[i].kind == DY_GOTFUNC ? "GOT.func" :
+                      gots[i].kind == DY_GOTLS ? "GOT.tls" : "GOT.mem");
         wb_name(&pay, gots[i].name);
         wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32);
         wb_putc(&pay, 0x01); /* mutable: one shared Global per symbol,
                                 filled and updated by the linker */
+    }
+    if (need_tls_base) {
+        wb_name(&pay, "env"); wb_name(&pay, "__tls_base");
+        wb_putc(&pay, 0x03); wb_putc(&pay, WT_I32);
+        wb_putc(&pay, 0x01); /* mutable: the loader installs the
+                                running thread's TLS area base for
+                                this module, per instance */
     }
     sec_begin(&mod, 2, &pay); wb_free(&pay);
 
@@ -1076,6 +1235,14 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         if (wfuns[i].defined) wb_uleb(&pay, wfuns[i].final_index);
     sec_begin(&mod, 9, &pay); wb_free(&pay);
 
+    /* ---- data count section (12): before the code section, as the
+       format requires wherever memory.init / data.drop appear ----- */
+    if (img_end > 0) {
+        wb_init(&pay);
+        wb_uleb(&pay, 1); /* one data segment */
+        sec_begin(&mod, 12, &pay); wb_free(&pay);
+    }
+
     /* ---- code section (10) -------------------------------------------- */
     wb_init(&pay);
     wb_uleb(&pay, ndefined);
@@ -1095,7 +1262,12 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     }
     sec_begin(&mod, 10, &pay); wb_free(&pay);
 
-    /* ---- data section (11): one segment at __memory_base -------------- */
+    /* ---- data section (11): one passive segment, landed by the
+       synthesized init's memory.init at __memory_base.  Passive
+       (rather than active at the imported __memory_base global)
+       because the bytes must be applied exactly once, by the main
+       instance's init — an active segment would be applied by
+       every per-worker copy's instantiation as well. ------------- */
     if (img_end > 0) {
         static const unsigned char zeros[1024];
         WBuf img;
@@ -1113,8 +1285,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         }
         wb_init(&pay);
         wb_uleb(&pay, 1);
-        wb_uleb(&pay, 0); /* active, memory 0 */
-        wb_putc(&pay, 0x23); wb_uleb(&pay, 0); wb_putc(&pay, 0x0b);
+        wb_uleb(&pay, 1); /* passive */
         wb_uleb(&pay, img.len);
         wb_write(&pay, img.data, img.len);
         sec_begin(&mod, 11, &pay); wb_free(&pay);
@@ -1142,6 +1313,20 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         dy_json_num(&text, s->wasm_dylink_flavor);
         wb_write(&text, ",\"mem_size\":", (int)strlen(",\"mem_size\":"));
         dy_json_num(&text, (uint32_t)sp_init);
+        /* the stack span inside mem_size: every later thread's
+           stack area for this module is this many bytes, and the
+           field's presence marks the threaded module revision */
+        wb_write(&text, ",\"stack_size\":65536", (int)strlen(",\"stack_size\":65536"));
+        if (tls_size) {
+            wb_write(&text, ",\"tls_size\":", (int)strlen(",\"tls_size\":"));
+            dy_json_num(&text, (uint32_t)tls_size);
+            wb_write(&text, ",\"tls_align\":", (int)strlen(",\"tls_align\":"));
+            dy_json_num(&text, (uint32_t)tls_align);
+            wb_write(&text, ",\"tls_template\":\"", (int)strlen(",\"tls_template\":\""));
+            dy_b64(&text, (const unsigned char *)tls_template.data,
+                   tls_template.len);
+            wb_write(&text, "\"", 1);
+        }
         wb_write(&text, ",\"mem_align\":16,\"bss_off\":", (int)strlen(",\"mem_align\":16,\"bss_off\":"));
         dy_json_num(&text, (uint32_t)bss_off);
         wb_write(&text, ",\"bss_size\":", (int)strlen(",\"bss_size\":"));
@@ -1179,7 +1364,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             int first = 1;
             for (i = 0; i < nb_wfuns; i++) {
                 if (!wfuns[i].defined || wfuns[i].is_static ||
-                    i == init_wf || i == fini_wf) continue;
+                    i == init_wf || i == fini_wf || i == swap_wf) continue;
                 if (!first) wb_putc(&text, ',');
                 first = 0;
                 wb_write(&text, "{\"name\":", (int)strlen("{\"name\":"));
@@ -1195,6 +1380,8 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
                 dy_json_str(&text, vars[i].name);
                 wb_write(&text, ",\"kind\":1,\"value\":", (int)strlen(",\"kind\":1,\"value\":"));
                 dy_json_num(&text, (uint32_t)vars[i].value);
+                if (vars[i].is_tls)
+                    wb_write(&text, ",\"tls\":1", (int)strlen(",\"tls\":1"));
                 wb_putc(&text, '}');
             }
         }
@@ -1217,6 +1404,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     }
     wb_free(&mod);
 out:
+    wb_free(&tls_template);
     tcc_free(gots);
     tcc_free(ctors);
     tcc_free(dtors);
@@ -1265,7 +1453,12 @@ static int wasm_output_module(TCCState *s, const char *filename)
         if (!nm) continue;
         if (!strcmp(nm, ".rodata") || !strncmp(nm, ".rodata.", 8) ||
             !strcmp(nm, ".data") || !strncmp(nm, ".data.", 6) ||
-            !strcmp(nm, ".bss")) {
+            !strcmp(nm, ".bss") ||
+            !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss")) {
+            /* a standalone module has exactly one thread, so its
+               TLS sections are placed as ordinary data; the
+               per-thread span machinery exists only in the dylink
+               form (threads design §7) */
             data_end = (data_end + 15) & -16;
             wsec_base[i] = data_end;
             data_end += sec->data_offset;

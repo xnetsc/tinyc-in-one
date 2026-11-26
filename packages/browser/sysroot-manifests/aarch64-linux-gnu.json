@@ -10,6 +10,10 @@
       "source": "include/dlfcn.h"
     },
     {
+      "path": "/sysroot/include/pthread.h",
+      "source": "include/pthread.h"
+    },
+    {
       "path": "/sysroot/include/float.h",
       "source": "include/float.h"
     },

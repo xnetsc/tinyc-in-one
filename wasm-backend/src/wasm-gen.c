@@ -367,6 +367,7 @@ static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
     x->kind = kind; x->addend = addend;
     x->shndx = -1; x->value = 0;
     x->sym_func = (sym->type.t & VT_BTYPE) == VT_FUNC;
+    x->sym_tls = (sym->type.t & VT_TLS) != 0;
     {
         /* A symbol already defined in a data section when the fixup
            is created - an anonymous symbol (float constants spilled
@@ -388,7 +389,8 @@ static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
             const char *nm = sec->name;
             if (nm && (!strcmp(nm, ".rodata") || !strncmp(nm, ".rodata.", 8) ||
                        !strcmp(nm, ".data") || !strncmp(nm, ".data.", 6) ||
-                       !strcmp(nm, ".bss"))) {
+                       !strcmp(nm, ".bss") ||
+                       !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"))) {
                 x->shndx = es->st_shndx;
                 x->value = es->st_value;
             }
@@ -431,6 +433,8 @@ static void we_sleb5(int32_t v)  { int i; unsigned char tmp[5]; WBuf t; wb_init(
                                    wb_free(&t); for (i = 0; i < 5; i++) we(tmp[i]); }
 static void we_local_get(int idx) { we(0x20); we_uleb(idx); }
 static void we_local_set(int idx) { we(0x21); we_uleb(idx); }
+static void we_local_tee(int idx) { we(0x22); we_uleb(idx); }
+
 static void we_global_get(int idx) { we(0x23); we_uleb(idx); }
 static void we_global_set(int idx) { we(0x24); we_uleb(idx); }
 static void we_i32_const(int32_t v) { we(0x41); we_sleb5(v); }
@@ -443,6 +447,52 @@ static void we_sleb(int64_t v)
     }
 }
 static void we_i64_const(int64_t v) { we(0x42); we_sleb(v); }
+
+/* atomic instruction: 0xFE prefix + sub-opcode, then a memarg whose
+   alignment is the access size's natural alignment (an unaligned
+   atomic access traps, where a plain access would not — the price
+   of the atomic form, recorded in the threads design §8) */
+static void we_atomic(int sub, int size)
+{
+    we(0xfe); we_uleb(sub);
+    we_uleb(size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3);
+    we_uleb(0);
+}
+
+static int wasm_atomic_load_sub(int size)
+{   /* 1: i32.atomic.load8_u, 2: i32.atomic.load16_u,
+       4: i32.atomic.load,    8: i64.atomic.load */
+    return size == 1 ? 0x12 : size == 2 ? 0x13 : size == 4 ? 0x10 : 0x11;
+}
+static int wasm_atomic_store_sub(int size)
+{   /* 1: i32.atomic.store8, 2: i32.atomic.store16,
+       4: i32.atomic.store,  8: i64.atomic.store */
+    return size == 1 ? 0x19 : size == 2 ? 0x1a : size == 4 ? 0x17 : 0x18;
+}
+static int wasm_atomic_rmw_sub(int size, int k)
+{   /* k: 0 add, 1 sub, 2 and, 3 or, 4 xor, 5 xchg, 6 cmpxchg.
+       The encoding groups seven forms per operation from a base
+       of 0x1e + 7k: +0 i32 full width, +1 i64 full width,
+       +2 i32 rmw8, +3 i32 rmw16, then the i64 sub-word forms. */
+    int base = 0x1e + 7 * k;
+    if (size == 1) return base + 2;  /* i32.atomic.rmw8.*_u */
+    if (size == 2) return base + 3;  /* i32.atomic.rmw16.*_u */
+    if (size == 4) return base;      /* i32.atomic.rmw.* */
+    return base + 1;                 /* i64.atomic.rmw.* */
+}
+
+/* sign-extend a sub-word atomic result held in an i32 (the atomic
+   loads and rmw ops are unsigned forms only) */
+static void we_atomic_sext(int size)
+{
+    if (size == 1) {
+        we_i32_const(24); we(0x74); /* i32.shl */
+        we_i32_const(24); we(0x76); /* i32.shr_s */
+    } else if (size == 2) {
+        we_i32_const(16); we(0x74);
+        we_i32_const(16); we(0x76);
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* control flow: basic-block dispatch                                  */
@@ -1298,6 +1348,26 @@ ST_FUNC void load(int r, SValue *sv)
     }
     if (fr & VT_LVAL) {
         int op = wasm_load_op(&sv->type, &is_float);
+        int bt = sv->type.t & VT_BTYPE;
+        if ((sv->type.t & VT_ATOMIC) && !is_float && bt != VT_STRUCT) {
+            /* An _Atomic scalar lvalue takes the atomic load form
+               (threads design §8).  VT_ATOMIC is the same bit as
+               VT_VOLATILE in this tree, so a volatile scalar is
+               strengthened to the atomic form as well.  The access
+               is one register word, as everywhere in this backend:
+               a 64-bit _Atomic variable is loaded as two atomic
+               words here and reached whole only through the
+               __atomic helper path.  _Atomic floats keep the plain
+               form — the instruction set has no float atomics. */
+            int align, size = type_size(&sv->type, &align);
+            if (bt == VT_PTR || bt == VT_FUNC) size = 4;
+            if (size > 4) size = 4;
+            wasm_push_addr(sv);
+            we_atomic(wasm_atomic_load_sub(size), size);
+            if (!(sv->type.t & VT_UNSIGNED)) we_atomic_sext(size);
+            we_local_set(wloc_reg(r));
+            return;
+        }
         wasm_push_addr(sv);
         we(op); we(0x00); we(0x00); /* memarg: align 0, offset 0 */
         if ((sv->type.t & VT_BTYPE) == VT_FLOAT)
@@ -1406,6 +1476,19 @@ ST_FUNC void store(int r, SValue *sv)
         return;
     }
     op = wasm_store_op(&sv->type, &is_float);
+    {
+        int bt = sv->type.t & VT_BTYPE;
+        if ((sv->type.t & VT_ATOMIC) && !is_float && bt != VT_STRUCT) {
+            /* the atomic store form, as in load() above */
+            int align, size = type_size(&sv->type, &align);
+            if (bt == VT_PTR || bt == VT_FUNC) size = 4;
+            if (size > 4) size = 4;
+            wasm_push_addr(sv);
+            we_local_get(wloc_reg(r));
+            we_atomic(wasm_atomic_store_sub(size), size);
+            return;
+        }
+    }
     wasm_push_addr(sv);
     we_local_get(wloc_reg(r));
     if ((sv->type.t & VT_BTYPE) == VT_FLOAT)
@@ -1912,6 +1995,395 @@ static void wasm_push_i32_value(SValue *sv)
               "indirect call");
 }
 
+/* ------------------------------------------------------------------ */
+/* atomic operations (threads design §8)                               */
+/*                                                                     */
+/* The frontend lowers every __atomic_* builtin and (through           */
+/* stdatomic.h) every C11 atomic operation to a call of a helper       */
+/* named __atomic_<op>_<size>; the fences and __atomic_is_lock_free    */
+/* arrive as calls of their own names, and stdatomic.h's               */
+/* atomic_flag_test_and_set / atomic_flag_clear are plain extern       */
+/* declarations.  None of these is ever imported: a call to an         */
+/* undefined helper is intercepted in gfunc_call and the operation     */
+/* is emitted inline from the threads-proposal instruction set.        */
+/* Memory orderings are not represented in the emitted code: wasm      */
+/* atomics are sequentially consistent, which only strengthens.        */
+/* memory.atomic.wait / notify are never emitted — no source-level     */
+/* surface reaches them.                                               */
+
+enum {
+    WA_LOAD, WA_STORE, WA_EXCHANGE, WA_CMPXCHG,
+    WA_FETCH_ADD, WA_FETCH_SUB, WA_FETCH_AND, WA_FETCH_OR,
+    WA_FETCH_XOR, WA_FETCH_NAND,
+    WA_ADD_FETCH, WA_SUB_FETCH, WA_AND_FETCH, WA_OR_FETCH,
+    WA_XOR_FETCH, WA_NAND_FETCH,
+    WA_LOCKFREE, WA_THREAD_FENCE, WA_SIGNAL_FENCE,
+    WA_FLAG_TEST_AND_SET, WA_FLAG_CLEAR
+};
+
+/* Match a callee name against the atomic surface.  On a match
+   returns 1 and sets *op_out / *size_out (size is the atom size in
+   bytes for the __atomic_<op>_<size> family, 0 for the rest). */
+static int wasm_atomic_match(const char *name, int *op_out, int *size_out)
+{
+    static const struct { const char *name; int op; } fixed[] = {
+        { "__atomic_is_lock_free", WA_LOCKFREE },
+        { "__atomic_always_lock_free", WA_LOCKFREE },
+        { "atomic_thread_fence", WA_THREAD_FENCE },
+        { "__atomic_thread_fence", WA_THREAD_FENCE },
+        { "atomic_signal_fence", WA_SIGNAL_FENCE },
+        { "__atomic_signal_fence", WA_SIGNAL_FENCE },
+        { "atomic_flag_test_and_set", WA_FLAG_TEST_AND_SET },
+        { "atomic_flag_test_and_set_explicit", WA_FLAG_TEST_AND_SET },
+        { "atomic_flag_clear", WA_FLAG_CLEAR },
+        { "atomic_flag_clear_explicit", WA_FLAG_CLEAR },
+    };
+    static const struct { const char *name; int op; } suffixed[] = {
+        { "__atomic_load", WA_LOAD },
+        { "__atomic_store", WA_STORE },
+        { "__atomic_exchange", WA_EXCHANGE },
+        { "__atomic_compare_exchange", WA_CMPXCHG },
+        { "__atomic_fetch_add", WA_FETCH_ADD },
+        { "__atomic_fetch_sub", WA_FETCH_SUB },
+        { "__atomic_fetch_and", WA_FETCH_AND },
+        { "__atomic_fetch_or", WA_FETCH_OR },
+        { "__atomic_fetch_xor", WA_FETCH_XOR },
+        { "__atomic_fetch_nand", WA_FETCH_NAND },
+        { "__atomic_add_fetch", WA_ADD_FETCH },
+        { "__atomic_sub_fetch", WA_SUB_FETCH },
+        { "__atomic_and_fetch", WA_AND_FETCH },
+        { "__atomic_or_fetch", WA_OR_FETCH },
+        { "__atomic_xor_fetch", WA_XOR_FETCH },
+        { "__atomic_nand_fetch", WA_NAND_FETCH },
+    };
+    int i;
+    for (i = 0; i < (int)(sizeof fixed / sizeof fixed[0]); i++)
+        if (!strcmp(name, fixed[i].name)) {
+            *op_out = fixed[i].op; *size_out = 0; return 1;
+        }
+    for (i = 0; i < (int)(sizeof suffixed / sizeof suffixed[0]); i++) {
+        size_t n = strlen(suffixed[i].name);
+        if (!strncmp(name, suffixed[i].name, n) && name[n] == '_') {
+            int sz = atoi(name + n + 1);
+            if (sz == 1 || sz == 2 || sz == 4 || sz == 8) {
+                *op_out = suffixed[i].op; *size_out = sz; return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* True when a function of this name is already defined in this
+   translation unit: the interception applies only to calls of
+   undefined helpers, exactly where the call would otherwise have
+   become an import. */
+static int wasm_wfunc_is_defined(const char *name)
+{
+    int i;
+    for (i = 0; i < nb_wfuns; i++)
+        if (wfuns[i].defined && !strcmp(wfuns[i].name, name))
+            return 1;
+    return 0;
+}
+
+/* Land an intercepted operation's result where the generic call
+   tail would have put the helper's return value: REG_IRET for
+   words up to 4 bytes, the REG_IRET/REG_IRE2 pair for 8-byte
+   integers, REG_FRET for floats (held as f64, as everywhere in
+   this backend).  The value is on the operand stack, already in
+   its final form (floats as f32/f64, not bit patterns). */
+static void wasm_atomic_place_result(int size, int is_float)
+{
+    if (is_float) {
+        if (size == 4) we(0xbb); /* f64.promote_f32 */
+        we_local_set(wloc_reg(REG_FRET));
+    } else if (size == 8) {
+        we_local_set(wloc_i64());
+        we_local_get(wloc_i64());
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(REG_IRET));
+        we_local_get(wloc_i64());
+        we_i64_const(32);
+        we(0x87); /* i64.shr_s */
+        we(0xa7); /* i32.wrap_i64 */
+        we_local_set(wloc_reg(REG_IRE2));
+    } else {
+        we_local_set(wloc_reg(REG_IRET));
+    }
+}
+
+/* scratch locals reserved for the atomic sequences (the argument
+   staging used wloc_scratch(0..nb_args-1), and an atomic call has
+   at most 6 arguments) */
+#define WA_SC(n) (wloc_scratch(30 + (n)))
+
+/* Emit an intercepted atomic operation.  The arguments have been
+   staged onto the operand stack in order, exactly as for a call.
+   `frame` is a frame offset allocated by gfunc_call holding two
+   8-byte slots (value copies an 8-byte compare-exchange / nand
+   needs beyond the single i64 local), or 0 when size < 8. */
+static void wasm_emit_atomic(int op, int size, SValue *func_sv,
+                             int nb_args, int frame)
+{
+    /* the atom value type: for load it is the first argument's
+       pointed type, for the rest it is the value argument's own
+       type (the frontend cast it to the atom type) */
+    CType *vt = NULL;
+    int is_float = 0, is_signed = 0;
+    if (op == WA_LOAD) {
+        SValue *a0 = &func_sv[1];
+        if (a0->type.ref) vt = &a0->type.ref->type;
+    } else if (op == WA_STORE || op == WA_EXCHANGE ||
+               op >= WA_FETCH_ADD) {
+        vt = &func_sv[2].type;
+    } else if (op == WA_CMPXCHG) {
+        vt = &func_sv[3].type;
+    }
+    if (vt) {
+        int bt = vt->t & VT_BTYPE;
+        is_float = bt == VT_FLOAT || bt == VT_DOUBLE || bt == VT_LDOUBLE;
+        is_signed = !(vt->t & VT_UNSIGNED);
+    }
+    (void)nb_args;
+    switch (op) {
+    case WA_THREAD_FENCE:
+        we_local_set(WA_SC(0)); /* the ordering argument */
+        we(0xfe); we(0x03); we(0x00); /* atomic.fence */
+        return;
+    case WA_SIGNAL_FENCE:
+        we_local_set(WA_SC(0)); /* compiler barrier only: no code */
+        return;
+    case WA_LOCKFREE: {
+        /* (size, ptr): the answer for this backend is a pure
+           function of the size — at most 8 bytes is lock-free,
+           nothing wider exists.  A constant size folds. */
+        SValue *a0 = &func_sv[1];
+        we_local_set(WA_SC(0)); /* ptr */
+        if ((a0->r & VT_VALMASK) == VT_CONST && !(a0->r & VT_LVAL)) {
+            we_local_set(WA_SC(0)); /* size (a constant, discarded) */
+            we_i32_const((a0->c.i >= 0 && a0->c.i <= 8) ? 1 : 0);
+        } else {
+            we_i32_const(8);
+            we(0x4d); /* i32.le_u */
+        }
+        we_local_set(wloc_reg(REG_IRET));
+        return;
+    }
+    case WA_FLAG_TEST_AND_SET:
+        if (nb_args > 1) we_local_set(WA_SC(0)); /* ordering */
+        we_i32_const(1);
+        we_atomic(0x43, 1); /* i32.atomic.rmw8.xchg_u */
+        we_local_set(wloc_reg(REG_IRET));
+        return;
+    case WA_FLAG_CLEAR:
+        if (nb_args > 1) we_local_set(WA_SC(0)); /* ordering */
+        we_i32_const(0);
+        we_atomic(0x19, 1); /* i32.atomic.store8 */
+        return;
+    case WA_STORE:
+        we_local_set(WA_SC(0)); /* model */
+        if (is_float) we(size == 4 ? 0xbc : 0xbd); /* value to bits */
+        we_atomic(wasm_atomic_store_sub(size), size);
+        return;
+    case WA_LOAD:
+        we_local_set(WA_SC(0)); /* model */
+        we_atomic(wasm_atomic_load_sub(size), size);
+        if (is_float) we(size == 4 ? 0xbe : 0xbf); /* bits to value */
+        else if (is_signed) we_atomic_sext(size);
+        wasm_atomic_place_result(size, is_float);
+        return;
+    case WA_EXCHANGE:
+        we_local_set(WA_SC(0)); /* model */
+        if (is_float) we(size == 4 ? 0xbc : 0xbd);
+        we_atomic(wasm_atomic_rmw_sub(size, 5), size); /* xchg */
+        if (is_float) we(size == 4 ? 0xbe : 0xbf);
+        else if (is_signed) we_atomic_sext(size);
+        wasm_atomic_place_result(size, is_float);
+        return;
+    case WA_CMPXCHG: {
+        /* stack: [ptr, expected_ptr, desired, weak, succ, fail] */
+        we_local_set(WA_SC(0)); /* failure ordering */
+        we_local_set(WA_SC(0)); /* success ordering */
+        we_local_set(WA_SC(0)); /* weak */
+        /* desired: park it (frame slot for 8 bytes — the i64 local
+           is needed as a transfer register below — a scratch local
+           otherwise), as a bit pattern for floats */
+        if (is_float) we(size == 4 ? 0xbc : 0xbd);
+        if (size == 8) {
+            we_local_set(wloc_i64());
+            we_local_get(wloc_fp()); we_i32_const(frame); we(0x6a);
+            we_local_get(wloc_i64());
+            we(0x37); we(0x03); we(0x00); /* i64.store */
+        } else {
+            we_local_set(WA_SC(3));
+        }
+        we_local_set(WA_SC(2)); /* expected_ptr */
+        we_local_set(WA_SC(1)); /* ptr */
+        /* expected = the value at expected_ptr, as bits */
+        we_local_get(WA_SC(2));
+        we_atomic(wasm_atomic_load_sub(size), size);
+        if (size == 8) {
+            we_local_set(wloc_i64());
+            we_local_get(wloc_fp()); we_i32_const(frame + 8); we(0x6a);
+            we_local_get(wloc_i64());
+            we(0x37); we(0x03); we(0x00); /* i64.store */
+        } else {
+            we_local_set(WA_SC(4));
+        }
+        /* [ptr, expected, desired] -> cmpxchg -> [actual] */
+        we_local_get(WA_SC(1));
+        if (size == 8) {
+            we_local_get(wloc_fp()); we_i32_const(frame + 8); we(0x6a);
+            we(0x29); we(0x03); we(0x00); /* i64.load */
+            we_local_get(wloc_fp()); we_i32_const(frame); we(0x6a);
+            we(0x29); we(0x03); we(0x00); /* i64.load */
+        } else {
+            we_local_get(WA_SC(4));
+            we_local_get(WA_SC(3));
+        }
+        we_atomic(wasm_atomic_rmw_sub(size, 6), size); /* cmpxchg */
+        if (size == 8) we_local_tee(wloc_i64());
+        else we_local_tee(WA_SC(5)); /* actual, kept for compare/store */
+        if (size == 8) {
+            we_local_get(wloc_fp()); we_i32_const(frame + 8); we(0x6a);
+            we(0x29); we(0x03); we(0x00); /* i64.load */
+            we(0x51); /* i64.eq */
+        } else {
+            we_local_get(WA_SC(4));
+            we(0x46); /* i32.eq */
+        }
+        we_local_set(WA_SC(6)); /* success flag */
+        /* on failure the actual value replaces *expected */
+        if (size == 8) {
+            we_local_get(wloc_i64());
+            we_local_get(wloc_fp()); we_i32_const(frame + 8); we(0x6a);
+            we(0x29); we(0x03); we(0x00);
+            we(0x52); /* i64.ne */
+        } else {
+            we_local_get(WA_SC(5));
+            we_local_get(WA_SC(4));
+            we(0x47); /* i32.ne */
+        }
+        we(0x04); we(0x40); /* if */
+        we_local_get(WA_SC(2));
+        if (size == 8) we_local_get(wloc_i64());
+        else we_local_get(WA_SC(5));
+        we_atomic(wasm_atomic_store_sub(size), size);
+        we(0x0b); /* end if */
+        we_local_get(WA_SC(6));
+        we_local_set(wloc_reg(REG_IRET));
+        return;
+    }
+    default: {
+        /* the fetch_<op> / <op>_fetch family:
+           stack: [ptr, value, model] */
+        int k = op == WA_FETCH_ADD || op == WA_ADD_FETCH ? 0 :
+                op == WA_FETCH_SUB || op == WA_SUB_FETCH ? 1 :
+                op == WA_FETCH_AND || op == WA_AND_FETCH ? 2 :
+                op == WA_FETCH_OR  || op == WA_OR_FETCH  ? 3 :
+                op == WA_FETCH_XOR || op == WA_XOR_FETCH ? 4 : -1;
+        int result_new = op >= WA_ADD_FETCH && op <= WA_NAND_FETCH;
+        if (k >= 0) {
+            we_local_set(WA_SC(0)); /* model */
+            if (result_new) {
+                /* the rmw returns the old value; the operation's
+                   result is old <op> value, computed locally — the
+                   update itself is the single atomic rmw */
+                if (size == 8) {
+                    we_local_set(wloc_i64());
+                    we_local_get(wloc_i64());
+                } else {
+                    we_local_set(WA_SC(3)); /* value, kept */
+                    we_local_get(WA_SC(3));
+                }
+                we_atomic(wasm_atomic_rmw_sub(size, k), size);
+                if (size == 8) we_local_get(wloc_i64());
+                else we_local_get(WA_SC(3));
+                /* add, sub, and, or, xor */
+                we(size == 8 ? (k == 0 ? 0x7c : k == 1 ? 0x7d :
+                                k == 2 ? 0x83 : k == 3 ? 0x84 : 0x85)
+                             : (k == 0 ? 0x6a : k == 1 ? 0x6b :
+                                k == 2 ? 0x71 : k == 3 ? 0x72 : 0x73));
+            } else {
+                we_atomic(wasm_atomic_rmw_sub(size, k), size);
+            }
+            if (is_signed) we_atomic_sext(size);
+            wasm_atomic_place_result(size, is_float);
+            return;
+        }
+        /* nand has no rmw form: a compare-exchange retry loop.
+           The value operand is parked (frame slot for 8 bytes, a
+           scratch local otherwise); the current value rides the
+           operand stack and a tee'd copy. */
+        we_local_set(WA_SC(0)); /* model */
+        if (size == 8) {
+            we_local_set(wloc_i64());
+            we_local_get(wloc_fp()); we_i32_const(frame); we(0x6a);
+            we_local_get(wloc_i64());
+            we(0x37); we(0x03); we(0x00); /* i64.store */
+        } else {
+            we_local_set(WA_SC(3)); /* value */
+        }
+        we_local_set(WA_SC(1)); /* ptr */
+        we(0x02); we(0x40); /* block */
+        we(0x03); we(0x40); /* loop */
+        we_local_get(WA_SC(1));
+        we_local_get(WA_SC(1));
+        we_atomic(wasm_atomic_load_sub(size), size); /* [ptr, cur] */
+        if (size == 8) we_local_tee(wloc_i64());
+        else we_local_tee(WA_SC(4)); /* cur, kept */
+        /* [ptr, cur, cur] -> fold the second copy into the
+           candidate, leaving [ptr, expected, candidate] */
+        if (size == 8) {
+            we_local_get(wloc_i64());
+            we_local_get(wloc_fp()); we_i32_const(frame); we(0x6a);
+            we(0x29); we(0x03); we(0x00); /* i64.load (value) */
+            we(0x83); /* i64.and */
+            we_i64_const(-1);
+            we(0x85); /* i64.xor: candidate = ~(cur & value) */
+        } else {
+            we_local_get(WA_SC(4));
+            we_local_get(WA_SC(3));
+            we(0x71); /* i32.and */
+            we_i32_const(-1);
+            we(0x73); /* i32.xor */
+        }
+        we_atomic(wasm_atomic_rmw_sub(size, 6), size); /* cmpxchg */
+        if (size == 8) {
+            we_local_get(wloc_i64());
+            we(0x51); /* i64.eq: actual == cur */
+        } else {
+            we_local_get(WA_SC(4));
+            we(0x46); /* i32.eq */
+        }
+        we(0x0d); we_uleb(1); /* br_if: leave the block on success */
+        we(0x0c); we_uleb(0); /* br: retry */
+        we(0x0b); /* end loop */
+        we(0x0b); /* end block */
+        if (result_new) {
+            /* the value the successful cmpxchg installed:
+               ~(cur & value), recomputed from the kept cur */
+            if (size == 8) {
+                we_local_get(wloc_i64());
+                we_local_get(wloc_fp()); we_i32_const(frame); we(0x6a);
+                we(0x29); we(0x03); we(0x00);
+                we(0x83); we_i64_const(-1); we(0x85);
+            } else {
+                we_local_get(WA_SC(4));
+                we_local_get(WA_SC(3));
+                we(0x71); we_i32_const(-1); we(0x73);
+            }
+        } else {
+            if (size == 8) we_local_get(wloc_i64());
+            else we_local_get(WA_SC(4));
+        }
+        if (is_signed) we_atomic_sext(size);
+        wasm_atomic_place_result(size, is_float);
+        return;
+    }
+    }
+}
+
 ST_FUNC void gfunc_call(int nb_args)
 {
     SValue *func_sv = &vtop[-nb_args];
@@ -1929,6 +2401,28 @@ ST_FUNC void gfunc_call(int nb_args)
     int i;
     int variadic = 0, nfixed = 0, va_ofs = 0;
     int va_slot[40], va_wt[40];
+    /* Atomic surface (threads design §8): a direct call to an
+       undefined atomic helper is not a call at all — the operation
+       is emitted inline at the call site below, the helper is never
+       interned and never becomes an import.  An 8-byte
+       compare-exchange / nand needs two value slots beyond the
+       single i64 local; they are allocated from the frame here,
+       before argument staging, like the variadic area below. */
+    int atomic_op = -1, atomic_size = 0, atomic_frame = 0;
+    if (!indirect) {
+        const char *cname = get_tok_str(func_sv->sym->v, NULL);
+        int ao, asz;
+        if (wasm_atomic_match(cname, &ao, &asz) &&
+            !wasm_wfunc_is_defined(cname)) {
+            atomic_op = ao;
+            atomic_size = asz;
+            if ((ao == WA_CMPXCHG || ao == WA_FETCH_NAND ||
+                 ao == WA_NAND_FETCH) && asz == 8) {
+                loc = (loc - 16) & -8;
+                atomic_frame = loc;
+            }
+        }
+    }
     if (indirect) {
         /* Call through a function-pointer value: the signature comes
            from the pointer's function type (synthesised from the call
@@ -1970,7 +2464,7 @@ ST_FUNC void gfunc_call(int nb_args)
            turn into imports. */
         put_extern_sym(func_sv->sym, NULL, 0, 0);
     }
-    if (!indirect) {
+    if (!indirect && atomic_op < 0) {
         if (func_sv->type.ref && func_sv->type.ref->f.func_type == FUNC_OLD) {
             /* Undeclared (K&R) callee: the frontend's helper functions
                (memset, memcpy, ... reached through vpush_helper_func)
@@ -2137,6 +2631,15 @@ ST_FUNC void gfunc_call(int nb_args)
         we_local_get(wloc_fp());
         we_i32_const(va_ofs);
         we(0x6a); /* i32.add */
+    }
+    if (atomic_op >= 0) {
+        /* the staged arguments are the operation's operands; the
+           emission consumes them and lands the result where the
+           call tail below would have */
+        wasm_emit_atomic(atomic_op, atomic_size, func_sv, nb_args,
+                         atomic_frame);
+        vtop -= nb_args + 1;
+        return;
     }
     if (indirect) {
         /* the callee value goes onto the operand stack last, above

@@ -49,9 +49,22 @@ import manifestX86_64LinuxAndroid from './sysroot-manifests/x86_64-linux-android
 import manifestArm64AppleDarwin from './sysroot-manifests/arm64-apple-darwin.json' with { type: 'json' };
 import manifestX86_64AppleDarwin from './sysroot-manifests/x86_64-apple-darwin.json' with { type: 'json' };
 import { createDefaultShims, ShimExit } from './runtime-shims.mjs';
+import {
+  Scheduler, ThreadRecord, createSimPthreadShims, ThreadExitSignal,
+  HDR_TID_COUNTER, createCoordinatorPthreadShims,
+} from './threads.mjs';
 import { MemoryFsStore, openFsStore } from './vfs-store.mjs';
 
 export { MemoryFsStore, IndexedDbFsStore, createFsStore } from './vfs-store.mjs';
+
+// Helpers the thread-worker runtime (threads.mjs, entered from
+// worker.mjs) builds replicas with. Not part of the public
+// embedding surface.
+export {
+  manifestToLibrary, libraryFromBytes, parseImportTypes,
+  makeWrapperFunction, createWasiShim, createShimContext,
+  canonicalModulePath,
+};
 
 /** The default target's sysroot manifest (sysroot-manifests/wasm32-wasi.json). */
 export const sysrootManifest = manifestWasm32Wasi;
@@ -1168,7 +1181,9 @@ function createShimContext(holder, byteIO) {
       const m = new Uint8Array(holder.memory.buffer);
       let end = ptr;
       while (end < m.length && end - ptr < maxLength && m[end] !== 0) end++;
-      return textDecoder.decode(m.subarray(ptr, end));
+      // Copy before decoding: a shared memory's views are
+      // refused by TextDecoder (real-tier processes).
+      return textDecoder.decode(m.slice(ptr, end));
     },
     writeCString(ptr, str) {
       const bytes = textEncoder.encode(str);
@@ -1694,6 +1709,9 @@ export class TinycState {
     const bytes = this._instance.exportFile(outputPath);
     const io = normalizeIO(options.io, this.io);
     if (isDylinkUnit(bytes)) {
+      // The run paths always create threaded processes
+      // (threads design §2.1); runMainModule therefore returns
+      // a promise, which run propagates.
       const proc = this._instance.createProcess({
         io,
         args: [outputPath, ...args.map(String)],
@@ -1701,17 +1719,19 @@ export class TinycState {
         stdin: options.stdin,
         shims: options.shims,
         imports: options.imports,
+        threads: true,
       });
-      const result = proc.runMainModule(bytes, {
+      return Promise.resolve(proc.runMainModule(bytes, {
         path: outputPath,
         entry: options.entry,
         callArgs: options.callArgs,
+      })).then((result) => {
+        flushIO(io);
+        if (result && typeof result === 'object' && 'exitCode' in result) {
+          return result.exitCode;
+        }
+        return result;
       });
-      flushIO(io);
-      if (result && typeof result === 'object' && 'exitCode' in result) {
-        return result.exitCode;
-      }
-      return result;
     }
     const result = runWasmModuleSync(bytes, {
       args: [outputPath, ...args.map(String)],
@@ -2067,17 +2087,23 @@ export class Tinyc {
     if (rc !== 0) return rc;
     const bytes = this.exportFile(DEFAULT_RUN_OUTPUT);
     if (dylink && isDylinkUnit(bytes)) {
+      // The run paths always create threaded processes
+      // (threads design §2.1); runMainModule therefore returns
+      // a promise, which callMain propagates.
       const proc = this.createProcess({
         io: this._io,
         args: [src, ...progArgs],
         shims: options.shims,
         imports: options.imports,
         stdin: options.stdin,
+        threads: true,
       });
-      const result = proc.runMainModule(bytes, { path: DEFAULT_RUN_OUTPUT });
-      flushIO(this._io);
-      if (typeof result === 'number') return result;
-      return result?.exitCode ?? 0;
+      return Promise.resolve(
+        proc.runMainModule(bytes, { path: DEFAULT_RUN_OUTPUT })).then((result) => {
+          flushIO(this._io);
+          if (typeof result === 'number') return result;
+          return result?.exitCode ?? 0;
+        });
     }
     const result = runWasmModuleSync(bytes, {
       args: [src, ...progArgs],
@@ -2333,11 +2359,24 @@ function manifestToLibrary(manifest, canonical) {
     bssOff: manifest.bss_off | 0,
     bssSize: manifest.bss_size | 0,
     tableSize: manifest.table_size | 0,
+    // The threaded revision's fields (threads design §3.2,
+    // §7.2): stackSize is undefined on a pre-revision module,
+    // which a threaded process refuses by name; the tls fields
+    // are present only when the module has __thread variables.
+    stackSize: typeof manifest.stack_size === 'number'
+      ? manifest.stack_size | 0 : undefined,
+    tlsSize: manifest.tls_size | 0,
+    tlsAlign: manifest.tls_align || 4,
+    tlsTemplate: typeof manifest.tls_template === 'string'
+      ? base64ToBytes(manifest.tls_template) : null,
     needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
     dataGotFunc: Array.isArray(manifest.data_got_func)
       ? manifest.data_got_func.map(String) : [],
     exports: (Array.isArray(manifest.exports) ? manifest.exports : [])
-      .map((e) => ({ name: String(e.name), kind: e.kind | 0, value: e.value | 0 })),
+      .map((e) => ({
+        name: String(e.name), kind: e.kind | 0, value: e.value | 0,
+        tls: e.tls ? 1 : 0,
+      })),
   };
   if (!(meta.memSize > 0)) {
     throw new TinycDylinkError(
@@ -2627,6 +2666,86 @@ function ulebBytes(v) {
   return out;
 }
 
+/** Widen a module's memory import declaration to shared, for
+ *  instantiation into a shared-memory (real-tier) process.
+ *  Module bytes do not record the tier (threads design §2.1),
+ *  and the backend declares the dylink memory import
+ *  non-shared; the import's limits are rewritten here — flags
+ *  gain the shared bit and a maximum of 65536 pages, matching
+ *  the process memory — and every other byte is preserved.
+ *  Returns the input unchanged when there is no memory import
+ *  or it is already shared. */
+function patchSharedMemoryImport(bytes) {
+  const readUleb = (p) => {
+    let v = 0, s = 0;
+    for (;;) {
+      const c = bytes[p++];
+      v += (c & 0x7f) * 2 ** s;
+      if (!(c & 0x80)) return [v, p];
+      s += 7;
+    }
+  };
+  let p = 8; // magic + version
+  while (p < bytes.length) {
+    const id = bytes[p];
+    const [size, bodyStart] = readUleb(p + 1);
+    if (id !== 2) { p = bodyStart + size; continue; }
+    // Import section: find the memory import.
+    let q = bodyStart;
+    const [count, afterCount] = readUleb(q);
+    q = afterCount;
+    for (let i = 0; i < count; i++) {
+      const [mlen, mp] = readUleb(q);
+      const mod = textDecoder.decode(bytes.subarray(mp, mp + mlen));
+      const [nlen, np] = readUleb(mp + mlen);
+      const name = textDecoder.decode(bytes.subarray(np, np + nlen));
+      const kindAt = np + nlen;
+      const kind = bytes[kindAt];
+      if (kind === 0x02 && name === 'memory') {
+        const [flags, minAt] = readUleb(kindAt + 1);
+        if (flags & 0x02) return bytes; // already shared
+        const [min, afterMin] = readUleb(minAt);
+        let entryEnd = afterMin;
+        if (flags & 0x01) entryEnd = readUleb(afterMin)[1];
+        const newEntry = [
+          ...ulebBytes(mod.length), ...textEncoder.encode(mod),
+          ...ulebBytes(name.length), ...textEncoder.encode(name),
+          0x02, 0x03, ...ulebBytes(min), ...ulebBytes(65536),
+        ];
+        const sectionBody = [
+          ...bytes.subarray(bodyStart, q),
+          ...newEntry,
+          ...bytes.subarray(entryEnd, bodyStart + size),
+        ];
+        return new Uint8Array([
+          ...bytes.subarray(0, p),
+          2, ...ulebBytes(sectionBody.length), ...sectionBody,
+          ...bytes.subarray(bodyStart + size),
+        ]);
+      }
+      // Skip this entry.
+      let e = kindAt + 1;
+      if (kind === 0x00) {
+        e = readUleb(e)[1];                    // function: type index
+      } else if (kind === 0x01) {
+        e += 1;                                // table: element type
+        const [f, m1] = readUleb(e);           //   then limits
+        e = readUleb(m1)[1];
+        if (f & 0x01) e = readUleb(e)[1];
+      } else if (kind === 0x02) {
+        const [f, m1] = readUleb(e);           // memory: limits
+        e = readUleb(m1)[1];
+        if (f & 0x01) e = readUleb(e)[1];
+      } else if (kind === 0x03) {
+        e += 2;                                // global: type + mutability
+      }
+      q = e;
+    }
+    return bytes; // no memory import
+  }
+  return bytes;
+}
+
 function makeWrapperFunction(jsFn, type) {
   const section = (id, body) => [id, ...ulebBytes(body.length), ...body];
   const vec = (items) => [...ulebBytes(items.length), ...items.flat()];
@@ -2668,6 +2787,47 @@ const NULL_STUB_FN = (() => {
   return new WebAssembly.Instance(new WebAssembly.Module(bytes), {}).exports.t;
 })();
 
+/** The real-tier probe (threads design §2.1): SharedArrayBuffer
+ *  available, a shared memory actually constructible (the
+ *  authoritative test), and a Worker constructor to host the
+ *  threads. A file: context fails the first two by construction
+ *  and is therefore always simulated — a consequence of the
+ *  probe, not a special case. */
+function probeRealTier() {
+  if (typeof SharedArrayBuffer !== 'function') {
+    return { ok: false, reason: 'SharedArrayBuffer is not available in this context' };
+  }
+  try {
+    new WebAssembly.Memory({ initial: 1, maximum: 65536, shared: true });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `a shared WebAssembly.Memory cannot be constructed (${err.message})`,
+    };
+  }
+  if (typeof Worker !== 'function') {
+    return { ok: false, reason: 'the Worker constructor is not available in this context' };
+  }
+  return { ok: true };
+}
+
+/** Real-tier shared-memory control block word offsets (bytes)
+ *  and thread-record word offsets (threads design §5). */
+const CB_LOAD_SEQ = 0, CB_ACKS_DONE = 4, CB_LOAD_DONE = 8,
+  CB_TASK_ADDR = 12, CB_CALL_SEQ = 16, CB_CALL_TASK_ADDR = 20,
+  CB_CALL_DONE = 24, CB_STDIN_CURSOR = 28, CB_STDIN_ADDR = 32,
+  CB_STDIN_LEN = 36, CB_LOAD_FAILED = 40;
+const TR_STATE = 0, TR_EXIT = 4, TR_ACK = 8, TR_DETACHED = 12;
+
+/** The pthread shims that can block, supplied to a threaded
+ *  simulated-tier process's modules wrapped in
+ *  WebAssembly.Suspending (threads design §4.2). */
+const SIM_BLOCKING_SHIMS = new Set([
+  'pthread_join', 'pthread_mutex_lock', 'pthread_mutex_timedlock',
+  'pthread_cond_wait', 'pthread_cond_timedwait', 'pthread_once',
+  'pthread_spin_lock', 'sched_yield',
+]);
+
 /** A dylink process. Created attached to a Tinyc instance
  *  (instance.createProcess: libraries resolve in the instance's
  *  virtual FS, retrievals write back into it, the instance's
@@ -2676,16 +2836,40 @@ const NULL_STUB_FN = (() => {
  *  through retrieval from options.baseUrl).
  *
  *  options: { io, args, env, stdin, shims, imports, baseUrl,
- *  transport, readModule } — io is a text IO partial like the
- *  instance IO; args/env/stdin seed the process's WASI and libc
- *  layers; shims/imports are extra import layers with the
- *  runWasmModule priority (after the built-in layers, before
- *  symbol resolution); transport is "auto" | "fetch" | "script". */
+ *  transport, readModule, threads, threadTier } — io is a text
+ *  IO partial like the instance IO; args/env/stdin seed the
+ *  process's WASI and libc layers; shims/imports are extra
+ *  import layers with the runWasmModule priority (after the
+ *  built-in layers, before symbol resolution); transport is
+ *  "auto" | "fetch" | "script". threads defaults to false (the
+ *  0.4.0 embedding contract: synchronous, creating-context
+ *  execution); the run paths pass threads: true. threadTier
+ *  may force 'simulated', or 'real' where the probe passes
+ *  (threads design §2.1). */
 export class TinycProcess {
   constructor(options = {}) {
     this._tinyc = options.tinyc ?? null;
     this._readModule = typeof options.readModule === 'function'
       ? options.readModule : null;
+    // -- threading (threads design §2) --
+    this._threaded = options.threads === true;
+    this._jspi = typeof WebAssembly.promising === 'function' &&
+      typeof WebAssembly.Suspending === 'function';
+    this.threadTier = null;
+    this._scheduler = null;
+    if (this._threaded) {
+      const probe = probeRealTier();
+      const forced = options.threadTier ?? null;
+      if (forced === 'real' && !probe.ok) {
+        throw new TinycDylinkError(
+          `tinyc: cannot create a real-tier threaded process: ${probe.reason}`);
+      }
+      if (forced !== null && forced !== 'real' && forced !== 'simulated') {
+        throw new TinycDylinkError(
+          `tinyc: threadTier must be "real" or "simulated", got "${forced}"`);
+      }
+      this.threadTier = forced ?? (probe.ok ? 'real' : 'simulated');
+    }
     // A relative baseUrl resolves against the current context's
     // directory, like the package's other asset URLs.
     this._baseUrl = options.baseUrl ?? null;
@@ -2699,7 +2883,11 @@ export class TinycProcess {
     }
     this._transport = createTransport(options.transport);
     this._args = (options.args ?? []).map(String);
-    this.memory = new WebAssembly.Memory({ initial: 1 });
+    // A real-tier process's memory is shared, with the wasm32
+    // maximum named (a shared memory must name one; §2.2).
+    this.memory = this.threadTier === 'real'
+      ? new WebAssembly.Memory({ initial: 1, maximum: 65536, shared: true })
+      : new WebAssembly.Memory({ initial: 1 });
     this.table = new WebAssembly.Table({ element: 'anyfunc', initial: 2 });
     // Slot 0 stays null (the engine traps calls through it); slot 1
     // is the linker's stub for a null function pointer.
@@ -2708,7 +2896,9 @@ export class TinycProcess {
     this._holder = { memory: this.memory, instance: null };
     // The shim allocator's frontier starts past the reserved
     // [0, 1024) span; module static regions are reserved from it.
-    this._allocatorState = { heapTop: 1024, freeHead: 0 };
+    // The state itself lives in the memory's header words (threads
+    // design §5.6), shared with every worker's shim set in the
+    // real thread tier; this object is the accessor view over it.
     this._io = options.io ? normalizeIO(options.io) : null;
     this._byteIO = this._io ? textIOToByteIO(this._io) : createDefaultByteIO();
     this._wasi = createWasiShim(
@@ -2716,10 +2906,11 @@ export class TinycProcess {
       this._holder, this._byteIO);
     const def = createDefaultShims({
       io: this._byteIO, holder: this._holder, stdin: options.stdin,
-      heapBase: 1024, allocatorState: this._allocatorState,
+      heapBase: 1024, memoryAllocator: true,
       processTable: this.table,
     });
     this._defaultEnv = def.env;
+    this._allocatorState = def.allocatorState;
     this._reserveStatic = def.reserveStatic;
     this._shimsOption = options.shims ?? null;
     this._importsOption = options.imports ?? null;
@@ -2737,6 +2928,44 @@ export class TinycProcess {
     this._main = null;
     this._dlerror = null;
     this._ended = false;
+    // -- thread state (threads design §2.2, §6.6) --
+    if (this._threaded) {
+      // The main thread is id 1 and exists from creation; the
+      // header counters start from it (§5.6).
+      this._writeI32(HDR_TID_COUNTER, 1);
+      if (this.threadTier === 'simulated') {
+        this._scheduler = new Scheduler(this);
+        this._scheduler.createMainThread();
+        this._pthreadEnv = createSimPthreadShims(this, this._scheduler);
+      } else {
+        this._pthreadEnv = createCoordinatorPthreadShims();
+        // Real tier: this process is the coordinator (§5.1).
+        // Its shared-memory control block, key table and stdin
+        // placement are set up lazily at the first run or load
+        // that needs them — before the main module loads, the
+        // allocator frontier is still inside the span the main
+        // module's data image lands on.
+        this._workerUrlOption = options.workerUrl ?? null;
+        this._stdinOption = options.stdin ?? null;
+        this._real = {
+          workers: new Map(),   // tid -> { worker, recordAddr, alive, isMain }
+          mainRun: null,        // { resolve } while a run is driven
+          mainExited: false,    // main thread pthread_exited
+          loadsInFlight: 0,
+          loadQueue: [],        // pending load requests (serialized)
+          spawnQueue: [],       // spawns gated on a load (§5.4)
+          nextLoadSeq: 1,
+          lastTaskIndex: 0,     // _loadOrder length at the last task
+          callWaiters: new Map(), // call seq -> { resolve, reject }
+          envMap: options.env ?? {},
+          nextCallSeq: 1,
+          control: 0,           // control block address (0 until setup)
+          keyTableAddr: 0,
+          dirAddr: 0,           // thread record directory
+        };
+        this._slotDesc = new Map(); // table slot -> descriptor, for replicas
+      }
+    }
   }
 
   /** The process's main module record, or null. */
@@ -2778,6 +3007,145 @@ export class TinycProcess {
     return this._reserveStatic(meta.memSize, meta.memAlign || 16);
   }
 
+  // -- memory words ---------------------------------------------------
+
+  _readI32(addr) {
+    return new DataView(this.memory.buffer).getInt32(addr, true);
+  }
+
+  _writeI32(addr, value) {
+    new DataView(this.memory.buffer).setInt32(addr, value | 0, true);
+  }
+
+  // -- per-(thread, module) state (threads design §3.1, §7.2) ---------
+
+  /** The thread's TLS area for a module, allocated and
+   *  initialized (template bytes, zeroed tail) on first use —
+   *  the later of thread creation and module load is when the
+   *  callers invoke this. Areas are retired with the thread,
+   *  never reused. */
+  _tlsAreaFor(tid, record) {
+    let addr = record.tlsAreas.get(tid);
+    if (addr === undefined) {
+      addr = this._reserveStatic(record.meta.tlsSize, record.meta.tlsAlign || 4);
+      const m = new Uint8Array(this.memory.buffer);
+      m.fill(0, addr, addr + record.meta.tlsSize);
+      if (record.meta.tlsTemplate) {
+        m.set(record.meta.tlsTemplate.subarray(
+          0, Math.min(record.meta.tlsTemplate.length, record.meta.tlsSize)),
+          addr);
+      }
+      record.tlsAreas.set(tid, addr);
+    }
+    return addr;
+  }
+
+  /** A created thread's stack region for a module (§3.1): the
+   *  main thread uses the module's baked span and has no
+   *  region. Regions are retired with the thread, never
+   *  reused. */
+  _stackRegionFor(tid, record) {
+    let base = record.stackRegions.get(tid);
+    if (base === undefined) {
+      base = this._reserveStatic(record.meta.stackSize, 16);
+      record.stackRegions.set(tid, base);
+    }
+    return base;
+  }
+
+  /** Point every GOT.tls global at the given thread's areas:
+   *  (the defining module's area for the thread) + (the
+   *  symbol's offset in the definer's span). */
+  _refreshGotTls(tid) {
+    for (const [key, e] of this._got) {
+      if (!key.startsWith('tls:') || !e.definer) continue;
+      e.global.value = this._tlsAreaFor(tid, e.definer) + e.offset;
+    }
+  }
+
+  /** The address a symbol-table entry names for the given
+   *  thread: a TLS variable lives in the definer's per-thread
+   *  area at its span offset; anything else is its recorded
+   *  value. */
+  _symbolAddress(entry, tid) {
+    if (entry.tls) {
+      const area = entry.record.tlsAreas.get(tid);
+      return (area ?? 0) + entry.value;
+    }
+    return entry.value;
+  }
+
+  /** The thread id a host-side lookup acts for: the scheduler's
+   *  context owner in a threaded process, else the single
+   *  thread. */
+  _actingTid() {
+    return this._scheduler?.contextOwner?.id ?? 1;
+  }
+
+  /** Make a thread's execution state current (§4.3): for every
+   *  loaded module, swap the instance's stack pointer to the
+   *  thread's saved value (capturing the outgoing thread's),
+   *  install its TLS base, and refresh the GOT.tls globals. */
+  _installThreadContext(thread) {
+    const sched = this._scheduler;
+    if (!sched || sched.contextOwner === thread) return;
+    const prev = sched.contextOwner;
+    for (const record of this._loadOrder) {
+      const inst = record.instance;
+      if (!inst) continue;
+      const swap = inst.exports.__tinyc_dylink_swap_sp;
+      if (typeof swap === 'function') {
+        let incoming = thread.savedSp.get(record);
+        if (incoming === undefined && record.stackRegions.has(thread.id)) {
+          incoming = record.stackRegions.get(thread.id) + record.meta.stackSize;
+        }
+        if (incoming !== undefined) {
+          const prevSp = swap(incoming);
+          if (prev && prev !== thread) prev.savedSp.set(record, prevSp);
+        }
+      }
+      if (record.tlsBaseGlobal) {
+        const area = record.tlsAreas.get(thread.id);
+        if (area !== undefined) record.tlsBaseGlobal.value = area;
+      }
+    }
+    this._refreshGotTls(thread.id);
+    sched.contextOwner = thread;
+  }
+
+  /** Allocate a created thread's per-module state and queue it
+   *  for the rotation (simulated tier). The thread's entry is
+   *  the start routine reached through the process table. */
+  _createThread(startSlot, arg, detached) {
+    const sched = this._scheduler;
+    const id = this._readI32(HDR_TID_COUNTER) + 1;
+    this._writeI32(HDR_TID_COUNTER, id);
+    const thread = new ThreadRecord(id);
+    thread.detached = detached;
+    thread.keyValuesAddr = this._reserveStatic(128 * 4, 4);
+    for (const record of this._loadOrder) {
+      if (record.meta.stackSize !== undefined && id !== 1) {
+        this._stackRegionFor(id, record);
+      }
+      if (record.meta.tlsSize > 0) this._tlsAreaFor(id, record);
+    }
+    thread.invoke = () => {
+      const fn = this.table.get(startSlot);
+      if (typeof fn !== 'function') {
+        throw new TinycDylinkError(
+          `tinyc: pthread_create: table slot ${startSlot} does not ` +
+          `hold a function`);
+      }
+      if (this._jspi) return WebAssembly.promising(fn)(arg);
+      return Promise.resolve(fn(arg));
+    };
+    sched.threads.set(id, thread);
+    sched.runnable.push(thread);
+    sched.kick();
+    sched._nudge();
+    return id;
+  }
+
   // -- dlerror --------------------------------------------------------
 
   _setDlerror(message) {
@@ -2801,7 +3169,7 @@ export class TinycProcess {
     const m = new Uint8Array(this.memory.buffer);
     let end = ptr;
     while (end < m.length && end - ptr < max && m[end] !== 0) end++;
-    return textDecoder.decode(m.subarray(ptr, end));
+    return textDecoder.decode(m.slice(ptr, end));
   }
 
   // -- library resolution (design §13) --------------------------------
@@ -2850,6 +3218,18 @@ export class TinycProcess {
       this._libraryErrors.delete(canonical);
     }
     return lib;
+  }
+
+  /** Whether a library and its whole needed closure are
+   *  available from local sources — the guest dlopen fast path
+   *  in a threaded process (§9.1). */
+  _closureLocal(canonical, seen = new Set()) {
+    if (seen.has(canonical)) return true;
+    seen.add(canonical);
+    const lib = this._libraryLocal(canonical);
+    if (!lib) return false;
+    return lib.meta.needed.every((n) =>
+      this._closureLocal(canonicalModulePath(n, vfsDirname(canonical)), seen));
   }
 
   /** A library, retrieving its manifest through the transport when
@@ -2943,6 +3323,13 @@ export class TinycProcess {
       };
       slot = this._jsFunctionSlot(trap, DEFAULT_CALL_TYPE);
       this._stubSlots.set(name, slot);
+      if (this._slotDesc) {
+        this._slotDesc.set(slot, {
+          kind: 'stub', name,
+          params: [...DEFAULT_CALL_TYPE.params],
+          results: [...DEFAULT_CALL_TYPE.results],
+        });
+      }
     }
     return slot;
   }
@@ -2957,8 +3344,15 @@ export class TinycProcess {
           if (type) break;
         }
       }
-      slot = this._jsFunctionSlot(fn, type ?? DEFAULT_CALL_TYPE);
+      const t = type ?? DEFAULT_CALL_TYPE;
+      slot = this._jsFunctionSlot(fn, t);
       this._shimSlots.set(name, slot);
+      if (this._slotDesc) {
+        this._slotDesc.set(slot, {
+          kind: 'shim', name,
+          params: [...t.params], results: [...t.results],
+        });
+      }
     }
     return slot;
   }
@@ -2977,7 +3371,9 @@ export class TinycProcess {
   _registerGlobals(record) {
     for (const [name, e] of record.exports) {
       if (!this._globalSymbols.has(name)) {
-        this._globalSymbols.set(name, { kind: e.kind, value: e.value, record });
+        this._globalSymbols.set(name, {
+          kind: e.kind, value: e.value, record, tls: e.tls ? 1 : 0,
+        });
       }
     }
     record.global = true;
@@ -2988,9 +3384,10 @@ export class TinycProcess {
       if (e.record === record) this._globalSymbols.delete(name);
     }
     for (const [name, e] of record.exports) {
-      const entry = this._got.get(`${e.kind === 0 ? 'func' : 'mem'}:${name}`);
+      const entry = this._got.get(
+        `${e.tls ? 'tls' : e.kind === 0 ? 'func' : 'mem'}:${name}`);
       if (entry && entry.definer === record) {
-        entry.global.value = e.kind === 0 ? this._stubSlot(name) : 0;
+        entry.global.value = e.kind === 0 && !e.tls ? this._stubSlot(name) : 0;
         entry.filled = false;
         entry.definer = null;
       }
@@ -3068,11 +3465,38 @@ export class TinycProcess {
     for (const [name, fn] of Object.entries(this._wasi)) {
       put('wasi_snapshot_preview1', name, fn);
     }
+    if (this._pthreadEnv && typeof this._pthreadEnv.sched_yield === 'function') {
+      // The wasm backend emits sched_yield as a WASI import
+      // (it is on the WASI name list), not an env import. In a
+      // threaded process the yield must reach the scheduler,
+      // so the WASI name is routed to the pthread shim too.
+      put('wasi_snapshot_preview1', 'sched_yield',
+        SIM_BLOCKING_SHIMS.has('sched_yield') && this._scheduler &&
+        this._jspi
+          ? new WebAssembly.Suspending(this._pthreadEnv.sched_yield)
+          : this._pthreadEnv.sched_yield);
+    }
     for (const [name, fn] of Object.entries(this._defaultEnv)) {
       put('env', name, fn);
     }
     const dl = this._dlfcnFor(record);
-    for (const [name, fn] of Object.entries(dl)) put('env', name, fn);
+    for (const [name, fn] of Object.entries(dl)) {
+      // In a threaded simulated-tier process the guest dlopen
+      // can suspend on a retrieval (§9.1): it is supplied
+      // wrapped in WebAssembly.Suspending, like the blocking
+      // pthread shims (§4.2).
+      if (name === 'dlopen' && this._scheduler && this._jspi) {
+        put('env', name, new WebAssembly.Suspending(fn));
+      } else {
+        put('env', name, fn);
+      }
+    }
+    if (this._pthreadEnv) {
+      for (const [name, fn] of Object.entries(this._pthreadEnv)) {
+        put('env', name, SIM_BLOCKING_SHIMS.has(name) && this._scheduler &&
+          this._jspi ? new WebAssembly.Suspending(fn) : fn);
+      }
+    }
     const ctx = createShimContext(this._holder, this._byteIO);
     for (const layer of [globalShimRegistry, this._tinyc?._shims, this._shimsOption]) {
       if (!layer) continue;
@@ -3091,19 +3515,42 @@ export class TinycProcess {
       new WebAssembly.Global({ value: 'i32', mutable: false }, record.memoryBase));
     put('env', '__table_base',
       new WebAssembly.Global({ value: 'i32', mutable: false }, record.tableBase));
+    // env.__tls_base, when the module imports it: a mutable
+    // global the loader holds and sets to the executing
+    // thread's TLS area for this module (§7.2). Its initial
+    // value is the loading context's area, so init — which
+    // runs on that context — sees the right area.
+    const moduleImports = WebAssembly.Module.imports(wasmModule);
+    if (moduleImports.some((i) =>
+      i.module === 'env' && i.name === '__tls_base' && i.kind === 'global')) {
+      const g = new WebAssembly.Global({ value: 'i32', mutable: true },
+        record.meta.tlsSize > 0
+          ? this._tlsAreaFor(this._actingTid(), record) : 0);
+      record.tlsBaseGlobal = g;
+      put('env', '__tls_base', g);
+    }
     const unresolvedFunctions = [];
     const unresolvedGotMem = [];
+    const unresolvedGotTls = [];
     const unresolvedOther = [];
-    for (const imp of WebAssembly.Module.imports(wasmModule)) {
+    for (const imp of moduleImports) {
       const key = `${imp.module}.${imp.name}`;
       if (imp.kind === 'global' &&
-          (imp.module === 'GOT.func' || imp.module === 'GOT.mem')) {
-        const kind = imp.module === 'GOT.func' ? 'func' : 'mem';
+          (imp.module === 'GOT.func' || imp.module === 'GOT.mem' ||
+           imp.module === 'GOT.tls')) {
+        const kind = imp.module === 'GOT.func' ? 'func'
+          : imp.module === 'GOT.mem' ? 'mem' : 'tls';
         const entry = this._gotEntry(kind, imp.name);
         if (!entry.filled) {
-          const hit = this._resolveGot(kind, imp.name, record, provided);
-          if (hit) this._fillGot(kind, imp.name, hit.value, hit.definer);
-          else if (kind === 'mem') unresolvedGotMem.push(imp.name);
+          if (kind === 'tls') {
+            const hit = this._resolveGotTls(imp.name, record);
+            if (hit) this._fillGotTls(imp.name, hit.definer, hit.offset);
+            else unresolvedGotTls.push(imp.name);
+          } else {
+            const hit = this._resolveGot(kind, imp.name, record, provided);
+            if (hit) this._fillGot(kind, imp.name, hit.value, hit.definer);
+            else if (kind === 'mem') unresolvedGotMem.push(imp.name);
+          }
         }
         put(imp.module, imp.name, entry.global);
         continue;
@@ -3144,7 +3591,7 @@ export class TinycProcess {
       if (!entry || !entry.filled) unresolvedDataGotFunc.push(name);
     }
     return { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther,
-             unresolvedDataGotFunc };
+             unresolvedDataGotFunc, unresolvedGotTls };
   }
 
   /** A GOT value for a not-yet-filled entry, in the §5 order:
@@ -3203,6 +3650,15 @@ export class TinycProcess {
           `(a host loadModule call retrieves it from the base URL first)`);
     }
     const meta = lib.meta;
+    if (this._threaded && meta.stackSize === undefined) {
+      // §3.3: a threaded process refuses a pre-revision module
+      // — its active data segments make replica instantiation
+      // unsafe. A non-threaded process accepts both forms.
+      throw new TinycDylinkError(
+        `tinyc: cannot load "${canonical}" into a threaded process: ` +
+        `the module's metadata carries no stack_size; it predates ` +
+        `the threaded module revision (threads design §3.3)`);
+    }
     const record = {
       canonical, meta, lib,
       handle: this._nextHandle++,
@@ -3216,6 +3672,9 @@ export class TinycProcess {
       refcount: 1,
       global: false,
       isMain: Boolean(opts.isMain),
+      tlsAreas: new Map(),      // thread id -> TLS area address
+      stackRegions: new Map(),  // thread id -> stack region base
+      tlsBaseGlobal: null,      // the env.__tls_base global, if imported
     };
     if (holderKey !== null) record.handleHolders.set(holderKey, 1);
     this._modules.set(canonical, record);
@@ -3227,13 +3686,17 @@ export class TinycProcess {
       record.tableBase = this._allocTable(meta.tableSize);
       for (const e of meta.exports) {
         if (record.exports.has(e.name)) continue;
+        // A TLS export's recorded value is its offset in the
+        // definer's TLS span, not a memory address (§7.2); the
+        // address is per-thread and computed at lookup time.
         const value = e.kind === 0
           ? record.tableBase + e.value
-          : record.memoryBase + e.value;
-        record.exports.set(e.name, { kind: e.kind, value });
+          : e.tls ? e.value : record.memoryBase + e.value;
+        record.exports.set(e.name, { kind: e.kind, value, tls: e.tls ? 1 : 0 });
       }
       for (const [name, e] of record.exports) {
-        this._fillGot(e.kind === 0 ? 'func' : 'mem', name, e.value, record);
+        if (e.tls) this._fillGotTls(name, record, e.value);
+        else this._fillGot(e.kind === 0 ? 'func' : 'mem', name, e.value, record);
       }
       if ((flags & RTLD_GLOBAL) || record.isMain) this._registerGlobals(record);
       // Needed walk: depth-first; LAZY/NOW propagate, GLOBAL does not.
@@ -3245,18 +3708,33 @@ export class TinycProcess {
         });
         record.neededRecords.push(dep);
       }
-      // Instantiate.
-      const wasmModule = lib.wasmModule ?? new WebAssembly.Module(lib.bodyBytes);
+      // Instantiate. In a real-tier (shared-memory) process
+      // the module's memory import declaration is widened to
+      // shared first (see patchSharedMemoryImport); the
+      // widened bytes are also what the tier's workers are
+      // booted with, so every replica compiles the same form.
+      const bodyBytes = this.threadTier === 'real'
+        ? patchSharedMemoryImport(lib.bodyBytes) : lib.bodyBytes;
+      record.bodyBytes = bodyBytes;
+      const wasmModule = this.threadTier === 'real'
+        ? new WebAssembly.Module(bodyBytes)
+        : (lib.wasmModule ?? new WebAssembly.Module(bodyBytes));
       record.wasmModule = wasmModule;
-      record.importTypes = parseImportTypes(lib.bodyBytes);
+      record.importTypes = parseImportTypes(bodyBytes);
       const { imports, unresolvedFunctions, unresolvedGotMem, unresolvedOther,
-              unresolvedDataGotFunc } =
+              unresolvedDataGotFunc, unresolvedGotTls } =
         this._buildImports(record, wasmModule);
       if (unresolvedGotMem.length > 0) {
         throw new TinycDylinkError(
           `tinyc: cannot load "${canonical}": unresolved variable(s) ` +
           `${unresolvedGotMem.map((n) => `"${n}"`).join(', ')} ` +
           `(GOT.mem references bind eagerly)`);
+      }
+      if (unresolvedGotTls.length > 0) {
+        throw new TinycDylinkError(
+          `tinyc: cannot load "${canonical}": unresolved TLS variable(s) ` +
+          `${unresolvedGotTls.map((n) => `"${n}"`).join(', ')} ` +
+          `(GOT.tls references bind eagerly)`);
       }
       if (unresolvedDataGotFunc.length > 0) {
         throw new TinycDylinkError(
@@ -3288,26 +3766,120 @@ export class TinycProcess {
           `tinyc: module "${canonical}" does not export ` +
           `__tinyc_dylink_init/__tinyc_dylink_fini; it is not a loadable dylink module`);
       }
+      if (this._threaded &&
+          typeof instance.exports.__tinyc_dylink_swap_sp !== 'function') {
+        throw new TinycDylinkError(
+          `tinyc: module "${canonical}" does not export ` +
+          `__tinyc_dylink_swap_sp; a threaded process requires it ` +
+          `(threads design §3.1)`);
+      }
       // Initialize (post-order: dependencies are loaded by now).
-      record.state = 'initializing';
-      let rc;
-      try {
-        rc = instance.exports.__tinyc_dylink_init(record.handle);
-      } catch (err) {
-        throw new TinycDylinkError(
-          `tinyc: initialization of "${canonical}" trapped: ${err.message}`);
+      // In the real thread tier the coordinator's instance is a
+      // replica that never runs program code (§5.1): init is
+      // deferred to the §5.4 protocol — the primary context
+      // runs it once every context holds its replica.
+      if (this.threadTier === 'real') {
+        record.state = 'instantiated';
+        this._loadOrder.push(record);
+        this._afterModuleLoaded(record);
+        return record;
       }
-      if (rc !== 0) {
-        throw new TinycDylinkError(
-          `tinyc: initialization of "${canonical}" failed: its DllMain returned FALSE`);
-      }
-      record.state = 'loaded';
+      this._initRecord(record);
       this._loadOrder.push(record);
+      this._afterModuleLoaded(record);
       return record;
     } catch (err) {
       this._rollbackLoad(record);
       throw err;
     }
+  }
+
+  /** Run a record's init on this context's instance — the
+   *  single-context path, and the coordinator's replica for a
+   *  host-initiated load in the real tier (§5.4). */
+  _initRecord(record) {
+    record.state = 'initializing';
+    let rc;
+    try {
+      rc = record.instance.exports.__tinyc_dylink_init(record.handle);
+    } catch (err) {
+      throw new TinycDylinkError(
+        `tinyc: initialization of "${record.canonical}" trapped: ${err.message}`);
+    }
+    if (rc !== 0) {
+      throw new TinycDylinkError(
+        `tinyc: initialization of "${record.canonical}" failed: ` +
+        `its DllMain returned FALSE`);
+    }
+    record.state = 'loaded';
+  }
+
+  /** Per-(thread, module) state for a freshly loaded module
+   *  (threads design §3.1, §7.2): TLS areas for every live
+   *  thread (the module-load side of the later-of-two-events
+   *  rule), stack regions for live created threads, and the
+   *  __tls_base installation for the current context. In a
+   *  non-threaded process the same machinery runs with the
+   *  single thread. */
+  _afterModuleLoaded(record) {
+    const meta = record.meta;
+    const tids = this._scheduler ? [...this._scheduler.threads.keys()] : [1];
+    if (meta.tlsSize > 0) {
+      for (const tid of tids) this._tlsAreaFor(tid, record);
+      if (record.tlsBaseGlobal) {
+        const area = record.tlsAreas.get(this._actingTid());
+        if (area !== undefined) record.tlsBaseGlobal.value = area;
+      }
+    }
+    if (!this._scheduler) return;
+    for (const tid of tids) {
+      if (tid !== 1 && meta.stackSize !== undefined) {
+        this._stackRegionFor(tid, record);
+      }
+    }
+    // If a created thread performed this load, init ran on its
+    // step and installed the module's baked stack top — the
+    // span that is the main thread's. Swap in the loading
+    // thread's own region top and record the baked top as the
+    // main thread's saved value.
+    const owner = this._scheduler.contextOwner;
+    if (owner && owner.id !== 1 && meta.stackSize !== undefined &&
+        !owner.savedSp.has(record)) {
+      const swap = record.instance?.exports?.__tinyc_dylink_swap_sp;
+      if (typeof swap === 'function') {
+        const top = this._stackRegionFor(owner.id, record) + meta.stackSize;
+        const baked = swap(top);
+        this._scheduler.mainThread.savedSp.set(record, baked);
+        owner.savedSp.set(record, top);
+      }
+    }
+    this._refreshGotTls(this._actingTid());
+  }
+
+  /** Fill a GOT.tls entry from a TLS definition, first-wins.
+   *  The entry records the definer and the span offset; its
+   *  global's value is the acting thread's address and is
+   *  refreshed at every context install (§7.2). */
+  _fillGotTls(name, definer, offset) {
+    const e = this._gotEntry('tls', name);
+    if (!e.filled) {
+      e.filled = true;
+      e.definer = definer;
+      e.offset = offset;
+      e.global.value = this._tlsAreaFor(this._actingTid(), definer) + offset;
+    }
+  }
+
+  /** A GOT.tls resolution: the global table, then the
+   *  requester's closure — TLS entries only. */
+  _resolveGotTls(name, record) {
+    const g = this._globalSymbols.get(name);
+    if (g && g.tls) return { definer: g.record, offset: g.value };
+    const hit = this._lookupClosure(name, record, false);
+    if (hit && hit.entry.tls) {
+      return { definer: hit.record, offset: hit.entry.value };
+    }
+    return null;
   }
 
   /** Undo a failed load: release the references the record took,
@@ -3361,9 +3933,10 @@ export class TinycProcess {
   // -- dlfcn --------------------------------------------------------------
 
   _dlsym(handle, name) {
+    const tid = this._actingTid();
     if (!handle) {
       const g = this._globalSymbols.get(name);
-      if (g) return g.value;
+      if (g) return this._symbolAddress(g, tid);
       this._setDlerror(
         `tinyc: dlsym: symbol "${name}" not found in the global scope`);
       return 0;
@@ -3374,9 +3947,9 @@ export class TinycProcess {
       return 0;
     }
     const own = record.exports.get(name);
-    if (own) return own.value;
+    if (own) return this._symbolAddress({ ...own, record }, tid);
     const hit = this._lookupClosure(name, record, false);
-    if (hit) return hit.entry.value;
+    if (hit) return this._symbolAddress({ ...hit.entry, record: hit.record }, tid);
     this._setDlerror(
       `tinyc: dlsym: symbol "${name}" not found in "${record.canonical}" ` +
       `or its dependency closure`);
@@ -3450,11 +4023,36 @@ export class TinycProcess {
           proc._setDlerror(err.message);
           return 0;
         }
+        const load = () => proc._loadModule(canonical, {
+          flags, requester, runtimeEdge: true,
+        });
+        if (proc._scheduler && !proc._closureLocal(canonical)) {
+          // Threaded, simulated tier (§9.1): the closure is not
+          // local, so park the calling thread on the retrieval —
+          // other threads rotate meanwhile — and complete the
+          // load synchronously once the closure is local. In
+          // the real tier the guest dlopen is a coordination
+          // operation (§5.4), not this path.
+          if (!proc._jspi) {
+            throw new Error(
+              `tinyc: dlopen: loading "${canonical}" requires a ` +
+              `retrieval, which suspends the calling thread; that ` +
+              `needs WebAssembly.promising (JSPI), which this ` +
+              `engine does not provide (threads design §4.2)`);
+          }
+          const thread = proc._scheduler.actingThread();
+          return proc._scheduler.parkOnHost(thread,
+            () => proc._prefetchClosure(canonical)).then(() => {
+              try {
+                return load().handle;
+              } catch (err) {
+                proc._setDlerror(err.message);
+                return 0;
+              }
+            });
+        }
         try {
-          const rec = proc._loadModule(canonical, {
-            flags, requester, runtimeEdge: true,
-          });
-          return rec.handle;
+          return load().handle;
         } catch (err) {
           proc._setDlerror(err.message);
           return 0;
@@ -3481,14 +4079,46 @@ export class TinycProcess {
     if (this._ended) throw new TinycDylinkError('tinyc: the process has ended');
     const canonical = canonicalModulePath(path, '/sysroot');
     await this._prefetchClosure(canonical);
+    if (this._scheduler && this._scheduler.drivingRun &&
+        !this._scheduler.hostDriving) {
+      // A load's init runs guest code; mid-run it goes through
+      // the rotation as a host operation (§4.1).
+      return this._scheduler.enqueueHostOp(() => {
+        return this._loadModule(canonical, { flags, hostEdge: true }).handle;
+      });
+    }
+    if (this.threadTier === 'real') {
+      // The §5.4 protocol with the coordinator as initiator:
+      // replicas everywhere first, then init here.
+      this._realSetup();
+      const before = this._loadOrder.length;
+      const rec = this._loadModule(canonical, { flags, hostEdge: true });
+      const delta = this._loadOrder.slice(before);
+      if (delta.length > 0) {
+        if (this._real.workers.size > 0) {
+          await this._realBroadcastLoad(delta, 'coordinator', 0);
+        } else {
+          for (const r of delta) this._initRecord(r);
+        }
+      }
+      return rec.handle;
+    }
     const rec = this._loadModule(canonical, { flags, hostEdge: true });
     return rec.handle;
   }
 
   /** Synchronous dlopen: the library and its closure must already
    *  be local (see loadModule for the retrieving form). Returns
-   *  the handle; throws TinycDylinkError on failure. */
+   *  the handle; throws TinycDylinkError on failure. In a
+   *  threaded process the synchronous form does not exist — a
+   *  load can run constructors on another context and wait for
+   *  replicas — and it fails by name (§2.3). */
   dlopen(path, flags = RTLD_LAZY) {
+    if (this._threaded) {
+      throw new TinycDylinkError(
+        'tinyc: dlopen: a threaded process loads asynchronously; ' +
+        'use loadModule (threads design §2.3)');
+    }
     const canonical = canonicalModulePath(path, '/sysroot');
     return this._loadModule(canonical, { flags, hostEdge: true }).handle;
   }
@@ -3520,7 +4150,11 @@ export class TinycProcess {
   }
 
   /** Call an exported function of a loaded module by handle and
-   *  name — the host counterpart of a guest function pointer. */
+   *  name — the host counterpart of a guest function pointer.
+   *  In a threaded process the call executes guest code, so it
+   *  returns a promise: through the scheduler as a host
+   *  operation in the simulated tier, delegated to the main
+   *  thread's worker in the real tier (§2.3). */
   callExport(handle, name, ...args) {
     const record = this._handles.get(handle);
     if (!record?.instance) {
@@ -3531,10 +4165,18 @@ export class TinycProcess {
       throw new TinycDylinkError(
         `tinyc: module "${record.canonical}" does not export "${name}"`);
     }
+    if (this._scheduler) {
+      return this._scheduler.enqueueHostOp(async () => {
+        if (this._jspi) return WebAssembly.promising(fn)(...args);
+        return fn(...args);
+      });
+    }
+    if (this._threaded) return this._realCallExport(record, name, args);
     return fn(...args);
   }
 
-  /** Read a variable exported by a loaded module, as an i32. */
+  /** Read a variable exported by a loaded module, as an i32.
+   *  A TLS variable reads the acting thread's area (§7.2). */
   readExportI32(handle, name) {
     const record = this._handles.get(handle);
     if (!record) throw new TinycDylinkError(`tinyc: readExportI32: unknown handle ${handle}`);
@@ -3543,7 +4185,8 @@ export class TinycProcess {
       throw new TinycDylinkError(
         `tinyc: module "${record.canonical}" does not export variable "${name}"`);
     }
-    return new DataView(this.memory.buffer).getInt32(e.value, true);
+    const addr = this._symbolAddress({ ...e, record }, this._actingTid());
+    return new DataView(this.memory.buffer).getInt32(addr, true);
   }
 
   writeExportI32(handle, name, value) {
@@ -3554,7 +4197,8 @@ export class TinycProcess {
       throw new TinycDylinkError(
         `tinyc: module "${record.canonical}" does not export variable "${name}"`);
     }
-    new DataView(this.memory.buffer).setInt32(e.value, value | 0, true);
+    const addr = this._symbolAddress({ ...e, record }, this._actingTid());
+    new DataView(this.memory.buffer).setInt32(addr, value | 0, true);
   }
 
   /** Load raw module bytes as the process's main module and run
@@ -3563,8 +4207,603 @@ export class TinycProcess {
    *  given, else _start, else main(argc, argv) with the process's
    *  args. Running the main module ends the process: every loaded
    *  module is finalized in reverse load order. Returns the
-   *  entry's return value, or { exitCode } for a _start main. */
+   *  entry's return value, or { exitCode } for a _start main.
+   *  In a threaded process the result comes back as a promise
+   *  for the same shape (§2.3). */
   runMainModule(bytes, options = {}) {
+    if (this._threaded) {
+      if (this.threadTier === 'real') {
+        return this._runMainModuleReal(bytes, options);
+      }
+      return this._runMainModuleSim(bytes, options);
+    }
+    return this._runMainModuleSync(bytes, options);
+  }
+
+  /** The main thread's step in a simulated-tier process: load
+   *  the main module and run its entry on a parkable stack
+   *  (§4.2), so even load-time constructors may block or
+   *  dlopen. Resolves with the runMainModule result shape. */
+  _invokeMainThread(bytes, options) {
+    if (this._main) {
+      throw new TinycDylinkError('tinyc: this process already has a main module');
+    }
+    if (this._modules.size > 0) {
+      throw new TinycDylinkError(
+        'tinyc: a main module must be the first module loaded into a process');
+    }
+    const canonical = canonicalModulePath(options.path ?? '/a.out', '/');
+    const lib = libraryFromBytes(canonical, bytes);
+    this._libraries.set(canonical, lib);
+    const record = this._loadModule(canonical, {
+      flags: RTLD_GLOBAL | RTLD_NOW, isMain: true, lib,
+    });
+    this._main = record;
+    this._holder.instance = record.instance;
+    // The main thread's pthread_key value array is allocated
+    // only now: before the main module's load, the allocator
+    // frontier still starts at 1024, inside the span the main
+    // module's data image is about to land on.
+    const mainThread = this._scheduler?.mainThread;
+    if (mainThread && !mainThread.keyValuesAddr) {
+      mainThread.keyValuesAddr = this._reserveStatic(128 * 4, 4);
+    }
+    const exports = record.instance.exports;
+    const invoke = (fn, args) => this._jspi
+      ? WebAssembly.promising(fn)(...args)
+      : Promise.resolve(fn(...args));
+    if (options.entry !== undefined) {
+      const fn = exports[options.entry];
+      if (typeof fn !== 'function') {
+        throw new TinycDylinkError(
+          `tinyc: main module does not export "${options.entry}"`);
+      }
+      return invoke(fn, options.callArgs ?? []);
+    }
+    if (typeof exports._start === 'function') {
+      return invoke(exports._start, []).then(() => ({ exitCode: 0 }));
+    }
+    if (typeof exports.main === 'function') {
+      const { argc, argv } = this._mainArgv(options);
+      return invoke(exports.main, [argc, argv])
+        .then((rc) => ({ exitCode: rc | 0 }));
+    }
+    throw new TinycDylinkError(
+      'tinyc: main module exports neither _start nor main');
+  }
+
+  /** Drive a simulated-tier run to process end (§2.3's three
+   *  rules, classified by the scheduler), then finalize in
+   *  reverse load order on the main thread's context. */
+  async _runMainModuleSim(bytes, options) {
+    const sched = this._scheduler;
+    const main = sched.mainThread;
+    main.mainEntry = true;
+    main.invoke = () => this._invokeMainThread(bytes, options);
+    sched.drivingRun = true;
+    sched.runnable.push(main);
+    const completion = sched.runCompletion();
+    sched.kick();
+    const end = await completion;
+    sched.drivingRun = false;
+    // Finalizers run with the main thread's context installed.
+    sched.contextOwner = null;
+    this._installThreadContext(main);
+    this._teardown();
+    if (this._io) flushIO(this._io);
+    switch (end.type) {
+      case 'exit': return { exitCode: end.code };
+      case 'entry': return end.result;
+      case 'all-exited': return { exitCode: 0 };
+      case 'fault': throw end.error;
+      case 'deadlock': throw end.error;
+      default: throw new TinycDylinkError('tinyc: the run ended abnormally');
+    }
+  }
+
+  // -- the real tier: coordinator (threads design §5) ------------------
+
+  _workerUrl() {
+    if (this._real.workerUrl) return this._real.workerUrl;
+    this._real.workerUrl = this._workerUrlOption ??
+      new URL('./worker.mjs', import.meta.url).href;
+    return this._real.workerUrl;
+  }
+
+  /** Shared-memory setup for the real tier, done once, lazily:
+   *  the control block, the pthread key destructor table
+   *  (§7.1), the thread-record directory, and the stdin byte
+   *  string with its atomic cursor (§5.6). */
+  _realSetup() {
+    const R = this._real;
+    if (R.control) return;
+    R.control = this._reserveStatic(64, 4);
+    R.keyTableAddr = this._reserveStatic(128 * 4, 4);
+    R.dirAddr = this._reserveStatic(8192 * 4, 4);
+    const stdin = this._stdinOption;
+    if (stdin !== null && stdin !== undefined) {
+      const bytes = typeof stdin === 'string'
+        ? textEncoder.encode(stdin) : stdin;
+      const addr = this._reserveStatic(bytes.length, 4);
+      new Uint8Array(this.memory.buffer).set(bytes, addr);
+      this._writeI32(R.control + CB_STDIN_ADDR, addr);
+      this._writeI32(R.control + CB_STDIN_LEN, bytes.length);
+    }
+    R.mainRecordAddr = this._allocThreadRecord(1);
+  }
+
+  _allocThreadRecord(tid) {
+    const addr = this._reserveStatic(32, 4);
+    const dv = new DataView(this.memory.buffer);
+    for (let i = 0; i < 32; i += 4) dv.setInt32(addr + i, 0, true);
+    if (tid < 8192) this._writeI32(this._real.dirAddr + tid * 4, addr);
+    return addr;
+  }
+
+  _bootData(tid, entry, extra = {}) {
+    const R = this._real;
+    const modules = this._loadOrder.map((record) => ({
+      canonical: record.canonical,
+      memoryBase: record.memoryBase,
+      tableBase: record.tableBase,
+      handle: record.handle,
+      global: record.global ? 1 : 0,
+      manifest: record.lib.manifest,
+      bodyBytes: record.bodyBytes ?? record.lib.bodyBytes,
+      exports: [...record.exports].map(([name, e]) =>
+        [name, { kind: e.kind, value: e.value, tls: e.tls ? 1 : 0 }]),
+      needed: [...record.meta.needed],
+    }));
+    const got = [];
+    for (const [key, e] of this._got) {
+      if (!e.filled) continue;
+      const [kind, name] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+      got.push(kind === 'tls'
+        ? { kind, name, definer: e.definer?.canonical ?? '', offset: e.offset }
+        : { kind, name, value: e.global.value });
+    }
+    const slots = [...this._slotDesc].map(([slot, d]) => ({ slot, ...d }));
+    return {
+      type: 'tinyc-thread-boot',
+      threadId: tid,
+      isMain: tid === 1,
+      memory: this.memory,
+      controlAddr: R.control,
+      keyTableAddr: R.keyTableAddr,
+      dirAddr: R.dirAddr,
+      recordAddr: extra.recordAddr ?? 0,
+      keyArrayAddr: extra.keyArrayAddr ?? 0,
+      args: [...this._args],
+      env: { ...R.envMap },
+      tableFree: this._tableFree,
+      modules, got, slots,
+      entry,
+      regions: extra.regions ?? {},
+    };
+  }
+
+  _spawnWorker(tid, boot, info = {}) {
+    const worker = new Worker(this._workerUrl(), { type: 'module' });
+    const entry = {
+      worker, recordAddr: info.recordAddr ?? 0,
+      alive: true, isMain: Boolean(info.isMain),
+    };
+    this._real.workers.set(tid, entry);
+    worker.addEventListener('message', (ev) => this._onWorkerMessage(tid, ev.data));
+    worker.addEventListener('error', (ev) => {
+      this._settleMainRun({
+        type: 'fault',
+        error: new Error(
+          `tinyc: thread ${tid}'s worker failed: ${ev.message ?? 'unknown error'}`),
+      });
+    });
+    if (entry.recordAddr) {
+      // A worker booted with the current layout has, by
+      // construction, every replica the last task posted.
+      this._writeI32(entry.recordAddr + TR_ACK, this._real.nextLoadSeq - 1);
+    }
+    worker.postMessage(boot);
+    return entry;
+  }
+
+  _settleMainRun(end) {
+    const R = this._real;
+    if (!R || !R.mainRun) return;
+    const { resolve } = R.mainRun;
+    R.mainRun = null;
+    resolve(end);
+  }
+
+  /** Drive a real-tier run: lay out the main module, boot the
+   *  main thread's worker with it, and wait for the process
+   *  end the workers report (§2.3). Finalization runs on the
+   *  coordinator's replicas (§5.5). */
+  async _runMainModuleReal(bytes, options) {
+    if (this._main) {
+      throw new TinycDylinkError('tinyc: this process already has a main module');
+    }
+    if (this._modules.size > 0) {
+      throw new TinycDylinkError(
+        'tinyc: a main module must be the first module loaded into a process');
+    }
+    const canonical = canonicalModulePath(options.path ?? '/a.out', '/');
+    const lib = libraryFromBytes(canonical, bytes);
+    this._libraries.set(canonical, lib);
+    const record = this._loadModule(canonical, {
+      flags: RTLD_GLOBAL | RTLD_NOW, isMain: true, lib,
+    });
+    this._main = record;
+    this._holder.instance = record.instance;
+    this._realSetup();
+    const regions = {};
+    for (const rec of this._loadOrder) {
+      regions[rec.canonical] = {
+        stackBase: null,
+        tlsArea: rec.meta.tlsSize > 0 ? this._tlsAreaFor(1, rec) : 0,
+      };
+    }
+    const boot = this._bootData(1, {
+      kind: 'main', canonical,
+      runOptions: {
+        entry: options.entry ?? null,
+        callArgs: options.callArgs ?? [],
+      },
+    }, { recordAddr: this._real.mainRecordAddr, regions });
+    const settled = new Promise((resolve) => {
+      this._real.mainRun = { resolve };
+    });
+    this._spawnWorker(1, boot, { isMain: true, recordAddr: this._real.mainRecordAddr });
+    const end = await settled;
+    this._realTeardown();
+    if (this._io) flushIO(this._io);
+    switch (end.type) {
+      case 'exit': return { exitCode: end.code };
+      case 'entry': return end.result;
+      case 'all-exited': return { exitCode: 0 };
+      case 'fault': throw end.error;
+      default: throw new TinycDylinkError('tinyc: the run ended abnormally');
+    }
+  }
+
+  /** Process end in the real tier is a coordinator act (§5.5):
+   *  finalize every module on the coordinator's replica — with
+   *  the module's stack top installed through the swap export
+   *  first (§5.1) — in reverse load order, then terminate the
+   *  remaining workers. */
+  _realTeardown() {
+    if (this._ended) return;
+    this._ended = true;
+    for (let i = this._loadOrder.length - 1; i >= 0; i--) {
+      const rec = this._loadOrder[i];
+      if (rec.state !== 'loaded' && rec.state !== 'instantiated') continue;
+      rec.state = 'closed';
+      try {
+        const swap = rec.instance.exports.__tinyc_dylink_swap_sp;
+        if (typeof swap === 'function') {
+          swap(rec.memoryBase + rec.meta.memSize);
+        }
+        rec.instance.exports.__tinyc_dylink_fini(rec.handle, 1);
+      } catch { /* a trapping finalizer cannot stop teardown */ }
+    }
+    for (const { worker } of this._real.workers.values()) {
+      try { worker.terminate(); } catch { /* already gone */ }
+    }
+    this._real.workers.clear();
+  }
+
+  /** §5.4: broadcast a load delta to every live worker and
+   *  collect acknowledgements. initBy 'coordinator' runs the
+   *  inits here once all replicas exist; 'requester' leaves
+   *  init to the requesting worker, which signals through the
+   *  load-done word. Resolves when the load is complete
+   *  process-wide. */
+  async _realBroadcastLoad(delta, initBy, requesterTid) {
+    const R = this._real;
+    const seq = R.nextLoadSeq++;
+    const payloadAddr = this._writeLoadTask(seq, delta, initBy, requesterTid);
+    const view = new Int32Array(this.memory.buffer);
+    Atomics.store(view, (R.control + CB_TASK_ADDR) / 4, payloadAddr);
+    Atomics.store(view, (R.control + CB_LOAD_SEQ) / 4, seq);
+    Atomics.notify(view, (R.control + CB_LOAD_SEQ) / 4);
+    // Collect acks: every live worker's record word reaches
+    // seq. Workers spawned later boot with the post-load
+    // layout and count as acked from their spawn (§5.4).
+    for (;;) {
+      let done = true;
+      for (const [tid, w] of R.workers) {
+        if (!w.alive) continue;
+        if (!w.recordAddr) continue;
+        if (this._readI32(w.recordAddr + TR_ACK) < seq) { done = false; break; }
+      }
+      if (done) break;
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    Atomics.store(view, (R.control + CB_ACKS_DONE) / 4, seq);
+    Atomics.notify(view, (R.control + CB_ACKS_DONE) / 4);
+    if (initBy === 'coordinator') {
+      // Publish each module's baked stack top (the value its
+      // init left in the stack pointer) for the main thread's
+      // worker, whose replica never runs init (§3.1, §5.4).
+      const topsAddr = this._reserveStatic(delta.length * 4, 4);
+      delta.forEach((rec, i) => {
+        this._initRecord(rec);
+        const swap = rec.instance.exports.__tinyc_dylink_swap_sp;
+        let baked = 0;
+        if (typeof swap === 'function') { baked = swap(0); swap(baked); }
+        this._writeI32(topsAddr + i * 4, baked);
+      });
+      this._writeI32(payloadAddr + 36, topsAddr);
+      Atomics.store(view, (R.control + CB_LOAD_DONE) / 4, seq);
+      Atomics.notify(view, (R.control + CB_LOAD_DONE) / 4);
+    } else {
+      // The requesting worker runs init and sets the word.
+      while (this._readI32(R.control + CB_LOAD_DONE) < seq) {
+        if (this._readI32(R.control + CB_LOAD_FAILED) === seq) {
+          throw new TinycDylinkError(this._readTaskError(payloadAddr));
+        }
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      for (const rec of delta) rec.state = 'loaded';
+    }
+    R.lastTaskIndex = this._loadOrder.length;
+    // Spawns gated on this load may proceed with the new layout.
+    for (const spawn of R.spawnQueue.splice(0)) {
+      this._spawnWorker(spawn.tid, this._bootData(spawn.tid,
+        { kind: 'start', slot: spawn.slot, arg: spawn.arg },
+        { recordAddr: spawn.recordAddr, regions: spawn.regions,
+          keyArrayAddr: spawn.keyArrayAddr }),
+        { recordAddr: spawn.recordAddr });
+    }
+  }
+
+  _readTaskError(payloadAddr) {
+    const dv = new DataView(this.memory.buffer);
+    const len = dv.getInt32(payloadAddr + 40, true);
+    const bytes = new Uint8Array(this.memory.buffer)
+      .subarray(payloadAddr + 44, payloadAddr + 44 + len);
+    return `tinyc: load failed in the requesting worker: ` +
+      textDecoder.decode(bytes);
+  }
+
+  /** Serialize a load task into shared memory (see threads.mjs
+   *  for the reader). Returns the payload address. */
+  _writeLoadTask(seq, delta, initBy, requesterTid) {
+    const enc = textEncoder;
+    const chunks = [];
+    let size = 44;
+    const push = (bytes) => { chunks.push(bytes); size += bytes.length; };
+    const gotEntries = [];
+    for (const [key, e] of this._got) {
+      if (!e.filled) continue;
+      const idx = key.indexOf(':');
+      gotEntries.push({
+        kind: key.slice(0, idx), name: key.slice(idx + 1),
+        value: e.global.value,
+        definer: e.definer?.canonical ?? '', offset: e.offset ?? 0,
+      });
+    }
+    const head = new DataView(new ArrayBuffer(44));
+    const requested = delta[delta.length - 1];
+    head.setInt32(0, seq, true);
+    head.setInt32(4, initBy === 'requester' ? 1 : 0, true);
+    head.setInt32(8, requesterTid, true);
+    head.setInt32(12, requested ? requested.handle : 0, true);
+    head.setInt32(16, delta.length, true);
+    head.setInt32(20, this._tableFree, true);
+    head.setInt32(24, gotEntries.length, true);
+    head.setInt32(28, this._slotDesc.size, true);
+    push(new Uint8Array(head.buffer));
+    const w32 = (v) => {
+      const b = new Uint8Array(4);
+      new DataView(b.buffer).setInt32(0, v | 0, true);
+      push(b);
+    };
+    const wstr = (s) => {
+      const bytes = enc.encode(s);
+      w32(bytes.length);
+      push(bytes);
+      const pad = (4 - (bytes.length % 4)) % 4;
+      if (pad) push(new Uint8Array(pad));
+    };
+    for (const g of gotEntries) {
+      w32(g.kind === 'func' ? 0 : g.kind === 'mem' ? 1 : 2);
+      wstr(g.name);
+      w32(g.value);
+      wstr(g.definer);
+      w32(g.offset);
+    }
+    for (const [slot, d] of this._slotDesc) {
+      w32(slot);
+      w32(d.kind === 'stub' ? 0 : d.kind === 'shim' ? 1 : 2);
+      wstr(d.name);
+      wstr(d.params.join(','));
+      wstr(d.results.join(','));
+    }
+    for (const rec of delta) {
+      wstr(rec.canonical);
+      w32(rec.memoryBase);
+      w32(rec.tableBase);
+      w32(rec.handle);
+      w32(rec.global ? 1 : 0);
+      const manifestJson = enc.encode(JSON.stringify(rec.lib.manifest));
+      w32(manifestJson.length);
+      push(manifestJson);
+      const pad = (4 - (manifestJson.length % 4)) % 4;
+      if (pad) push(new Uint8Array(pad));
+      const body = rec.bodyBytes ?? rec.lib.bodyBytes;
+      w32(body.length);
+      push(body);
+      const pad2 = (4 - (body.length % 4)) % 4;
+      if (pad2) push(new Uint8Array(pad2));
+    }
+    const addr = this._reserveStatic(size, 4);
+    const m = new Uint8Array(this.memory.buffer);
+    let at = addr;
+    for (const c of chunks) { m.set(c, at); at += c.length; }
+    return addr;
+  }
+
+  /** A guest dlopen from a worker (§5.4): resolve and lay out
+   *  here, broadcast, and let the requesting worker run init
+   *  and complete its own call. Serialized with other loads. */
+  async _realGuestLoad(msg) {
+    const R = this._real;
+    R.loadQueue.push(msg);
+    if (R.loadsInFlight > 0) return;
+    while (R.loadQueue.length > 0) {
+      const req = R.loadQueue[0];
+      R.loadsInFlight++;
+      try {
+        const canonical = canonicalModulePath(req.path, '/sysroot');
+        await this._prefetchClosure(canonical);
+        const before = this._loadOrder.length;
+        this._loadModule(canonical, {
+          flags: req.flags, requester: null, runtimeEdge: true,
+        });
+        const delta = this._loadOrder.slice(before);
+        await this._realBroadcastLoad(delta, 'requester', req.fromTid);
+      } catch (err) {
+        // Name the failure in the task area the requester polls.
+        const seq = R.nextLoadSeq;
+        const bytes = textEncoder.encode(err.message);
+        const addr = this._reserveStatic(44 + bytes.length + 4, 4);
+        const dv = new DataView(this.memory.buffer);
+        dv.setInt32(addr + 8, req.fromTid, true);
+        dv.setInt32(addr + 40, bytes.length, true);
+        new Uint8Array(this.memory.buffer).set(bytes, addr + 44);
+        const view = new Int32Array(this.memory.buffer);
+        Atomics.store(view, (R.control + CB_TASK_ADDR) / 4, addr);
+        Atomics.store(view, (R.control + CB_LOAD_SEQ) / 4, seq);
+        Atomics.store(view, (R.control + CB_LOAD_FAILED) / 4, seq);
+        Atomics.notify(view, (R.control + CB_LOAD_SEQ) / 4);
+        R.nextLoadSeq++;
+      } finally {
+        R.loadsInFlight--;
+        R.loadQueue.shift();
+      }
+    }
+  }
+
+  /** Delegate a host callExport to the main thread's worker
+   *  (§5.5): the call runs on the main thread's context at its
+   *  next wait point, and the result returns by message. */
+  _realCallExport(record, name, args) {
+    const R = this._real;
+    const main = R.workers.get(1);
+    if (!main || !main.alive) {
+      throw new TinycDylinkError(
+        'tinyc: callExport: a real-tier process delegates calls ' +
+        'to its main thread worker, and none is live');
+    }
+    for (const a of args) {
+      if (typeof a !== 'number') {
+        throw new TinycDylinkError(
+          'tinyc: callExport: real-tier delegation carries i32 arguments only');
+      }
+    }
+    const seq = R.nextCallSeq++;
+    const enc = textEncoder;
+    const cBytes = enc.encode(record.canonical);
+    const nBytes = enc.encode(name);
+    const size = 16 + cBytes.length + 4 + nBytes.length + 4 + args.length * 4;
+    const addr = this._reserveStatic(size + 8, 4);
+    const dv = new DataView(this.memory.buffer);
+    const m = new Uint8Array(this.memory.buffer);
+    let at = addr;
+    dv.setInt32(at, seq, true); at += 4;
+    dv.setInt32(at, 0, true); at += 4;   // result value (worker's)
+    dv.setInt32(at, cBytes.length, true); at += 4;
+    m.set(cBytes, at); at += cBytes.length;
+    at += (4 - (cBytes.length % 4)) % 4;
+    dv.setInt32(at, nBytes.length, true); at += 4;
+    m.set(nBytes, at); at += nBytes.length;
+    at += (4 - (nBytes.length % 4)) % 4;
+    dv.setInt32(at, args.length, true); at += 4;
+    for (const a of args) { dv.setInt32(at, a | 0, true); at += 4; }
+    const view = new Int32Array(this.memory.buffer);
+    Atomics.store(view, (R.control + CB_CALL_TASK_ADDR) / 4, addr);
+    Atomics.store(view, (R.control + CB_CALL_SEQ) / 4, seq);
+    Atomics.notify(view, (R.control + CB_CALL_SEQ) / 4);
+    return new Promise((resolve, reject) => {
+      R.callWaiters.set(seq, { resolve, reject });
+    });
+  }
+
+  _onWorkerMessage(tid, msg) {
+    const R = this._real;
+    if (!R || !msg || typeof msg !== 'object') return;
+    switch (msg.type) {
+      case 'io': {
+        const bytes = msg.bytes instanceof Uint8Array
+          ? msg.bytes : new Uint8Array(msg.bytes);
+        if (msg.stream === 'err') this._byteIO.err(bytes);
+        else this._byteIO.out(bytes);
+        break;
+      }
+      case 'thread-spawn': {
+        const spawn = {
+          tid: msg.threadId, slot: msg.slot, arg: msg.arg,
+          recordAddr: msg.recordAddr, regions: msg.regions,
+          keyArrayAddr: msg.keyArrayAddr,
+        };
+        if (R.loadsInFlight > 0) { R.spawnQueue.push(spawn); break; }
+        this._spawnWorker(spawn.tid, this._bootData(spawn.tid,
+          { kind: 'start', slot: spawn.slot, arg: spawn.arg },
+          { recordAddr: spawn.recordAddr, regions: spawn.regions,
+            keyArrayAddr: spawn.keyArrayAddr }),
+          { recordAddr: spawn.recordAddr });
+        break;
+      }
+      case 'thread-exit': {
+        const w = R.workers.get(tid);
+        if (w) w.alive = false;
+        if (tid === 1) R.mainExited = true;
+        // Rule 3: the main thread pthread_exited and every
+        // other thread has since exited.
+        if (R.mainRun && R.mainExited) {
+          let anyAlive = false;
+          for (const o of R.workers.values()) if (o.alive) anyAlive = true;
+          if (!anyAlive) this._settleMainRun({ type: 'all-exited' });
+        }
+        break;
+      }
+      case 'main-returned':
+        this._settleMainRun({ type: 'entry', result: msg.result });
+        break;
+      case 'process-exit':
+        this._settleMainRun({ type: 'exit', code: msg.code | 0 });
+        break;
+      case 'thread-fault':
+        this._settleMainRun({
+          type: 'fault',
+          error: new Error(`tinyc: thread ${tid}: ${msg.message}`),
+        });
+        break;
+      case 'dlopen-request':
+        void this._realGuestLoad(msg);
+        break;
+      case 'dlclose-note': {
+        const record = this._handles.get(msg.handle);
+        if (record) {
+          try { this._dlclose(msg.handle, null); } catch { /* accounting only */ }
+        }
+        break;
+      }
+      case 'call-done': {
+        const waiter = R.callWaiters.get(msg.seq);
+        if (waiter) {
+          R.callWaiters.delete(msg.seq);
+          if (msg.ok) waiter.resolve(msg.value);
+          else waiter.reject(new TinycDylinkError(msg.message));
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  _runMainModuleSync(bytes, options = {}) {
     if (this._main) {
       throw new TinycDylinkError('tinyc: this process already has a main module');
     }
@@ -3612,7 +4851,9 @@ export class TinycProcess {
     return result;
   }
 
-  _callMain(record, options) {
+  /** Build the (argc, argv) pair for a main entry in the
+   *  process's memory. */
+  _mainArgv(options) {
     const args = (options.args ?? this._args).map(String);
     const strBytes = args.map((a) => textEncoder.encode(a + '\0'));
     const total = strBytes.reduce((n, b) => n + b.length, 0) + (args.length + 1) * 4;
@@ -3626,7 +4867,12 @@ export class TinycProcess {
       sp += strBytes[i].length;
     });
     dv.setUint32(block + args.length * 4, 0, true);
-    return record.instance.exports.main(args.length, block);
+    return { argc: args.length, argv: block };
+  }
+
+  _callMain(record, options) {
+    const { argc, argv } = this._mainArgv(options);
+    return record.instance.exports.main(argc, argv);
   }
 
   /** End the process: finalize every loaded module in reverse
@@ -3645,6 +4891,12 @@ export class TinycProcess {
   }
 
   dispose() {
+    if (this.threadTier === 'real') {
+      for (const { worker } of this._real.workers.values()) {
+        try { worker.terminate(); } catch { /* already gone */ }
+      }
+      this._real.workers.clear();
+    }
     this._teardown();
   }
 }

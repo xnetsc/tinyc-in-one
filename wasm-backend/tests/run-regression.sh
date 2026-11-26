@@ -102,6 +102,11 @@ node tests/run-varargs-printf.mjs tests/test-varargs-printf.wasm; stage_rc $? "n
 echo "== dylink variadic calls (stdio shims through the process loader) =="
 node tests/run-varargs-dylink.mjs; stage_rc $? "node"
 
+echo "== compile test-atomics.c (atomic operations, threads design §8) =="
+$TCC -nostdlib -I include -I ../vendor-tinycc/include -I ../vendor-tinycc/win32/include -o tests/test-atomics.wasm tests/test-atomics.c; stage_rc $? "compile"
+echo "== atomics assertions =="
+node tests/run-atomics.mjs; stage_rc $? "node"
+
 if [ "$FAIL" -eq 0 ]; then
     echo "regression result: PASS"
 else

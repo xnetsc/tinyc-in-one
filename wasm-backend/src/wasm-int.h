@@ -66,6 +66,10 @@ typedef struct WFix {
                      only from address materialisations may never
                      reach the ELF symtab at all; the dylink output
                      classifies undefined symbols by this attribute */
+    int sym_tls;  /* the C symbol carries VT_TLS (a __thread
+                     variable): the dylink output classifies a
+                     defined one into the module's TLS span and an
+                     undefined one as a GOT.tls reference */
 } WFix;
 
 typedef struct WFunc {
