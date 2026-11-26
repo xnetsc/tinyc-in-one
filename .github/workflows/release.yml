@@ -181,6 +181,26 @@ jobs:
           node /tmp/pw/browser-run.mjs /tmp/browser-consumer \
             > "$GITHUB_WORKSPACE/test-outputs/browser-consumer.log" 2>&1
 
+      # The release job assembles the tinyc_web (Pyodide) wheel
+      # from the collected release assets. Every target's
+      # libtcc1.a comes out of a shipped dist tarball except
+      # wasm32-wasi's, which no tarball carries: it exists only
+      # here, as a byproduct of the browser build's native make
+      # in build/wasm32-src. Ship it in a dedicated artifact; the
+      # name matches neither the release job's *release-assets*
+      # collection nor its *test-outputs* bundle, so the file is
+      # an input to the wheel build, never a published asset.
+      - name: Stage the wasm32 libtcc1.a for the Pyodide wheel build
+        run: |
+          mkdir -p pyodide-wheel-inputs/wasm32-wasi
+          cp packages/browser/build/wasm32-src/libtcc1.a \
+            pyodide-wheel-inputs/wasm32-wasi/libtcc1.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyodide-wheel-inputs
+          path: pyodide-wheel-inputs/
+          if-no-files-found: error
+
       # The packaged artifact is what consumers actually get, and
       # no other step inspects it: the consumer tests drive the
       # source tree, so when threads.mjs joined index.mjs's imports
@@ -858,6 +878,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python build tooling
+        run: pip install setuptools wheel
       - name: Download all job artifacts
         uses: actions/download-artifact@v4
         with:
@@ -869,6 +897,53 @@ jobs:
             -exec cp {} release-files/ \;
           (cd all-artifacts && zip -qr "$GITHUB_WORKSPACE/release-files/test-outputs.zip" \
             . -i '*test-outputs*/*')
+          ls -la release-files/
+
+      # The tinyc_web wheel (the Pyodide package) is built here,
+      # from the same collected assets as every other release
+      # file, by the package's own bundling script: the compiler
+      # envelopes and the target manifests come out of the
+      # shipped tinyc-web.zip, each target's libtcc1.a comes out
+      # of its shipped dist tarball, and the sysroot headers come
+      # from this checkout. The one input no tarball carries is
+      # wasm32-wasi's libtcc1.a (a byproduct of the browser
+      # build's native make), which the linux-x64 job ships in
+      # the pyodide-wheel-inputs artifact. The wheel version
+      # comes from packages/pyodide/pyproject.toml.
+      - name: Build the tinyc_web wheel (Pyodide package)
+        run: |
+          mkdir -p wheel-build/tinyc-web wheel-build/libtcc1 wheel-build/dist
+          unzip -q release-files/tinyc-web.zip -d wheel-build/tinyc-web
+          tar -xzf release-files/tinyc-x86_64-linux-gnu.tar.gz \
+            -C wheel-build/dist
+          for t in x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu \
+                   x86_64-linux-android aarch64-linux-android; do
+            mkdir -p "wheel-build/libtcc1/$t"
+            cp "wheel-build/dist/$t/lib/tcc/libtcc1.a" "wheel-build/libtcc1/$t/"
+          done
+          mkdir -p wheel-build/libtcc1/x86_64-windows
+          cp wheel-build/dist/x86_64-w64-mingw32/lib/tcc/win32/lib/libtcc1.a \
+            wheel-build/libtcc1/x86_64-windows/
+          for t in arm64-apple-darwin x86_64-apple-darwin; do
+            mkdir -p "wheel-build/libtcc1/$t" "wheel-build/dist-$t"
+            tar -xzf "release-files/tinyc-$t.tar.gz" -C "wheel-build/dist-$t"
+            cp "wheel-build/dist-$t/lib/tcc/libtcc1.a" "wheel-build/libtcc1/$t/"
+          done
+          mkdir -p wheel-build/libtcc1/wasm32-wasi
+          cp all-artifacts/pyodide-wheel-inputs/wasm32-wasi/libtcc1.a \
+            wheel-build/libtcc1/wasm32-wasi/
+          python3 packages/pyodide/bundle_assets.py \
+            --from-dir wheel-build/tinyc-web \
+            --libtcc1-dir wheel-build/libtcc1
+          python3 - <<'EOF'
+          import json
+          targets = json.load(open("packages/pyodide/tinyc_web/assets/targets.json"))["targets"]
+          assert len(targets) == 9, f"expected 9 bundled targets, got {len(targets)}"
+          print("wheel assets OK: 9 targets bundled")
+          EOF
+          (cd packages/pyodide && python3 -m pip wheel . \
+            -w "$GITHUB_WORKSPACE/release-files" --no-deps --no-build-isolation)
+          ls release-files/tinyc_web-*-py3-none-any.whl
           ls -la release-files/
       - name: Publish GitHub Release
         env:
