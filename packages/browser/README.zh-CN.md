@@ -251,12 +251,14 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 
 ## SIMD 内建函数
 
-每个目标的 sysroot 带同一套 freestanding 头文件集，该集合含
-`wasm32-wasi` 目标的 SIMD 头：`#include <wasm_simd128.h>`——
-WebAssembly SIMD128 内建集——另带 wasm 形态的 `arm_neon.h`、
-`xmmintrin.h`、`emmintrin.h`：NEON 与 SSE/SSE2 表面中映射到
-v128 操作的子集。逐个头的覆盖明细见根 README 的「SIMD 内建
-函数」一节。
+每个目标的 sysroot 带同一套 freestanding 头文件集。`wasm32-wasi`
+的 sysroot 另带只服务 wasm 目标的头：SIMD 兼容头——
+`#include <wasm_simd128.h>`（WebAssembly SIMD128 内建集），
+以及 wasm 形态的 `arm_neon.h`、`xmmintrin.h`、`emmintrin.h`
+（NEON 与 SSE/SSE2 表面中映射到 v128 操作的子集）——还有
+`dlfcn.h` 与 `pthread.h`，其实现是 wasm 的进程装载器与调度器。
+其余目标的这两个头由各自 SDK 提供。逐个头的覆盖明细见根
+README 的「SIMD 内建函数」一节。
 
 ## 测试
 

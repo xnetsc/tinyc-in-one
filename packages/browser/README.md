@@ -252,12 +252,16 @@ const worker = new TinycWorker({ shimModules: ['./my-shims.mjs'] });
 ## SIMD intrinsics
 
 Every target's sysroot carries the same freestanding include
-set, and that set includes the SIMD headers of the `wasm32-wasi`
-target: `#include <wasm_simd128.h>` — the WebAssembly SIMD128
-intrinsic set — plus wasm forms of `arm_neon.h`, `xmmintrin.h`
-and `emmintrin.h`: subsets of the NEON and SSE/SSE2 surfaces
-mapped onto v128 operations. See the root README's "SIMD
-intrinsics" section for the per-header breakdown.
+set. The `wasm32-wasi` sysroot additionally carries the headers
+that serve the wasm target alone: the SIMD compatibility
+headers — `#include <wasm_simd128.h>`, the WebAssembly SIMD128
+intrinsic set, plus wasm forms of `arm_neon.h`, `xmmintrin.h`
+and `emmintrin.h`, subsets of the NEON and SSE/SSE2 surfaces
+mapped onto v128 operations — and `dlfcn.h` and `pthread.h`,
+whose implementations are the wasm process loader and
+scheduler. Other targets take those two headers from their own
+SDKs. See the root README's "SIMD intrinsics" section for the
+per-header breakdown.
 
 ## Tests
 

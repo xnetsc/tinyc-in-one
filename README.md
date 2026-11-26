@@ -253,9 +253,9 @@ Target: `wasm32-wasi` (browser package).
 The WebAssembly SIMD128 intrinsic set over `v128_t`. The same
 sysroot also carries wasm forms of `arm_neon.h`, `xmmintrin.h`
 and `emmintrin.h`: subsets of the NEON and SSE/SSE2 surfaces
-mapped onto v128 operations. The browser package's other
-targets carry the native headers above in their sysroots,
-unchanged.
+mapped onto v128 operations. These four headers ship in the
+browser package's `wasm32-wasi` sysroot only; the native
+headers above ship with the native packages.
 
 ## Packages
 

@@ -217,8 +217,9 @@ RVV 1.0 内建 API 的定长形式，共 12237 个内建。此头要求
 
 WebAssembly SIMD128 内建集，基于 `v128_t`。同一 sysroot 还
 带 wasm 形态的 `arm_neon.h`、`xmmintrin.h`、`emmintrin.h`：
-NEON 与 SSE/SSE2 表面中映射到 v128 操作的子集。浏览器包的
-其它目标，其 sysroot 里带的是上面原生形态的头，原样不变。
+NEON 与 SSE/SSE2 表面中映射到 v128 操作的子集。这四个头在
+浏览器包里只随 `wasm32-wasi` 的 sysroot 出货；上面的原生
+形态头随原生包出货。
 
 ## 各生态包
 

@@ -1732,12 +1732,31 @@ test('export: products come out of the virtual FS as bytes and as a Blob', async
 // Per-target sysroot manifests
 // ---------------------------------------------------------------------
 
+// The wasm32-wasi sysroot additionally carries the headers whose
+// content serves the wasm backend alone: the four SIMD
+// compatibility headers (their intrinsics map onto wasm SIMD128
+// builtins) and dlfcn.h / pthread.h, whose own text restricts them
+// to the wasm target (the process loader and scheduler are host
+// shims there; other targets take these headers from their own
+// SDK). Every other target ships the shared freestanding set.
+const WASM_ONLY_INCLUDE_PATHS = new Set([
+  '/sysroot/include/arm_neon.h',
+  '/sysroot/include/dlfcn.h',
+  '/sysroot/include/emmintrin.h',
+  '/sysroot/include/pthread.h',
+  '/sysroot/include/wasm_simd128.h',
+  '/sysroot/include/xmmintrin.h',
+]);
+const sharedIncludeFiles = sysrootManifest.includeFiles.filter(
+  (e) => !WASM_ONLY_INCLUDE_PATHS.has(e.path));
+
 test('sysroot: every supported target has a manifest with its own lib source', () => {
   for (const target of SUPPORTED_TARGETS) {
     const url = new URL(`./sysroot-manifests/${target}.json`, import.meta.url);
     const manifest = JSON.parse(readFileSync(url, 'utf8'));
     assert.equal(manifest.target, target);
-    assert.deepEqual(manifest.includeFiles, sysrootManifest.includeFiles);
+    assert.deepEqual(manifest.includeFiles,
+      target === 'wasm32-wasi' ? sysrootManifest.includeFiles : sharedIncludeFiles);
     assert.equal(manifest.includeDir, sysrootManifest.includeDir);
     assert.equal(manifest.libFiles.length, 1);
     assert.equal(manifest.libFiles[0].source, `lib/${target}/libtcc1.a`);
@@ -1768,7 +1787,7 @@ test('sysroot: android and darwin manifests resolve through loadSysrootManifest'
   const darwin = await loadSysrootManifest('arm64-apple-darwin');
   assert.equal(darwin.target, 'arm64-apple-darwin');
   assert.equal(darwin.systemHeaders, 'user-sdk');
-  assert.deepEqual(darwin.includeFiles, sysrootManifest.includeFiles);
+  assert.deepEqual(darwin.includeFiles, sharedIncludeFiles);
   const darwinX64 = await loadSysrootManifest('x86_64-apple-darwin');
   assert.equal(darwinX64.systemHeaders, 'user-sdk');
 });

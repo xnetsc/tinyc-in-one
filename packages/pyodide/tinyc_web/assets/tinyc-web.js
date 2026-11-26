@@ -17,7 +17,7 @@ var TinycWeb = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // packages/browser/web-entry.mjs
+  // ../browser/web-entry.mjs
   var web_entry_exports = {};
   __export(web_entry_exports, {
     DEFAULT_RUN_OUTPUT: () => DEFAULT_RUN_OUTPUT,
@@ -76,7 +76,7 @@ var TinycWeb = (() => {
     writeModuleData: () => writeModuleData
   });
 
-  // packages/browser/sysroot-manifests/wasm32-wasi.json
+  // ../browser/sysroot-manifests/wasm32-wasi.json
   var wasm32_wasi_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -185,7 +185,7 @@ var TinycWeb = (() => {
     }
   };
 
-  // packages/browser/sysroot-manifests/x86_64-linux-gnu.json
+  // ../browser/sysroot-manifests/x86_64-linux-gnu.json
   var x86_64_linux_gnu_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -193,18 +193,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -220,10 +208,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -264,14 +248,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -306,7 +282,7 @@ var TinycWeb = (() => {
     }
   };
 
-  // packages/browser/sysroot-manifests/aarch64-linux-gnu.json
+  // ../browser/sysroot-manifests/aarch64-linux-gnu.json
   var aarch64_linux_gnu_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -314,18 +290,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -341,10 +305,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -385,14 +345,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -427,7 +379,7 @@ var TinycWeb = (() => {
     }
   };
 
-  // packages/browser/sysroot-manifests/riscv64-linux-gnu.json
+  // ../browser/sysroot-manifests/riscv64-linux-gnu.json
   var riscv64_linux_gnu_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -435,18 +387,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -462,10 +402,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -506,14 +442,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -548,7 +476,7 @@ var TinycWeb = (() => {
     }
   };
 
-  // packages/browser/sysroot-manifests/x86_64-windows.json
+  // ../browser/sysroot-manifests/x86_64-windows.json
   var x86_64_windows_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -556,18 +484,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -583,10 +499,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -627,14 +539,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -669,7 +573,7 @@ var TinycWeb = (() => {
     }
   };
 
-  // packages/browser/sysroot-manifests/aarch64-linux-android.json
+  // ../browser/sysroot-manifests/aarch64-linux-android.json
   var aarch64_linux_android_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -677,18 +581,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -704,10 +596,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -748,14 +636,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -793,7 +673,7 @@ var TinycWeb = (() => {
     dynamicLinker: "/system/bin/linker64"
   };
 
-  // packages/browser/sysroot-manifests/x86_64-linux-android.json
+  // ../browser/sysroot-manifests/x86_64-linux-android.json
   var x86_64_linux_android_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -801,18 +681,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -828,10 +696,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -872,14 +736,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -917,7 +773,7 @@ var TinycWeb = (() => {
     dynamicLinker: "/system/bin/linker64"
   };
 
-  // packages/browser/sysroot-manifests/arm64-apple-darwin.json
+  // ../browser/sysroot-manifests/arm64-apple-darwin.json
   var arm64_apple_darwin_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -925,18 +781,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -952,10 +796,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -996,14 +836,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
-      },
-      {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -1039,7 +871,7 @@ var TinycWeb = (() => {
     systemHeaders: "user-sdk"
   };
 
-  // packages/browser/sysroot-manifests/x86_64-apple-darwin.json
+  // ../browser/sysroot-manifests/x86_64-apple-darwin.json
   var x86_64_apple_darwin_default = {
     name: "tinyc-sysroot",
     version: 1,
@@ -1047,18 +879,6 @@ var TinycWeb = (() => {
     binPath: "/sysroot/bin/tinyc",
     includeDir: "/sysroot/include",
     includeFiles: [
-      {
-        path: "/sysroot/include/arm_neon.h",
-        source: "include/arm_neon.h"
-      },
-      {
-        path: "/sysroot/include/dlfcn.h",
-        source: "include/dlfcn.h"
-      },
-      {
-        path: "/sysroot/include/emmintrin.h",
-        source: "include/emmintrin.h"
-      },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
@@ -1074,10 +894,6 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
-      },
-      {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -1120,14 +936,6 @@ var TinycWeb = (() => {
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/wasm_simd128.h",
-        source: "include/wasm_simd128.h"
-      },
-      {
-        path: "/sysroot/include/xmmintrin.h",
-        source: "include/xmmintrin.h"
-      },
-      {
         path: "/sysroot/include/tcclib.h",
         source: "tcclib.h"
       }
@@ -1161,7 +969,7 @@ var TinycWeb = (() => {
     systemHeaders: "user-sdk"
   };
 
-  // packages/browser/runtime-shims.mjs
+  // ../browser/runtime-shims.mjs
   var textEncoder = new TextEncoder();
   var textDecoder = new TextDecoder();
   var ShimExit = class extends Error {
@@ -2105,7 +1913,7 @@ var TinycWeb = (() => {
     return result;
   }
 
-  // packages/browser/threads.mjs
+  // ../browser/threads.mjs
   var EPERM = 1;
   var ESRCH = 3;
   var EAGAIN = 11;
@@ -3120,7 +2928,7 @@ var TinycWeb = (() => {
   var rtEncoder = new TextEncoder();
   var rtDecoder = new TextDecoder();
 
-  // packages/browser/vfs-store.mjs
+  // ../browser/vfs-store.mjs
   var MemoryFsStore = class {
     constructor() {
       this.kind = "memory";
@@ -3251,7 +3059,7 @@ var TinycWeb = (() => {
     return store;
   }
 
-  // packages/browser/index.mjs
+  // ../browser/index.mjs
   var import_meta = {};
   var sysrootManifest = wasm32_wasi_default;
   var SYSROOT_MANIFESTS = Object.freeze({
