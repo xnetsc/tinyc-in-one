@@ -945,6 +945,34 @@ jobs:
             -w "$GITHUB_WORKSPACE/release-files" --no-deps --no-build-isolation)
           ls release-files/tinyc_web-*-py3-none-any.whl
           ls -la release-files/
+
+      # The header catalog (tinyc-headers-<version>.md) is
+      # generated here, from the same collected assets as every
+      # other release file: the native builtin header sets come
+      # out of the shipped dist tarballs (the same tarballs the
+      # wheel build extracts its libtcc1.a files from), and the
+      # browser sysroot sets come from the per-target manifests
+      # in this checkout, whose header contents resolve to this
+      # checkout's wasm-backend and vendor include trees - the
+      # same sources the sysroot envelopes were generated from.
+      # The version comes from packages/npm/package.json, the
+      # same source the npm tarball names derive from.
+      - name: Generate the header catalog
+        run: |
+          mkdir -p catalog-build/native
+          tar -xzf release-files/tinyc-x86_64-linux-gnu.tar.gz \
+            -C catalog-build/native
+          for t in arm64-apple-darwin x86_64-apple-darwin; do
+            mkdir -p "catalog-build/native/$t"
+            tar -xzf "release-files/tinyc-$t.tar.gz" \
+              -C "catalog-build/native/$t"
+          done
+          VER=$(python3 -c "import json; print(json.load(open('packages/npm/package.json'))['version'])")
+          python3 tools/gen_header_catalog.py \
+            --native-root catalog-build/native \
+            --version "$VER" \
+            --out "release-files/tinyc-headers-$VER.md"
+          ls -la release-files/
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
