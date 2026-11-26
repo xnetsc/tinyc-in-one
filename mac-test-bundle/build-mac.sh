@@ -67,6 +67,12 @@ step "bundled Darwin headers: stage headers + libSystem stubs into dist"
 # include-libc, and the libtcc1.a build needs stdio.h from there.
 python3 "$BUNDLE/darwin-dist.py" stage "$ROOT/vendor-darwin" "$DIST" \
     || fail "darwin-dist stage"
+# The libtcc1 build runs the freshly built tcc with -B pointing at
+# the source tree (lib/Makefile XFLAGS-unx), so {B} in the repointed
+# config.h resolves to the source tree during the build. Mirror the
+# staged headers there so the build finds the bundled stdio.h.
+cp -r "$DIST/lib/tcc/include-libc" "$SRC_COPY/include-libc" \
+    || fail "mirror include-libc into sources"
 
 step "bundled Darwin headers: repoint search paths at the package"
 # Upstream configure bakes the build machine's SDK include path
