@@ -973,11 +973,14 @@ jobs:
       # the package's shared case list runs against the installed
       # package. The harness dependencies (the pyodide npm
       # package) come from packages/pyodide/tests.
+      # The wheel test drives the sync tier through callPromising,
+      # which needs JSPI (WebAssembly stack switching). Node 22
+      # only exposes it behind --experimental-wasm-jspi.
       - name: Test the tinyc_web wheel in a clean Pyodide
         run: |
           cd packages/pyodide/tests
           npm ci --silent
-          node run_wheel.mjs "$GITHUB_WORKSPACE"/release-files/tinyc_web-*-py3-none-any.whl
+          node --experimental-wasm-jspi run_wheel.mjs "$GITHUB_WORKSPACE"/release-files/tinyc_web-*-py3-none-any.whl
 
       # The browser package is built and packed in the linux-x64
       # job, where the two macOS targets' sysroot envelopes carry
