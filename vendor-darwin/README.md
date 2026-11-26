@@ -59,10 +59,13 @@ itself is `(*__error())`, the stdio streams are `__stdinp` /
 `strerror_r` is the XSI form, `mcontext_t` is a pointer to the
 machine state (unlike Linux, where it is the struct itself),
 siginfo_t is the 104-byte LP64 form with the BSD si_code
-values, fenv has no FE_DENORMAL and fenv_t is 32 bytes on
-x86_64 (x87 fields plus MXCSR) and 8 bytes on arm64
-(FPSR/FPCR), and `struct stat` carries a
-birth-time field (144 bytes, offsets in sys/stat.h).
+values, fenv_t is 16 bytes on both architectures (x87
+control/status/tag plus MXCSR on x86_64, FPSR/FPCR plus
+reserved words on arm64), FE_DENORMAL exists only on arm64
+(0x80, part of FE_ALL_EXCEPT 0x9f), and the arm64 rounding
+constants are the FPCR rounding-mode field (bits 22-23),
+and `struct stat` carries a birth-time field (144 bytes,
+offsets in sys/stat.h).
 
 Opaque or fixed-size types follow the platform's public layout:
 `FILE` is fully opaque; `pthread_t` is a pointer; the pthread

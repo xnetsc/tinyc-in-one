@@ -236,11 +236,11 @@ SA_OFF(struct arm_thread_state64, __fp, 232);
 #endif
 
 #if defined(__x86_64__)
-SA_SIZE(fenv_t, 32);
+SA_SIZE(fenv_t, 16);
 #elif defined(__aarch64__)
-SA_SIZE(fenv_t, 8);
+SA_SIZE(fenv_t, 16);
 #endif
-SA_SIZE(fexcept_t, 4);
+SA_SIZE(fexcept_t, 2);
 
 SA_SIZE(struct tm, 56);
 SA_OFF(struct tm, tm_gmtoff, 40);
