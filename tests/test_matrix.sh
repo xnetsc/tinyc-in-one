@@ -8,6 +8,13 @@
 # native variant's output is also executed. Triples whose dist is
 # absent are reported SKIP, not failed; a present-but-broken variant
 # fails the run. Full output is kept in tests/matrix-test-output.txt.
+#
+# The android triples get a second, hosted battery
+# (tests/android_battery.c): it links against the bundled bionic
+# headers, crt objects and link-time stubs, and the product's
+# PT_INTERP and DT_NEEDED are checked. The product runs only on
+# Android (the emulator job); here the check is link-level - a
+# failed link is itself the unresolved-symbol failure.
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -93,12 +100,46 @@ smoke() {
     fi
 }
 
+# battery_android <triple>
+battery_android() {
+    local triple=$1
+    local dist=$ROOT/build/dist/$triple
+    if [ ! -x "$dist/bin/tinyc" ]; then
+        note "SKIP: $triple battery (not built)"
+        return
+    fi
+    local out=$TMP/battery-$triple
+    if ! "$dist/bin/tinyc" "$ROOT/tests/android_battery.c" -lm -ldl \
+            -o "$out" >> "$LOG" 2>&1; then
+        fail "$triple: hosted battery compile/link failed"
+        return
+    fi
+    local int needed lib
+    int=$(readelf -l "$out" 2>/dev/null \
+        | sed -n 's/.*\[Requesting program interpreter: \(.*\)\]/\1/p')
+    if [ "$int" != "/system/bin/linker64" ]; then
+        fail "$triple: battery interp '$int' != /system/bin/linker64"
+        return
+    fi
+    needed=$(readelf -d "$out" 2>/dev/null | grep 'NEEDED')
+    for lib in libc.so libm.so libdl.so; do
+        if ! echo "$needed" | grep -q "\[$lib\]"; then
+            fail "$triple: battery DT_NEEDED lacks $lib"
+            return
+        fi
+    done
+    note "PASS: $triple battery (interp /system/bin/linker64, NEEDED libc.so/libm.so/libdl.so)"
+    readelf -d "$out" >> "$LOG" 2>&1
+}
+
 smoke x86_64-linux-gnu    elf "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
 smoke aarch64-linux-gnu   elf "AArch64"                       "/lib/ld-linux-aarch64.so.1"
 smoke riscv64-linux-gnu   elf "RISC-V"                        "/lib/ld-linux-riscv64-lp64d.so.1"
 smoke x86_64-w64-mingw32  pe
 smoke aarch64-linux-android elf "AArch64"                     "/system/bin/linker64"
 smoke x86_64-linux-android  elf "Advanced Micro Devices X86-64" "/system/bin/linker64"
+battery_android aarch64-linux-android
+battery_android x86_64-linux-android
 
 echo >> "$LOG"
 if [ $FAIL -eq 0 ]; then note "MATRIX SMOKE: ALL PASS"; else note "MATRIX SMOKE: FAILURES PRESENT"; fi

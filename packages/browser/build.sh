@@ -255,3 +255,11 @@ echo "built: tcc-$TARGET.mjs + tcc-$TARGET.wasm (target: $TARGET)"
 # script wherever the served sysroot is assembled (see
 # build-asset-envelopes.mjs).
 node "$(dirname "$0")/build-asset-envelopes.mjs" --target "$TARGET" --compiler-only
+
+# The sysroot asset envelope for this target, written into
+# ./sysroot/ — the directory the package ships and the one
+# loadSysroot reads the envelope from (see index.mjs). The
+# envelope carries the headers and libtcc1.a the target's
+# sysroot manifest lists, resolved from the repository's header
+# trees and build outputs (see build-sysroot-envelopes.mjs).
+node "$(dirname "$0")/build-sysroot-envelopes.mjs" --target "$TARGET"

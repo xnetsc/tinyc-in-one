@@ -11,15 +11,19 @@
 #   aarch64-linux-gnu       native when the host is aarch64, else cross
 #   riscv64-linux-gnu       cross, glibc sysroot in /usr/riscv64-linux-gnu
 #   x86_64-w64-mingw32      cross, PE output (upstream x86_64-win32 target)
-#   aarch64-linux-android   cross, NDK bionic sysroot (see manifest)
+#   aarch64-linux-android   cross, bundled bionic headers (vendor-android/)
 #   x86_64-linux-android    native when the host is x86_64, else cross
 #
 # A linux-gnu target whose CPU matches the build host is built in
-# native mode: upstream's configure finds the system sysroot itself.
-# Any other linux-gnu target is built in cross mode with an explicit
-# /usr/<triplet> sysroot, which the build host must provide (the
-# cross libc packages). The same rule picks the compiler and sysroot
-# for the host variants below.
+# native mode; any other linux-gnu target is built in cross mode.
+# Either way the dist bundles the target's glibc header tree and
+# crt objects (vendor-glibc/), and the dual-form file's baked
+# search paths take headers and crt objects from the bundle. The
+# programs it compiles link the system libc.so.6 / libm.so.6
+# dynamically: the bundle carries libc.so / libm.so linker scripts
+# that resolve to those runtime files, so no libc development
+# package is needed on the machine running the compiler. The same
+# rule picks the compiler for the host variants below.
 #
 # macOS hosts (arm64-apple-darwin, x86_64-apple-darwin) are recognized
 # build entries: their dual-form kernel (PIE executable with an
@@ -34,10 +38,9 @@
 #
 # Supported here: the two linux-gnu triples and x86_64-w64-mingw32.
 # A Linux variant whose CPU matches the build host is compiled with
-# the host compiler and the system sysroot; any other Linux variant
-# with the <triplet>-gcc cross compiler and a /usr/<triplet> sysroot
-# (the binary is a native-configured TCC for that machine, verified
-# under qemu-user). The MinGW variant uses a MinGW cross gcc; the
+# the host compiler; any other Linux variant with the <triplet>-gcc
+# cross compiler (the binary is a native-configured TCC for that
+# machine, verified under qemu-user). The MinGW variant uses a MinGW cross gcc; the
 # recipe's CC can be overridden with TINYC_MINGW_CC, e.g. plain gcc
 # on a Windows runner. Host variants land in build/dist-host/<triple>/
 # with the same internal layout as build/dist plus a manifest that
@@ -48,6 +51,12 @@
 #   include/             libtcc.h, tinyc_io.h
 #   lib/tcc/libtcc1.a    target runtime library
 #   lib/tcc/include/     TCC builtin headers
+#   lib/tcc/include-libc/  libc headers: glibc (linux-gnu triples),
+#                        bionic (android triples)
+#   lib/tcc/libc/        glibc crt objects + libc.so/libm.so linker
+#                        scripts (linux-gnu triples); bionic crt
+#                        objects + libc/libm/libdl link-time stubs
+#                        (android triples)
 #   manifest.json        target, isa baseline, file locations
 # The Windows variant keeps its support files under lib/tcc/win32/
 # (include/ + lib/), mirroring upstream's win32 layout.
@@ -62,8 +71,11 @@ HOST_ARCH=$(uname -m)
 ALL="x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32 aarch64-linux-android x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin"
 if [ $# -gt 0 ]; then TRIPLES="$*"; else TRIPLES="$ALL"; fi
 
-NDK_SYSROOT=${TINYC_NDK_SYSROOT:-$HOME/workspace/envs/android-toolchain/sdk/ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot}
 ANDROID_API=${TINYC_ANDROID_API:-30}
+# The NDK release vendor-android/ was collected from; the android
+# dists bundle its headers and link inputs, so building or running
+# the android compilers needs no NDK on the machine.
+ANDROID_NDK_VER=r26d
 VER=$(cat vendor-tinycc/VERSION)
 
 # Output formats per backend family, verified against the upstream
@@ -102,6 +114,83 @@ JSON
 # (x86_64-gen.c: xmm used for scalar FP, no ymm/AVX anywhere;
 #  arm64-gen.c: scalar FP on the ARMv8.0-A v-register file, no vector
 #  instruction emission, no SVE; riscv64-gen.c/-asm.c: no RVV).
+# Search paths baked into the linux-gnu dual-form files. {B} is the
+# target's lib/tcc directory inside the package sysroot. The bundled
+# glibc headers (include-libc) are searched before TCC's builtin
+# headers, and the crt objects come from the bundled copies in
+# libc/, so compiling a hosted program needs no system header or
+# crt file. libc/ also carries libc.so and libm.so linker scripts
+# (GROUP entries naming the runtime shared objects); the library
+# search continues into the system library directory passed to
+# gnu_defs, where the runtime libc.so.6 / libm.so.6 themselves are
+# found, so the produced program is an ordinary dynamic ELF whose
+# DT_NEEDED names the system libraries.
+#
+# gnu_defs <system-lib-dir> fills GNU_DEFS for one linux-gnu build.
+gnu_defs() {
+    GNU_DEFS=(
+        '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include-libc:{B}/include"'
+        '-DCONFIG_TCC_CRTPREFIX="{B}/libc"'
+        "-DCONFIG_TCC_LIBPATHS=\"{B}/libc:{B}:$1\""
+    )
+}
+
+# --- bundled glibc headers + crt for the linux-gnu targets --------
+# vendor-glibc/<triple>/ carries the target's glibc header tree and
+# crt objects (LGPL; see vendor-glibc/README.md and the COPYING.LIB
+# in each triple directory). add_glibc_to_dist copies them into a
+# dist and adds the libc.so / libm.so linker scripts described
+# above.
+GLIBC_VER=2.39
+
+# add_glibc_to_dist <dist> <triple>   (linux-gnu triples only)
+add_glibc_to_dist() {
+    local DIST=$1 TRIPLE=$2
+    local VDIR=$ROOT/vendor-glibc/$TRIPLE
+    if [ ! -d "$VDIR" ]; then
+        echo "missing vendored glibc tree: $VDIR" >&2
+        exit 1
+    fi
+    mkdir -p "$DIST/lib/tcc/include-libc" "$DIST/lib/tcc/libc"
+    cp -r "$VDIR/include/." "$DIST/lib/tcc/include-libc/"
+    cp "$VDIR"/crt/*.o "$DIST/lib/tcc/libc/"
+    printf 'GROUP ( libc.so.6 )\n' > "$DIST/lib/tcc/libc/libc.so"
+    printf 'GROUP ( libm.so.6 )\n' > "$DIST/lib/tcc/libc/libm.so"
+    cp "$VDIR/COPYING.LIB" "$DIST/lib/tcc/libc/"
+}
+
+# --- bundled bionic headers + link inputs for the android targets -
+# vendor-android/ carries the bundled header set collected from
+# the NDK sysroot (the bionic surface at the C / POSIX layer: the
+# C standard library, the full POSIX surface and bionic's own
+# libc-level extensions, plus the kernel UAPI headers their
+# include closure pulls in) and, per
+# triple and API level, its crt objects and libc/libm/libdl
+# link-time stubs (Apache-2.0 and BSD-style terms; see
+# vendor-android/README.md and the NOTICE there).
+# add_android_to_dist copies them into a dist, and the android
+# dual-form files' baked search paths take headers and crt objects
+# from the bundle, so compiling a hosted program needs no NDK on
+# the machine running the compiler. The stubs carry the SONAMEs
+# libc.so / libm.so / libdl.so, so the produced program is an
+# ordinary dynamic ELF whose DT_NEEDED names the system bionic
+# libraries, loaded by /system/bin/linker64 at run time.
+
+# add_android_to_dist <dist> <triple>   (android triples only)
+add_android_to_dist() {
+    local DIST=$1 TRIPLE=$2
+    local VDIR=$ROOT/vendor-android
+    local LIBSRC=$VDIR/$TRIPLE/$ANDROID_API/lib
+    if [ ! -d "$LIBSRC" ]; then
+        echo "missing vendored bionic tree: $LIBSRC" >&2
+        exit 1
+    fi
+    mkdir -p "$DIST/lib/tcc/include-libc" "$DIST/lib/tcc/libc"
+    cp -r "$VDIR/include/." "$DIST/lib/tcc/include-libc/"
+    cp "$LIBSRC"/* "$DIST/lib/tcc/libc/"
+    cp "$VDIR/NOTICE" "$DIST/lib/tcc/libc/"
+}
+
 ISA_X86_64="x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation"
 ISA_ARM64="ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE"
 ISA_RISCV64="RV64GC baseline (I/M/A/F/D/C); no Vector extension (RVV) support"
@@ -151,6 +240,11 @@ build_one() {
         cp "$SRC/libtcc.h" "$DIST/include/"
     fi
 
+    case $TRIPLE in
+        *-linux-gnu) add_glibc_to_dist "$DIST" "$TRIPLE" ;;
+        *-android) add_android_to_dist "$DIST" "$TRIPLE" ;;
+    esac
+
     # ---- dual-form file: tcc.c is a unity build (it includes
     # libtcc.c), so one -fPIC compile plus the IO unit, linked as a
     # PIE with dynamic symbols exported, yields a file that both
@@ -169,8 +263,16 @@ build_one() {
     case $TRIPLE in
         *-android)
             EXTRA_JSON=",
-  \"sysroot\": \"$NDK_SYSROOT\",
+  \"libc\": \"bionic headers (the bionic surface at the C/POSIX layer, plus the kernel headers its include closure pulls in) and crt objects bundled (Android NDK $ANDROID_NDK_VER sysroot); programs link the system libc.so/libm.so/libdl.so dynamically\",
+  \"libc_headers\": \"lib/tcc/include-libc\",
+  \"libc_lib\": \"lib/tcc/libc\",
   \"android_api\": $ANDROID_API"
+            ;;
+        *-linux-gnu)
+            EXTRA_JSON=",
+  \"libc\": \"glibc $GLIBC_VER headers and crt objects bundled; programs link the system libc.so.6/libm.so.6 dynamically\",
+  \"libc_headers\": \"lib/tcc/include-libc\",
+  \"libc_lib\": \"lib/tcc/libc\""
             ;;
         *-mingw32)
             FAMILY=pe
@@ -227,6 +329,7 @@ build_host_linux() {
     cp "$SRC/$CT-libtcc1.a" "$DIST/lib/tcc/libtcc1.a"
     cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/include/"
     cp "$SRC/libtcc.h" "$DIST/include/"
+    add_glibc_to_dist "$DIST" "$TRIPLE"
 
     "$HGC" -O2 -fPIC -pie -Wl,--export-dynamic \
         -o "$DIST/bin/tinyc" "$SRC/tcc.c" "$ROOT/core/tcc_io.c" \
@@ -235,6 +338,10 @@ build_host_linux() {
     ln -sf tinyc "$DIST/bin/tcc"
     cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
 
+    local LIBC_JSON=",
+  \"libc\": \"glibc $GLIBC_VER headers and crt objects bundled; programs link the system libc.so.6/libm.so.6 dynamically\",
+  \"libc_headers\": \"lib/tcc/include-libc\",
+  \"libc_lib\": \"lib/tcc/libc\""
     cat > "$DIST/manifest.json" <<EOF
 {
   "name": "tinyc",
@@ -245,7 +352,7 @@ build_host_linux() {
 $(print_outputs elf)
   "dual_file": "bin/tinyc",
   "toolchain_include": "include",
-  "libtcc1": "lib/tcc/libtcc1.a",
+  "libtcc1": "lib/tcc/libtcc1.a"$LIBC_JSON,
   "built_on": "$HOST_ARCH-linux-gnu host, C compiler $HGC",
   "verification": "host smoke test (native execution when the variant matches the test host, qemu-user otherwise): tests/test_hosts.sh"
 }
@@ -374,29 +481,29 @@ EOF
 }
 
 # build_host_for <triple> <cross-name> <target-def> <isa>
-# A Linux host variant is built with the plain host compiler and no
-# baked sysroot when its CPU is the build host's CPU; otherwise with
-# the <triplet>-gcc cross compiler and a /usr/<triplet> sysroot.
+# A Linux host variant is built with the plain host compiler when
+# its CPU is the build host's CPU; otherwise with the <triplet>-gcc
+# cross compiler and a /usr/<triplet> sysroot. Either way the baked
+# search paths are the package paths (gnu_defs): the bundled glibc
+# headers and crt objects, plus the system library directory that
+# carries the runtime shared libraries on the machine the variant
+# runs on (/usr/lib/<triplet> natively, the cross sysroot's lib
+# directory for a cross-built variant).
 build_host_for() {
     local H=$1 CT=$2 TDEF=$3 ISA=$4
     if [ "${H%%-*}" = "$HOST_ARCH" ]; then
-        # Native: no sysroot is baked, but the system paths still
-        # need the multiarch triplet directory. configure detects
-        # the triplet and config.h carries it - inside a block
-        # guarded on no TCC_TARGET_* being defined yet, which the
-        # -DTCC_TARGET_* on the dual-form compile line suppresses.
-        # Bake the paths the triplet would have produced (the same
-        # values the matrix native build ends up with).
+        # Native: the dual-form file is compiled with the host
+        # compiler. Leaving the search paths to configure would
+        # bake the build host's header and crt directories instead
+        # of the package paths.
+        gnu_defs "/usr/lib/$H"
         build_host_linux "$H" "$CT" gcc "$TDEF" "$ISA" \
-            "-DCONFIG_TCC_CRTPREFIX=\"/usr/lib/$H\"" \
-            "-DCONFIG_TCC_LIBPATHS=\"{B}:/usr/lib/$H:/usr/lib\"" \
-            "-DCONFIG_TCC_SYSINCLUDEPATHS=\"{B}/include:/usr/include/$H:/usr/include\""
+            "${GNU_DEFS[@]}"
     else
+        gnu_defs "/usr/$H/lib"
         build_host_linux "$H" "$CT" "$H-gcc" "$TDEF" "$ISA" \
             "-DCONFIG_SYSROOT=\"/usr/$H\"" \
-            '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-            '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-            '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+            "${GNU_DEFS[@]}"
     fi
 }
 
@@ -426,18 +533,20 @@ fi
 
 # build_glibc <triple> <cross-name> <target-def> <isa>
 # linux-gnu targets: native mode when the target CPU is the build
-# host's CPU (configure finds the system sysroot), cross mode with a
-# /usr/<triplet> sysroot otherwise.
+# host's CPU, cross mode otherwise; both modes bundle the target's
+# glibc headers and crt objects (see add_glibc_to_dist) and bake
+# the package search paths (gnu_defs).
 build_glibc() {
     local TRIPLE=$1 CT=$2 TDEF=$3 ISA=$4
     if [ "${TRIPLE%%-*}" = "$HOST_ARCH" ]; then
-        build_one "$TRIPLE" "" native "" "$ISA"
+        gnu_defs "/usr/lib/$TRIPLE"
+        build_one "$TRIPLE" "" native "" "$ISA" \
+            "${GNU_DEFS[@]}"
     else
+        gnu_defs "/usr/$TRIPLE/lib"
         build_one "$TRIPLE" "$CT" cross "$TDEF" "$ISA" \
             "-DCONFIG_SYSROOT=\"/usr/$TRIPLE\"" \
-            '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-            '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-            '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+            "${GNU_DEFS[@]}"
     fi
 }
 
@@ -450,11 +559,10 @@ for TRIPLE in $TRIPLES; do
             build_glibc "$TRIPLE" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64"
             ;;
         riscv64-linux-gnu)
+            gnu_defs "/usr/riscv64-linux-gnu/lib"
             build_one "$TRIPLE" riscv64 cross "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
                 '-DCONFIG_SYSROOT="/usr/riscv64-linux-gnu"' \
-                '-DCONFIG_TCC_CRTPREFIX="{R}/lib"' \
-                '-DCONFIG_TCC_LIBPATHS="{R}/lib:{B}"' \
-                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/include"'
+                "${GNU_DEFS[@]}"
             ;;
         x86_64-w64-mingw32)
             DIST_W=$ROOT/build/dist/$TRIPLE
@@ -465,10 +573,9 @@ for TRIPLE in $TRIPLES; do
         aarch64-linux-android)
             build_one "$TRIPLE" arm64 cross \
                 "-DTCC_TARGET_ARM64 -DTARGETOS_ANDROID=1" "$ISA_ARM64" \
-                "-DCONFIG_SYSROOT=\"$NDK_SYSROOT\"" \
-                "-DCONFIG_TCC_CRTPREFIX=\"{R}/usr/lib/aarch64-linux-android/$ANDROID_API\"" \
-                "-DCONFIG_TCC_LIBPATHS=\"{R}/usr/lib/aarch64-linux-android/$ANDROID_API:{B}\"" \
-                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/usr/include:{R}/usr/include/aarch64-linux-android"' \
+                "-DCONFIG_TCC_CRTPREFIX=\"{B}/libc\"" \
+                "-DCONFIG_TCC_LIBPATHS=\"{B}/libc:{B}\"" \
+                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/aarch64-linux-android"' \
                 '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
             ;;
         x86_64-linux-android)
@@ -483,10 +590,9 @@ for TRIPLE in $TRIPLES; do
             fi
             build_one "$TRIPLE" "$X64_ANDROID_CT" "$X64_ANDROID_MODE" \
                 "-DTCC_TARGET_X86_64 -DTARGETOS_ANDROID=1" "$ISA_X86_64" \
-                "-DCONFIG_SYSROOT=\"$NDK_SYSROOT\"" \
-                "-DCONFIG_TCC_CRTPREFIX=\"{R}/usr/lib/x86_64-linux-android/$ANDROID_API\"" \
-                "-DCONFIG_TCC_LIBPATHS=\"{R}/usr/lib/x86_64-linux-android/$ANDROID_API:{B}\"" \
-                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{R}/usr/include:{R}/usr/include/x86_64-linux-android"' \
+                "-DCONFIG_TCC_CRTPREFIX=\"{B}/libc\"" \
+                "-DCONFIG_TCC_LIBPATHS=\"{B}/libc:{B}\"" \
+                '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/x86_64-linux-android"' \
                 '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
             ;;
         arm64-apple-darwin|x86_64-apple-darwin)

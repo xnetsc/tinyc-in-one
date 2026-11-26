@@ -62,6 +62,14 @@ step "configure (upstream, native osx)"
 (cd "$SRC_COPY" && ./configure --prefix="$DIST") \
     || fail "./configure"
 
+step "bundled Darwin headers: repoint search paths at the package"
+# Upstream configure bakes the build machine's SDK include path
+# into config.h.  Replace it with the package paths so the built
+# compiler uses the bundled Darwin headers (vendor-darwin/) and
+# the bundled libSystem .tbd stubs, never the SDK.
+python3 "$BUNDLE/darwin-dist.py" paths "$SRC_COPY/config.h" \
+    || fail "darwin-dist paths"
+
 step "make + make install (upstream TCC, libtcc1.a, headers)"
 if [ -f "$SRC_COPY/config.mak" ]; then
     (cd "$SRC_COPY" && make -j4) || fail "make"
@@ -79,6 +87,10 @@ if [ -f "$DIST/lib/tcc/libtcc1.a" ]; then
 else
     fail "dist/lib/tcc/libtcc1.a missing"
 fi
+
+step "bundled Darwin headers: stage headers + libSystem stubs into dist"
+python3 "$BUNDLE/darwin-dist.py" stage "$ROOT/vendor-darwin" "$DIST" \
+    || fail "darwin-dist stage"
 
 step "library form: libtinyc.dylib (clang, unity build of patched tcc.c)"
 DYLIB=$WORK/libtinyc.dylib

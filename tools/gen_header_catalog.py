@@ -19,9 +19,13 @@ never from a hand-maintained list:
   Native packages: the builtin include directory of each triple's
   dist as it ships - lib/tcc/include, or lib/tcc/win32/include
   for the MinGW triple - plus the dist's toolchain include/
-  directory (libtcc.h, tinyc_io.h). The release workflow
-  assembles these from the shipped dist tarballs; a local run
-  reads build/dist by default.
+  directory (libtcc.h, tinyc_io.h). The linux-gnu, android and
+  darwin dists also bundle a libc header tree (glibc, bionic and
+  the bundled Darwin headers respectively) in
+  lib/tcc/include-libc; it is summarized per directory rather
+  than listed per header. The
+  release workflow assembles these from the shipped dist
+  tarballs; a local run reads build/dist by default.
 
 Every per-header summary is extracted mechanically from the file
 itself: its first block comment, its line count, its #define
@@ -235,6 +239,24 @@ def native_sections(repo, native_root):
                         os.path.join(plain_inc, fn))))
             section["rows"] = rows
             section["tree"] = None
+            libc_inc = os.path.join(dist, "lib", "tcc", "include-libc")
+            if os.path.isdir(libc_inc):
+                tree_files = []
+                for dirpath, dirnames, filenames in os.walk(libc_inc):
+                    dirnames.sort()
+                    for fn in sorted(filenames):
+                        tree_files.append(os.path.relpath(
+                            os.path.join(dirpath, fn), libc_inc))
+                by_dir = {}
+                for rel in tree_files:
+                    d = os.path.dirname(rel) or "."
+                    by_dir[d] = by_dir.get(d, 0) + 1
+                section["libc_tree"] = {"total": len(tree_files),
+                                        "by_dir": by_dir}
+                section["libc_names"] = sorted(
+                    rel for rel in tree_files
+                    if os.path.dirname(rel) == ""
+                    and rel.endswith(".h"))
         else:
             raise SystemExit(
                 f"{triple}: no lib/tcc/include or lib/tcc/win32/include "
@@ -298,6 +320,7 @@ def main():
     native_names = set()
     for sec in n_sections:
         native_names |= {name for name, _ in sec["rows"]}
+        native_names |= set(sec.get("libc_names") or [])
     libc_bundled = sorted(n for n in LIBC_HEADER_NAMES
                           if n in bundled_names or n in native_names)
 
@@ -333,16 +356,16 @@ def main():
                "listed in each native section below (TCC's own "
                "headers, including the SIMD intrinsic headers) "
                "plus, per package, the toolchain headers in its "
-               "`include/` directory. Hosted libc headers are not "
-               "part of the native packages: a native target's "
-               "system headers come from the target platform "
-               "itself. The one exception is the MinGW package, "
-               "which bundles the win32 header tree summarized in "
-               "its section.")
+               "`include/` directory. The linux-gnu packages also "
+               "bundle the glibc header tree, the android packages "
+               "the bionic header tree and the darwin packages "
+               "their bundled Darwin header set, each summarized in "
+               "its section, and the MinGW package bundles the "
+               "win32 header tree summarized in its section.")
     if libc_bundled:
         out.append("")
-        out.append("Of the common libc headers, only these appear "
-                   "in the bundled builtin sets: "
+        out.append("Of the common libc headers, these are part of "
+                   "the bundled sets: "
                    + ", ".join(f"`{n}`" for n in libc_bundled) + ".")
     out.append("")
     out.append("Headers with the same name in different sections "
@@ -382,6 +405,17 @@ def main():
                        f"bundled win32 header tree: {tree['total']} "
                        "further headers, not listed individually. "
                        "Files per directory:")
+            out.append("")
+            for d in sorted(tree["by_dir"]):
+                label = "(top level)" if d == "." else f"`{d}/`"
+                out.append(f"- {label}: {tree['by_dir'][d]}")
+        if sec.get("libc_tree"):
+            tree = sec["libc_tree"]
+            out.append("")
+            out.append(f"The dist also bundles its libc header "
+                       f"tree in `lib/tcc/include-libc`: "
+                       f"{tree['total']} headers, not listed "
+                       "individually. Files per directory:")
             out.append("")
             for d in sorted(tree["by_dir"]):
                 label = "(top level)" if d == "." else f"`{d}/`"

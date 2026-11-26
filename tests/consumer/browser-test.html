@@ -3,13 +3,16 @@
 <title>tinyc browser consumer test</title>
 <!--
   Browser consumer test page. Serve the directory containing this
-  file over HTTP with ./pkg/ holding the built browser package
-  (index.mjs, tcc-<target>.mjs/.wasm, sysroot manifests and files),
-  then drive it with browser-run.mjs (Playwright) or any headless
-  Chrome. Results land on window.__TINYC_LOG__ / __TINYC_OK__ /
-  __TINYC_DONE__.
+  file over HTTP with ./pkg/ holding the unpacked packaged
+  artifact (index.mjs, the per-target compiler envelopes
+  tcc-<target>.tinyc.js and the sysroot manifests), including
+  the sysroot envelopes the artifact itself ships under
+  ./pkg/sysroot/ — the canonical location the loader derives
+  from the package's own URL. Drive it with browser-run.mjs
+  (Playwright) or any headless Chrome. Results land on
+  window.__TINYC_LOG__ / __TINYC_OK__ / __TINYC_DONE__.
 
-  The test consumes the built package only:
+  The test consumes the packaged artifact only:
     1. wasm32-wasi: compile a hello that writes through the WASI
        fd_write import, then run the product through the package's
        shim layer (runWasmModule) and assert the captured output and
@@ -26,6 +29,12 @@
     3. x86_64-linux-gnu: cross-compile an object file and verify the
        ELF header and e_machine (format check only; the product is
        not runnable in a browser).
+    4. The shipped sysroot, loaded the way a consumer loads it
+       (loadTinyc with sysroot: true, envelopes fetched from
+       ./pkg/sysroot/): a wasm32-wasi program that includes
+       <stdatomic.h> compiles and runs against it, and an
+       x86_64-linux-gnu translation unit including <stdint.h>
+       cross-compiles to an ELF object against it.
 -->
 <script type="module">
 import { loadTinyc, runWasmModule, TCC_OUTPUT } from './pkg/index.mjs';
@@ -126,6 +135,42 @@ try {
     obj[0] === 0x7f && obj[1] === 0x45 && obj[2] === 0x4c && obj[3] === 0x46);
   check('x86_64 product e_machine is 62 (EM_X86_64)',
     obj[18] === 62 && obj[19] === 0);
+
+  // Section 4: the shipped sysroot. The sysroot envelopes are
+  // fetched from ./pkg/sysroot/, the canonical location the
+  // loader derives from the package's own URL.
+  const ts = await loadTinyc({ target: 'wasm32-wasi', sysroot: true });
+  const sts = ts.createState();
+  check('sysroot state compileString returns 0',
+    sts.compileString([
+      '#include <stdatomic.h>',
+      'static _Atomic int counter;',
+      'int main(void) {',
+      '  for (int i = 0; i < 100; i++) atomic_fetch_add(&counter, 1);',
+      '  return atomic_load(&counter) == 100 ? 42 : 2;',
+      '}',
+    ].join('\n')) === 0);
+  check('sysroot <stdatomic.h> program returns 42',
+    await sts.run([]) === 42);
+  sts.delete();
+
+  const tx = await loadTinyc({ target: 'x86_64-linux-gnu', sysroot: true });
+  tx.addFile('/s.c', [
+    '#include <stdint.h>',
+    '#include <stddef.h>',
+    'uint64_t widen(uint32_t v) { return (uint64_t)v + (uint64_t)(size_t)sizeof(v); }',
+    '',
+  ].join('\n'));
+  // callMain is the raw compiler entry: unlike the state API it
+  // does not register the sysroot include directory, so the
+  // consumer names it explicitly.
+  const rc4 = tx.callMain(['-I/sysroot/include', '-c', '/s.c', '-o', '/s.o']);
+  check('x86_64 sysroot cross compile returns 0', rc4 === 0);
+  const sobj = tx.exportFile('/s.o');
+  check('x86_64 sysroot product is an ELF object',
+    sobj[0] === 0x7f && sobj[1] === 0x45 && sobj[2] === 0x4c && sobj[3] === 0x46);
+  check('x86_64 sysroot product e_machine is 62 (EM_X86_64)',
+    sobj[18] === 62 && sobj[19] === 0);
 } catch (e) {
   ok = false;
   log.push('ERROR: ' + ((e && e.stack) || e));

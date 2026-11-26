@@ -122,6 +122,18 @@ function main() {
   for (const entry of entries) {
     const p = join(srcRoot, entry.source);
     if (!existsSync(p)) {
+      // A missing library entry leaves a headers-only envelope:
+      // the library is a build output that may not exist where
+      // the envelope is generated (the macOS targets' libtcc1.a
+      // is built on macOS hosts). The omission is printed, and
+      // callers that stage the sources (bundle_assets.py,
+      // build-sysroot-envelopes.mjs) report or reject it at
+      // their own layer. A missing header is a broken sysroot
+      // and stays fatal.
+      if (entry.source.startsWith('lib/')) {
+        console.log(`notice: sysroot source not staged, entry omitted from the envelope: ${p} (entry ${entry.source})`);
+        continue;
+      }
       throw new Error(`sysroot source not found: ${p} (entry ${entry.source})`);
     }
     files[entry.source] = readFileSync(p).toString('base64');

@@ -141,25 +141,24 @@ jobs:
           bash packages/java/build.sh > test-outputs/java-build.log 2>&1
           bash packages/java/run-tests.sh > test-outputs/java-tests.log 2>&1
 
-      # The committed script bundle (packages/browser/tinyc-web.js)
-      # is a build product of the ESM sources, and every test in
-      # this pipeline drives the ESM entry — so a bundle that was
-      # not rebuilt after a source change ships stale code without
-      # anything noticing (it once kept a pre-replay TinycState.run
-      # for a whole release line). Rebuild it from source here and
-      # byte-compare against the committed copy.
-      - name: Web bundle freshness - committed tinyc-web.js must match a fresh build
+      # Artifact gate, part 1: the shipped browser sysroot sets
+      # must be self-contained. Every header a per-target
+      # manifest ships is scanned for the headers it includes;
+      # each must resolve inside the same target's shipped set.
+      # The browser scope of the host-provided registry is empty
+      # by design: the sysroot is freestanding, so nothing may
+      # rely on a host header. The audit reads only the
+      # manifests and the include trees, so it runs before the
+      # browser build and a header-set gap fails in seconds.
+      - name: Artifact gate - browser header closure audit
         run: |
-          cd packages/browser
-          cp tinyc-web.js /tmp/tinyc-web.committed.js
-          node build-web-bundle.mjs > "$GITHUB_WORKSPACE/test-outputs/web-bundle-build.log" 2>&1
-          if ! cmp -s tinyc-web.js /tmp/tinyc-web.committed.js; then
-            echo "::error::STALE WEB BUNDLE: packages/browser/tinyc-web.js differs from a fresh build of the current sources. Rebuild it with 'npm run build:web' in packages/browser and commit the result."
-            exit 1
-          fi
-          echo "tinyc-web.js is up to date with the sources."
+          python3 tests/artifact-gate/check_header_closure.py \
+            --manifests packages/browser/sysroot-manifests \
+            --include-root wasm-backend/include \
+            --include-root vendor-tinycc/include \
+            --tcclib vendor-tinycc/tcclib.h
 
-      - name: Browser package - build all targets, real-browser consumer test
+      - name: Browser package - build all targets
         run: |
           cd packages/browser
           for t in wasm32-wasi x86_64-linux-gnu aarch64-linux-gnu \
@@ -167,10 +166,54 @@ jobs:
                    x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin; do
             TARGET=$t ./build.sh >> "$GITHUB_WORKSPACE/test-outputs/browser-build.log" 2>&1
           done
+
+      # Artifact gate, part 2: from here on, the browser package
+      # is tested only as the packaged artifact. The npm tarball
+      # is packed from the built package and unpacked into a
+      # clean directory; the gate asserts the tarball carries
+      # the full ESM import closure of its entry points and one
+      # sysroot envelope per target under sysroot/, and that the
+      # script bundle inside the tarball matches a fresh build
+      # of the sources.
+      - name: Artifact gate - pack the browser tarball, check contents and bundle
+        run: |
+          cd packages/browser
+          rm -f tinyc-web-*.tgz
+          npm pack > "$GITHUB_WORKSPACE/test-outputs/npm-pack.log" 2>&1
+          rm -rf /tmp/pkg-gate && mkdir -p /tmp/pkg-gate
+          tar -xzf tinyc-web-*.tgz -C /tmp/pkg-gate --strip-components=1
+          rm -f tinyc-web-*.tgz
           cd "$GITHUB_WORKSPACE"
-          rm -rf /tmp/browser-consumer && mkdir -p /tmp/browser-consumer/pkg
-          tar cf - --exclude=build --exclude=node_modules -C packages/browser . \
-            | tar xf - -C /tmp/browser-consumer/pkg
+          node tests/artifact-gate/check_import_closure.mjs /tmp/pkg-gate
+          node tests/artifact-gate/check_sysroot_envelopes.mjs /tmp/pkg-gate
+          cd packages/browser
+          node build-web-bundle.mjs > "$GITHUB_WORKSPACE/test-outputs/web-bundle-build.log" 2>&1
+          if ! cmp -s tinyc-web.js /tmp/pkg-gate/tinyc-web.js; then
+            echo "::error::STALE WEB BUNDLE: the tinyc-web.js inside the packaged tarball differs from a fresh build of the current sources. Rebuild it with 'npm run build:web' in packages/browser and commit the result."
+            exit 1
+          fi
+          echo "tinyc-web.js in the tarball is up to date with the sources."
+
+      # Artifact gate, part 3: the gate loads every target's
+      # compiler from the tarball and its sysroot from the
+      # sysroot envelopes the tarball itself ships under
+      # sysroot/ — the same bytes a consumer's loadSysroot
+      # fetches — compiles every shipped header standalone
+      # against that sysroot, and compiles and runs whole
+      # programs on the runnable target. The program runs go
+      # through the process layer's simulated tier, which needs
+      # JSPI, so the gate runs on emsdk's Node like the thread
+      # suite.
+      - name: Artifact gate - shipped-header gate and real-compile suite
+        run: |
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          "$EMSDK_NODE" --experimental-wasm-jspi tests/artifact-gate/run_header_gate.mjs \
+            --pkg /tmp/pkg-gate --sysroot-dir /tmp/pkg-gate/sysroot
+
+      - name: Browser package - real-browser consumer test on the tarball
+        run: |
+          rm -rf /tmp/browser-consumer && mkdir -p /tmp/browser-consumer
+          cp -r /tmp/pkg-gate /tmp/browser-consumer/pkg
           cp tests/consumer/browser-test.html /tmp/browser-consumer/index.html
           rm -rf /tmp/pw && mkdir -p /tmp/pw && cd /tmp/pw
           npm init -y >/dev/null
@@ -200,51 +243,6 @@ jobs:
           name: pyodide-wheel-inputs
           path: pyodide-wheel-inputs/
           if-no-files-found: error
-
-      # The packaged artifact is what consumers actually get, and
-      # no other step inspects it: the consumer tests drive the
-      # source tree, so when threads.mjs joined index.mjs's imports
-      # without joining the package.json "files" list, the
-      # published 0.5.0 tarball (and the release zip) shipped an
-      # ESM entry that could not be imported at all. Pack the npm
-      # tarball here and assert that the whole relative-import
-      # closure of the ESM entry points is inside it; the release
-      # zip gets the same assertion after Collect release assets.
-      - name: Browser package contents - npm tarball must contain the full import closure
-        run: |
-          cat > /tmp/check-package-contents.mjs <<'EOF'
-          import fs from 'node:fs';
-          import path from 'node:path';
-          const root = process.argv[2];
-          const seen = new Set();
-          const missing = [];
-          const queue = ['index.mjs', 'worker.mjs'].map((e) => path.join(root, e));
-          while (queue.length) {
-            const file = queue.pop();
-            const rel = path.relative(root, file);
-            if (seen.has(rel)) continue;
-            seen.add(rel);
-            if (!fs.existsSync(file)) { missing.push(rel); continue; }
-            if (!file.endsWith('.mjs') && !file.endsWith('.js')) continue;
-            const text = fs.readFileSync(file, 'utf8');
-            const re = /(?:from|import)\s*['"](\.\/[^'"]+)['"]|new URL\(\s*['"](\.\/[^'"]+)['"]/g;
-            let m;
-            while ((m = re.exec(text))) queue.push(path.join(path.dirname(file), m[1] || m[2]));
-          }
-          if (missing.length) {
-            for (const f of missing)
-              console.log(`::error::PACKAGE CONTENT GAP: '${f}' is imported by the tinyc-web ESM entry points but is missing from the packaged artifact. Add it to the packaging manifest (package.json "files" / the release zip list).`);
-            process.exit(1);
-          }
-          console.log(`package contents OK: all ${seen.size} files in the ESM import closure are present.`);
-          EOF
-          cd packages/browser
-          rm -f tinyc-web-*.tgz
-          npm pack > "$GITHUB_WORKSPACE/test-outputs/npm-pack.log" 2>&1
-          rm -rf /tmp/pkg-contents && mkdir -p /tmp/pkg-contents
-          tar -xzf tinyc-web-*.tgz -C /tmp/pkg-contents --strip-components=1
-          rm -f tinyc-web-*.tgz
-          node /tmp/check-package-contents.mjs /tmp/pkg-contents
 
       - name: Wasm backend - full regression suite
         run: |
@@ -308,16 +306,21 @@ jobs:
             sysroot-manifest.json sysroot-manifests sysroot tcc-*.tinyc.js)
           ls -la release-assets/
 
-      # Same import-closure assertion as the npm tarball step, run
-      # against the zip the release actually ships (its file list
-      # is a separate manifest in the step above, and it drifted
-      # the same way in 0.5.0). The checker script is the one the
-      # tarball step wrote to /tmp.
-      - name: Browser package contents - release zip must contain the full import closure
+      # The release zip is a separate packaging manifest from
+      # the npm tarball, so the artifact gate runs against it
+      # too: the ESM import closure, the sysroot envelopes, and
+      # the shipped-header gate in headers-only mode (the
+      # whole-program runs already covered the same compiler
+      # and sysroot bytes through the tarball).
+      - name: Artifact gate - release zip contents and headers
         run: |
-          rm -rf /tmp/zip-contents && mkdir -p /tmp/zip-contents
-          unzip -q release-assets/tinyc-web.zip -d /tmp/zip-contents
-          node /tmp/check-package-contents.mjs /tmp/zip-contents
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          rm -rf /tmp/zip-gate && mkdir -p /tmp/zip-gate
+          unzip -q release-assets/tinyc-web.zip -d /tmp/zip-gate
+          node tests/artifact-gate/check_import_closure.mjs /tmp/zip-gate
+          node tests/artifact-gate/check_sysroot_envelopes.mjs /tmp/zip-gate
+          "$EMSDK_NODE" --experimental-wasm-jspi tests/artifact-gate/run_header_gate.mjs \
+            --pkg /tmp/zip-gate --sysroot-dir /tmp/zip-gate/sysroot --headers-only
 
       - uses: actions/upload-artifact@v4
         with:
@@ -712,6 +715,15 @@ jobs:
           fi
           grep -c '^PASS: ' test-outputs/mac-tests.log
 
+      # SDK-free verification of the bundled Darwin headers: the
+      # battery and the ABI probe build and run with the SDK
+      # hidden, the probe output diffed against the SDK-built
+      # reference. A failure fails the job; the log lands in
+      # test-outputs with the rest.
+      - name: SDK-free battery (bundled Darwin headers)
+        run: |
+          bash tests/macos/run_macos_sdkfree.sh > test-outputs/mac-sdkfree.log 2>&1
+
       # SIMD execution evidence on this platform: the script
       # runs the shipped bundle kernel built above on the SIMD
       # probes as Mach-O executables, diffed against clang:
@@ -733,6 +745,13 @@ jobs:
           # bundle dist, as in the Linux layout; stage them too.
           cp mac-test-bundle/dist/lib/tcc/*.o "$SD/lib/tcc/"
           cp -r mac-test-bundle/dist/lib/tcc/include "$SD/lib/tcc/include"
+          # The bundled Darwin headers and the .tbd link stubs are
+          # part of the bundle dist too (darwin-dist.py staged
+          # them); the packages below are built from stage-dist,
+          # so stage them here as well.
+          cp -r mac-test-bundle/dist/lib/tcc/include-libc "$SD/lib/tcc/include-libc"
+          mkdir -p "$SD/lib/tcc/lib"
+          cp mac-test-bundle/dist/lib/tcc/lib/*.tbd "$SD/lib/tcc/lib/"
           cp mac-test-bundle/dist/include/libtcc.h "$SD/include/"
           cp core/tinyc_io.h "$SD/include/"
           python3 - "$SD/manifest.json" "$TRIPLE" '${{ matrix.isa }}' <<'EOF'
@@ -749,6 +768,9 @@ jobs:
               "isa": isa, "outputs": outputs, "dual_file": "bin/tinyc",
               "toolchain_include": "include",
               "libtcc1": "lib/tcc/libtcc1.a",
+              "libc": "Darwin libc headers bundled (vendor-darwin, self-written); programs link the system libSystem.B.dylib dynamically",
+              "libc_headers": "lib/tcc/include-libc",
+              "libc_lib": "lib/tcc/lib",
           }
           with open(path, "w") as f:
               json.dump(manifest, f, indent=2)
@@ -946,6 +968,60 @@ jobs:
           ls release-files/tinyc_web-*-py3-none-any.whl
           ls -la release-files/
 
+      # The wheel is tested the way a consumer receives it: the
+      # wheel file itself is installed into a clean Pyodide, and
+      # the package's shared case list runs against the installed
+      # package. The harness dependencies (the pyodide npm
+      # package) come from packages/pyodide/tests.
+      - name: Test the tinyc_web wheel in a clean Pyodide
+        run: |
+          cd packages/pyodide/tests
+          npm ci --silent
+          node run_wheel.mjs "$GITHUB_WORKSPACE"/release-files/tinyc_web-*-py3-none-any.whl
+
+      # The browser package is built and packed in the linux-x64
+      # job, where the two macOS targets' sysroot envelopes carry
+      # their headers only: their libtcc1.a is a macOS build
+      # product that does not exist on that runner. The macOS
+      # jobs' dist tarballs are collected above like every other
+      # release file (the wheel build extracts the same
+      # libtcc1.a files from them), so the two envelopes are
+      # regenerated here with their libraries and the zip is
+      # repacked; the gate step below then holds the published
+      # zip to the complete-envelope standard.
+      - name: Complete the macOS sysroot envelopes in the release zip
+        run: |
+          mkdir -p darwin-envelopes/dist-arm64 darwin-envelopes/dist-x86_64 darwin-envelopes/web
+          tar -xzf release-files/tinyc-arm64-apple-darwin.tar.gz \
+            -C darwin-envelopes/dist-arm64
+          tar -xzf release-files/tinyc-x86_64-apple-darwin.tar.gz \
+            -C darwin-envelopes/dist-x86_64
+          unzip -q release-files/tinyc-web.zip -d darwin-envelopes/web
+          node packages/browser/build-sysroot-envelopes.mjs \
+            --target arm64-apple-darwin --target x86_64-apple-darwin \
+            --lib arm64-apple-darwin="$PWD/darwin-envelopes/dist-arm64/lib/tcc/libtcc1.a" \
+            --lib x86_64-apple-darwin="$PWD/darwin-envelopes/dist-x86_64/lib/tcc/libtcc1.a" \
+            --require-libs
+          cp packages/browser/sysroot/sysroot-arm64-apple-darwin.tinyc.js \
+             packages/browser/sysroot/sysroot-x86_64-apple-darwin.tinyc.js \
+             darwin-envelopes/web/sysroot/
+          rm release-files/tinyc-web.zip
+          (cd darwin-envelopes/web && \
+            zip -qr "$GITHUB_WORKSPACE/release-files/tinyc-web.zip" .)
+          unzip -l release-files/tinyc-web.zip | grep 'sysroot-.*\.tinyc\.js'
+
+      # Artifact gate, release side: the published zip's sysroot
+      # envelopes are checked with the macOS exception lifted
+      # (--require-libs): after the completion step above, every
+      # target's envelope, the macOS two included, must carry
+      # its libtcc1.a.
+      - name: Artifact gate - release zip sysroot envelopes, macOS libraries required
+        run: |
+          rm -rf /tmp/release-zip-gate && mkdir -p /tmp/release-zip-gate
+          unzip -q release-files/tinyc-web.zip -d /tmp/release-zip-gate
+          node tests/artifact-gate/check_sysroot_envelopes.mjs \
+            /tmp/release-zip-gate --require-libs
+
       # The header catalog (tinyc-headers-<version>.md) is
       # generated here, from the same collected assets as every
       # other release file: the native builtin header sets come
@@ -973,6 +1049,29 @@ jobs:
             --version "$VER" \
             --out "release-files/tinyc-headers-$VER.md"
           ls -la release-files/
+
+      # Artifact gate: the shipped native header sets, audited
+      # against the same extracted dists the header catalog is
+      # generated from. Every header a shipped header includes
+      # must be in the same triple's shipped set or registered
+      # in header_host_provided.json with its provider. The
+      # bundled libc header trees (glibc, bionic, Darwin) are
+      # part of the shipped sets; the registry covers only the
+      # MinGW triple's Win32 API references (the MinGW-w64
+      # header set) and the glibc dispatch headers for ABIs
+      # the bundled trees do not carry.
+      - name: Artifact gate - native header closure audit
+        run: |
+          python3 tests/artifact-gate/check_header_closure.py \
+            --native-dist x86_64-linux-gnu=catalog-build/native/x86_64-linux-gnu \
+            --native-dist aarch64-linux-gnu=catalog-build/native/aarch64-linux-gnu \
+            --native-dist riscv64-linux-gnu=catalog-build/native/riscv64-linux-gnu \
+            --native-dist x86_64-linux-android=catalog-build/native/x86_64-linux-android \
+            --native-dist aarch64-linux-android=catalog-build/native/aarch64-linux-android \
+            --native-dist x86_64-w64-mingw32=catalog-build/native/x86_64-w64-mingw32 \
+            --native-dist arm64-apple-darwin=catalog-build/native/arm64-apple-darwin \
+            --native-dist x86_64-apple-darwin=catalog-build/native/x86_64-apple-darwin
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

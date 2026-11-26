@@ -27,6 +27,7 @@ mac-test-bundle/tinyc-mac-test.tar.gz
 /packages/browser/tcc-*.mjs
 /packages/browser/tcc-*.wasm
 /packages/browser/tcc-*.tinyc.js
+/packages/browser/sysroot/
 /packages/npm/*.tgz
 /wasm-backend/build-install/
 /wasm-backend/build.log
