@@ -85,16 +85,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -117,6 +137,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -131,6 +155,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -162,16 +194,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -194,6 +246,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -208,6 +264,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -251,16 +315,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -283,6 +367,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -297,6 +385,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -340,16 +436,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -372,6 +488,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -386,6 +506,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -429,16 +557,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -461,6 +609,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -475,6 +627,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -518,16 +678,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -550,6 +730,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -564,6 +748,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -610,16 +802,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -642,6 +854,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -656,6 +872,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -702,16 +926,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -734,6 +978,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -748,6 +996,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",
@@ -792,16 +1048,36 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
       {
-        path: "/sysroot/include/pthread.h",
-        source: "include/pthread.h"
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
       },
       {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/iso646.h",
+        source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/limits.h",
+        source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -824,6 +1100,10 @@ var TinycWeb = (() => {
         source: "include/stddef.h"
       },
       {
+        path: "/sysroot/include/stdint.h",
+        source: "include/stdint.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
       },
@@ -838,6 +1118,14 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wasm_simd128.h",
+        source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       },
       {
         path: "/sysroot/include/tcclib.h",

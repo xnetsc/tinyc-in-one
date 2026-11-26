@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 import {
   loadTinyc,
@@ -1047,14 +1047,27 @@ test('missing tcc_* export throws TinycMissingExportError naming it', async () =
 // ---------------------------------------------------------------------
 
 test('sysroot manifest lists the real upstream include files', () => {
-  const upstreamInclude = new URL('../../vendor-tinycc/include/', import.meta.url);
-  const onDisk = readdirSync(upstreamInclude).sort();
-  const inManifest = sysrootManifest.includeFiles
-    .map((e) => e.source)
-    .filter((s) => s.startsWith('include/'))
-    .map((s) => s.slice('include/'.length))
-    .sort();
-  assert.deepEqual(inManifest, onDisk);
+  // Manifest sources resolve through the envelope lookup order:
+  // wasm-backend/include first, vendor-tinycc/include second, and
+  // tcclib.h is vendor-tinycc/tcclib.h.  Every listed source must
+  // name a real file under that order.
+  const lookupDirs = [
+    new URL('../../wasm-backend/include/', import.meta.url),
+    new URL('../../vendor-tinycc/include/', import.meta.url),
+  ];
+  for (const entry of sysrootManifest.includeFiles) {
+    if (entry.source === 'tcclib.h') {
+      assert.ok(
+        existsSync(new URL('../../vendor-tinycc/tcclib.h', import.meta.url)),
+        entry.source);
+      continue;
+    }
+    assert.ok(entry.source.startsWith('include/'), entry.source);
+    const name = entry.source.slice('include/'.length);
+    assert.ok(
+      lookupDirs.some((dir) => existsSync(new URL(name, dir))),
+      `${entry.source} does not resolve in the lookup order`);
+  }
   const paths = sysrootManifest.includeFiles.map((e) => e.path);
   assert.ok(paths.includes('/sysroot/include/tcclib.h'));
   assert.ok(paths.every((p) => p.startsWith(sysrootManifest.includeDir + '/')));
