@@ -4,7 +4,7 @@
 // pointing at the context global, a fake document.currentScript and
 // location — and exercised there: the TinycWeb global, the asset
 // base-URL rules of the script scenario, the inlined sysroot
-// manifests, and the same injected-mock / hand-written-wasm paths
+// manifests, and the same mock-module / hand-written-wasm paths
 // test.mjs uses for the ES module build.
 //
 // Run with: npm run test:web   (node --test test-web-bundle.mjs)
@@ -37,6 +37,8 @@ function loadBundle({ scriptSrc = null, pageHref = 'https://example.com/app/page
   sandbox.URL = URL;
   sandbox.TextEncoder = TextEncoder;
   sandbox.TextDecoder = TextDecoder;
+  sandbox.btoa = btoa;
+  sandbox.atob = atob;
   sandbox.Blob = Blob;
   sandbox.File = File;
   sandbox.fetch = fetch;
@@ -48,7 +50,14 @@ function loadBundle({ scriptSrc = null, pageHref = 'https://example.com/app/page
   sandbox.location = { href: pageHref };
   sandbox.document = { currentScript: scriptSrc ? { src: scriptSrc } : null };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(bundlePath, 'utf8'), sandbox, { filename: 'tinyc-web.js' });
+  vm.runInContext(fs.readFileSync(bundlePath, 'utf8'), sandbox, {
+    filename: 'tinyc-web.js',
+    // A real page imports the module URLs the envelope glue is
+    // built from; the vm page delegates dynamic import to the host
+    // loader. (Needs node --experimental-vm-modules — see the
+    // test:web script in package.json.)
+    importModuleDynamically: (specifier) => import(specifier),
+  });
   return sandbox;
 }
 
@@ -82,6 +91,28 @@ function makeMock(overrides = {}) {
     tcc_get_symbol(h, n) { calls.push(['tcc_get_symbol', h, n]); return 0; },
   };
   return Object.assign(mock, overrides);
+}
+
+/** The asset envelope file's text form, exactly as
+ *  build-asset-envelopes.mjs writes it. (Same helper as test.mjs.) */
+function envelopeText(key, payload) {
+  return (
+    'globalThis.__TINYC_ASSET_REGISTRY__ ??= Object.create(null);\n' +
+    `globalThis.__TINYC_ASSET_REGISTRY__[${JSON.stringify(key)}] = ` +
+    `${JSON.stringify(payload)};\n`
+  );
+}
+
+/** The envelope content a loadModule hook returns in these tests:
+ *  a compiler envelope whose glue factory hands back `mock`. The
+ *  factory runs in the host realm (the page's dynamic imports are
+ *  host-loaded), so the mock is stashed on the host global. */
+function mockEnvelope(mock) {
+  globalThis.__WEB_BUNDLE_MOCK__ = mock;
+  return envelopeText('tcc-wasm32-wasi', {
+    glue: 'export default function factory() { return globalThis.__WEB_BUNDLE_MOCK__; }',
+    wasm: Buffer.from([0, 97, 115, 109]).toString('base64'),
+  });
 }
 
 // (module (func (export "add") (param i32 i32) (result i32)
@@ -135,10 +166,10 @@ test('web bundle: runWasmModule runs a hand-written module', async () => {
   assert.equal(result, 42);
 });
 
-test('web bundle: loadTinyc works with an injected mock module', async () => {
+test('web bundle: loadTinyc builds the module from the envelope the loadModule hook returns', async () => {
   const page = loadBundle({ scriptSrc: 'https://cdn.example.com/tinyc/tinyc-web.js' });
   const mock = makeMock();
-  const tinyc = await page.TinycWeb.loadTinyc({ wasmExports: mock });
+  const tinyc = await page.TinycWeb.loadTinyc({ loadModule: async () => mockEnvelope(mock) });
   assert.ok(tinyc instanceof page.TinycWeb.Tinyc);
   assert.ok(tinyc.fs instanceof page.TinycWeb.VirtualFS);
   assert.equal(tinyc.target, 'wasm32-wasi');
@@ -153,7 +184,7 @@ test('web bundle: default envelope URL resolves against the script directory', a
   const page = loadBundle({ scriptSrc: 'https://cdn.example.com/libs/tinyc-web.js' });
   let captured;
   await page.TinycWeb.loadTinyc({
-    loadModule: async (target, files) => { captured = files; return makeMock(); },
+    loadModule: async (target, files) => { captured = files; return mockEnvelope(makeMock()); },
   });
   assert.equal(captured.envelopeFile, 'tcc-wasm32-wasi.tinyc.js');
   assert.equal(captured.envelopeUrl, 'https://cdn.example.com/libs/tcc-wasm32-wasi.tinyc.js');
@@ -163,7 +194,7 @@ test('web bundle: without a script URL, URLs fall back to the page directory', a
   const page = loadBundle({ scriptSrc: null, pageHref: 'https://example.com/app/page.html' });
   let captured;
   await page.TinycWeb.loadTinyc({
-    loadModule: async (target, files) => { captured = files; return makeMock(); },
+    loadModule: async (target, files) => { captured = files; return mockEnvelope(makeMock()); },
   });
   assert.equal(captured.envelopeUrl, 'https://example.com/app/tcc-wasm32-wasi.tinyc.js');
 });
@@ -173,7 +204,7 @@ test('web bundle: baseUrl overrides the envelope base', async () => {
   let captured;
   await page.TinycWeb.loadTinyc({
     baseUrl: 'https://other.example/x',
-    loadModule: async (target, files) => { captured = files; return makeMock(); },
+    loadModule: async (target, files) => { captured = files; return mockEnvelope(makeMock()); },
   });
   assert.equal(captured.envelopeUrl, 'https://other.example/x/tcc-wasm32-wasi.tinyc.js');
 });

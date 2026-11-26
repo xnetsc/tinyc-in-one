@@ -8,7 +8,7 @@
 // module for the requested target from a registry and loads it
 // lazily; instances of different targets coexist. This file provides,
 // in plain JS:
-//   - loadTinyc()          instantiate the WASM module (or an injected one)
+//   - loadTinyc()          instantiate the WASM module
 //   - instance.callMain()  command-line mode through the exported main
 //   - TinycState           fine-grained libtcc API (tcc_* exports)
 //   - runWasmModule()      execute a compiled wasm32 product: a WASM
@@ -29,17 +29,15 @@
 //   - IO                   JS callbacks directly, no trampoline needed:
 //                          this package's host language is JavaScript.
 //
-// Native module resolution order in loadTinyc(), per target:
-//   options.module        an already-created Emscripten module object
-//   options.createModule  an Emscripten MODULARIZE factory
-//   options.wasmExports   raw WebAssembly exports, or a plain mock object
-//                         implementing the same tcc_* names (test double)
-//   options.loadModule    async loader called with (target, files);
-//                         its result is cached per target
-//   (default)             the per-target asset envelope
-//                         tcc-<target>.tinyc.js built by build.sh,
-//                         retrieved through the §14 transport (fetch
-//                         reads it as text, script injects it)
+// Native module resolution in loadTinyc(), per target: the compiler
+// module comes from the per-target asset envelope
+// tcc-<target>.tinyc.js built by build.sh, retrieved through the
+// §14 transport (fetch reads it as text, script injects it).
+// options.loadModule may replace the retrieval step: an async
+// loader called with (target, files) that returns that envelope's
+// content — its text or its bytes; the package parses the envelope
+// and builds the module from it. The built module is cached per
+// target.
 
 import manifestWasm32Wasi from './sysroot-manifests/wasm32-wasi.json' with { type: 'json' };
 import manifestX86_64LinuxGnu from './sysroot-manifests/x86_64-linux-gnu.json' with { type: 'json' };
@@ -691,8 +689,9 @@ export class VirtualFS {
 //   'raw'         WebAssembly.Instance exports with a memory
 //   'mock'        plain object of JS functions with the same names;
 //                 strings and handles pass through as JS values.
-//                 This is the injection point used by the tests and
-//                 by anyone prototyping without a WASM build.
+//                 This is the shape the tests' mock modules take;
+//                 they reach the bridge through the internal
+//                 loadTinycWithNative seam below.
 // ---------------------------------------------------------------------
 
 class NativeBridge {
@@ -1405,6 +1404,49 @@ export class TinycState {
     this._io = null;
     this._deleted = false;
     this._outputTypeSet = false;
+    // Compilation operations recorded for run()'s replay (see
+    // _record): only successful operations, and only once
+    // createState has finished its own setup.
+    this._ops = [];
+    this._recording = false;
+  }
+
+  /** Record a compilation operation for run()'s replay. run()
+   *  re-compiles on a fresh state with the dylink flavor set
+   *  before compiling, because the flavor is a
+   *  code-generation-time property the original state (compiled
+   *  standalone) cannot gain afterwards. Only successful
+   *  operations are recorded; createState's own setup (-nostdlib,
+   *  include directories) is not, because createState redoes it
+   *  on the replay state. */
+  _record(op) {
+    if (this._recording) this._ops.push(op);
+  }
+
+  /** Replay one recorded operation on this state. A recorded
+   *  -wasm-dylink option is dropped: the flavor is run()'s to
+   *  control, and a stale one must not override it. */
+  _replayOp(op) {
+    switch (op.kind) {
+      case 'options': {
+        const kept = op.value.split(/\s+/)
+          .filter((t) => t && !t.startsWith('-wasm-dylink')).join(' ');
+        if (kept) this.setOptions(kept);
+        break;
+      }
+      case 'includePath': this.addIncludePath(op.value); break;
+      case 'sysincludePath': this.addSysincludePath(op.value); break;
+      case 'libraryPath': this.addLibraryPath(op.value); break;
+      case 'library': this.addLibrary(op.value); break;
+      case 'libPath': this.setLibPath(op.value); break;
+      case 'define': this.defineSymbol(op.sym, op.value); break;
+      case 'undefine': this.undefineSymbol(op.sym); break;
+      case 'addFile': this.addFile(op.value); break;
+      case 'compileString': this.compileString(op.value); break;
+      case 'compileFile': this.compileFile(op.value); break;
+      default:
+        throw new TinycError(`tinyc: unknown recorded operation ${op.kind}`);
+    }
   }
 
   _call(name, returnType, argTypes, args) {
@@ -1465,41 +1507,54 @@ export class TinycState {
 
   setLibPath(path) {
     this._call('tcc_set_lib_path', null, ['string'], [this._bridge.modulePath(path)]);
+    this._record({ kind: 'libPath', value: path });
     return this;
   }
 
   setOptions(str) {
-    return this._checkRc('tcc_set_options',
+    const rc = this._checkRc('tcc_set_options',
       this._call('tcc_set_options', 'number', ['string'], [str]));
+    this._record({ kind: 'options', value: str });
+    return rc;
   }
 
   addIncludePath(path) {
-    return this._checkRc('tcc_add_include_path',
+    const rc = this._checkRc('tcc_add_include_path',
       this._call('tcc_add_include_path', 'number', ['string'], [this._bridge.modulePath(path)]));
+    this._record({ kind: 'includePath', value: path });
+    return rc;
   }
 
   addSysincludePath(path) {
-    return this._checkRc('tcc_add_sysinclude_path',
+    const rc = this._checkRc('tcc_add_sysinclude_path',
       this._call('tcc_add_sysinclude_path', 'number', ['string'], [this._bridge.modulePath(path)]));
+    this._record({ kind: 'sysincludePath', value: path });
+    return rc;
   }
 
   addLibraryPath(path) {
-    return this._checkRc('tcc_add_library_path',
+    const rc = this._checkRc('tcc_add_library_path',
       this._call('tcc_add_library_path', 'number', ['string'], [this._bridge.modulePath(path)]));
+    this._record({ kind: 'libraryPath', value: path });
+    return rc;
   }
 
   addLibrary(name) {
-    return this._checkRc('tcc_add_library',
+    const rc = this._checkRc('tcc_add_library',
       this._call('tcc_add_library', 'number', ['string'], [name]));
+    this._record({ kind: 'library', value: name });
+    return rc;
   }
 
   defineSymbol(sym, value = '1') {
     this._call('tcc_define_symbol', null, ['string', 'string'], [sym, value]);
+    this._record({ kind: 'define', sym, value });
     return this;
   }
 
   undefineSymbol(sym) {
     this._call('tcc_undefine_symbol', null, ['string'], [sym]);
+    this._record({ kind: 'undefine', sym });
     return this;
   }
 
@@ -1535,14 +1590,18 @@ export class TinycState {
     }
     this._instance.fs.syncFile(p);
     this._ensureOutputType();
-    return this._checkRc('tcc_add_file',
+    const rc = this._checkRc('tcc_add_file',
       this._call('tcc_add_file', 'number', ['string'], [this._bridge.modulePath(p)]));
+    this._record({ kind: 'addFile', value: p });
+    return rc;
   }
 
   compileString(source) {
     this._ensureOutputType();
-    return this._checkRc('tcc_compile_string',
+    const rc = this._checkRc('tcc_compile_string',
       this._call('tcc_compile_string', 'number', ['string'], [source]));
+    this._record({ kind: 'compileString', value: source });
+    return rc;
   }
 
   /** Compile a file from the virtual FS: its content is fed through
@@ -1556,8 +1615,10 @@ export class TinycState {
     const src = this._instance.fs.readTextFile(p);
     const marked = `#line 1 "${p}"\n${src}`;
     this._ensureOutputType();
-    return this._checkRc('tcc_compile_string',
+    const rc = this._checkRc('tcc_compile_string',
       this._call('tcc_compile_string', 'number', ['string'], [marked]));
+    this._record({ kind: 'compileFile', value: p });
+    return rc;
   }
 
   /** Write the compiled product to a virtual path. TCC writes it
@@ -1587,13 +1648,13 @@ export class TinycState {
    *  instantiates it in the host with runWasmModuleSync — the WASI
    *  argv is [outputPath, ...args]. Returns the program's exit code
    *  for a _start module, or the named entry's return value when
-   *  options.entry is given. This switches the state to EXE output
-   *  type. On every other target the glue layer throws
-   *  TinycRunNotSupportedError before anything is passed to the
-   *  native module — those targets compile to files only.
+   *  options.entry is given. On every other target the glue layer
+   *  throws TinycRunNotSupportedError before anything is passed to
+   *  the native module — those targets compile to files only.
    *  options: { outputPath, entry, callArgs, env, imports, shims,
    *  stdin, heapBase, io } — entry/callArgs/env/imports/shims/stdin/
-   *  heapBase forward to runWasmModuleSync, and the instance's
+   *  heapBase forward to runWasmModuleSync (and entry/callArgs to
+   *  the dylink process's runMainModule), and the instance's
    *  registered shims apply automatically; io is a text IO partial
    *  (default: this state's IO) whose out/err receive the program's
    *  fd_write output, decoded. */
@@ -1607,9 +1668,29 @@ export class TinycState {
     // exports enter the global symbol table; it can dlopen further
     // modules). A product that is not a dylink unit file runs in
     // its standalone form, as before.
-    if (this._instance._dylinkOptionOk()) this.setOptions('-wasm-dylink=main');
-    this.setOutputType(TCC_OUTPUT.EXE);
-    this.outputFile(outputPath);
+    // The dylink flavor is a code-generation-time property: it
+    // must be set before compiling, and this state was compiled
+    // standalone, so setting it here would emit a module whose
+    // bodies write the immutable __memory_base import. Instead
+    // re-compile the recorded operations on a fresh state with
+    // the flavor set first and EXE output type set once; the
+    // original state is untouched, so a later outputFile on it
+    // still produces its standalone module. When the compiler
+    // does not accept the option, keep the old behavior.
+    if (this._instance._dylinkOptionOk()) {
+      const replay = this._instance.createState();
+      try {
+        replay.setOptions('-wasm-dylink=main');
+        replay.setOutputType(TCC_OUTPUT.EXE);
+        for (const op of this._ops) replay._replayOp(op);
+        replay.outputFile(outputPath);
+      } finally {
+        replay.delete();
+      }
+    } else {
+      this.setOutputType(TCC_OUTPUT.EXE);
+      this.outputFile(outputPath);
+    }
     const bytes = this._instance.exportFile(outputPath);
     const io = normalizeIO(options.io, this.io);
     if (isDylinkUnit(bytes)) {
@@ -1621,7 +1702,11 @@ export class TinycState {
         shims: options.shims,
         imports: options.imports,
       });
-      const result = proc.runMainModule(bytes, { path: outputPath });
+      const result = proc.runMainModule(bytes, {
+        path: outputPath,
+        entry: options.entry,
+        callArgs: options.callArgs,
+      });
       flushIO(io);
       if (result && typeof result === 'object' && 'exitCode' in result) {
         return result.exitCode;
@@ -2069,6 +2154,9 @@ export class Tinyc {
     if (this._bridge.has('tcc_add_include_path')) {
       for (const dir of this.fs.getIncludeDirs()) state.addIncludePath(dir);
     }
+    // Setup is done; compilation operations from here on are
+    // recorded for run()'s replay.
+    state._recording = true;
     return state;
   }
 
@@ -2367,6 +2455,26 @@ function assetRegistry() {
   return (globalThis[ASSET_REGISTRY] ??= Object.create(null));
 }
 
+/** Parse an asset envelope's payload out of its file text: the
+ *  envelope is a classic script registering a JSON payload; the
+ *  payload is the text between the first "{" and the last "}",
+ *  read without executing the file. The one parse path, shared by
+ *  the transport retrieval and the loadModule hook. */
+function parseAssetEnvelopeText(text, url) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) {
+    throw new TinycError(
+      `tinyc: asset envelope at ${url} is not in the envelope form`);
+  }
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch (err) {
+    throw new TinycError(
+      `tinyc: asset envelope at ${url} does not parse: ${err.message}`);
+  }
+}
+
 /** Retrieve one registered asset payload through the transport. The
  *  fetch side reads the envelope file as text and parses the
  *  registered object out of it without executing it, the same rule
@@ -2391,19 +2499,7 @@ async function retrieveAsset(transport, url, key, fetchImpl) {
       throw new TinycError(
         `tinyc: cannot load asset "${key}" from ${url}: ${err.message}`);
     }
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start) {
-      throw new TinycError(
-        `tinyc: asset envelope at ${url} is not in the envelope form`);
-    }
-    let payload;
-    try {
-      payload = JSON.parse(text.slice(start, end + 1));
-    } catch (err) {
-      throw new TinycError(
-        `tinyc: asset envelope at ${url} does not parse: ${err.message}`);
-    }
+    const payload = parseAssetEnvelopeText(text, url);
     registry[key] = payload;
     return payload;
   }
@@ -3564,12 +3660,9 @@ export function createProcess(options = {}) {
 // Loading
 // ---------------------------------------------------------------------
 
-// Per-target native module cache. Only modules obtained through
-// loadModule or the shipped envelope files are cached: a target's module
-// is loaded at most once, and only when an instance of that target
-// is actually requested. Injected modules (module / createModule /
-// wasmExports) are used as-is per call and never enter the cache, so
-// callers can inject a different module for the same target.
+// Per-target native module cache: a target's module is loaded at
+// most once, and only when an instance of that target is actually
+// requested.
 const targetModuleCache = new Map();
 
 /** Targets whose native module has been loaded through the
@@ -3582,15 +3675,23 @@ export function clearTargetModuleCache() {
   targetModuleCache.clear();
 }
 
-/* The compiler module from its asset envelope: the envelope
- * registers the glue source text and the module bytes; the factory
- * is built by importing the glue source from a blob URL (a module
- * script cannot be imported from a file: page, and the envelope
- * itself is a classic script, not a module), and the module bytes
- * are handed to the factory directly, so the glue never fetches. */
+/* The compiler module from its asset envelope, retrieved through
+ * the transport. */
 async function createModuleFromAssetEnvelope(transport, envelopeUrl, target, io) {
   const asset = await retrieveAsset(
     transport, envelopeUrl, `tcc-${target}`);
+  return buildModuleFromAsset(asset, envelopeUrl, target, io);
+}
+
+/** Build the compiler module from an asset envelope's payload —
+ *  the one build path, shared by the transport retrieval and by
+ *  the loadModule hook: the envelope registers the glue source
+ *  text and the module bytes; the factory is built by importing
+ *  the glue source from a blob URL (a module script cannot be
+ *  imported from a file: page, and the envelope itself is a
+ *  classic script, not a module), and the module bytes are handed
+ *  to the factory directly, so the glue never fetches. */
+async function buildModuleFromAsset(asset, envelopeUrl, target, io) {
   if (!asset || typeof asset.glue !== 'string' || typeof asset.wasm !== 'string') {
     throw new TinycError(
       `tinyc: asset envelope at ${envelopeUrl} carries no compiler module for target "${target}"`);
@@ -3634,16 +3735,42 @@ async function createModuleFromAssetEnvelope(transport, envelopeUrl, target, io)
   });
 }
 
+/** The loadModule hook's half of module loading: the hook returns
+ *  the envelope's content — its text, or its bytes as a Uint8Array
+ *  or ArrayBuffer — and the package parses the envelope and builds
+ *  the module from it through the same parse and build code as a
+ *  directly retrieved envelope. Anything else the hook returns (a
+ *  built module object above all) is rejected by name: a module
+ *  can only be supplied as envelope content. */
+async function buildModuleFromHookContent(content, envelopeUrl, target, io) {
+  let text;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (content instanceof ArrayBuffer || ArrayBuffer.isView(content)) {
+    text = textDecoder.decode(content);
+  } else {
+    throw new TinycError(
+      `tinyc: the loadModule hook for target "${target}" returned ` +
+      `${content === null ? 'null' : typeof content}; it must return the ` +
+      `asset envelope's content — the envelope file's text or its bytes — ` +
+      `and the package builds the module from it`);
+  }
+  const asset = parseAssetEnvelopeText(text, envelopeUrl);
+  return buildModuleFromAsset(asset, envelopeUrl, target, io);
+}
+
 async function loadTargetModule(target, options, io) {
   const cached = targetModuleCache.get(target);
   if (cached) return cached;
   const files = targetModuleFiles(target);
   const promise = (async () => {
     if (typeof options.loadModule === 'function') {
-      return options.loadModule(target, {
+      const envelopeUrl = assetUrl(files.envelopeFile, options.baseUrl);
+      const content = await options.loadModule(target, {
         ...files,
-        envelopeUrl: assetUrl(files.envelopeFile, options.baseUrl),
+        envelopeUrl,
       });
+      return buildModuleFromHookContent(content, envelopeUrl, target, io);
     }
     /* The compiler's own bytes go through the §14 transport like
      * every other byte the package loads from its origin: the
@@ -3651,9 +3778,9 @@ async function loadTargetModule(target, options, io) {
      * fetch it is read as text and parsed, under the script
      * transport it is injected and read back from the registry,
      * and either way the module is built from the envelope's glue
-     * text and bytes. Explicit module sources (the loadModule hook
-     * above, or options.module / createModule / wasmExports, which
-     * resolveNative handles before this) bypass the transport. */
+     * text and bytes. (The loadModule hook above replaces this
+     * retrieval: the caller returns the same envelope's content
+     * and the package builds the module from it.) */
     const transport = createTransport(options.transport);
     const envelopeUrl = assetUrl(files.envelopeFile, options.baseUrl);
     return createModuleFromAssetEnvelope(transport, envelopeUrl, target, io);
@@ -3665,22 +3792,7 @@ async function loadTargetModule(target, options, io) {
   return promise;
 }
 
-async function resolveNative(options, io, target) {
-  if (options.module) return options.module;
-  if (options.wasmExports) return options.wasmExports;
-  if (typeof options.createModule === 'function') {
-    return await options.createModule({
-      print: (text) => io.out(text + '\n'),
-      printErr: (text) => io.err(text + '\n'),
-      locateFile: (path, prefix) =>
-        options.wasmUrl && path.endsWith('.wasm') ? options.wasmUrl : prefix + path,
-    });
-  }
-  // Default: the per-target module envelope (options.loadModule
-  // when given, otherwise the shipped tcc-<target>.tinyc.js),
-  // cached and loaded lazily by loadTargetModule.
-  return loadTargetModule(target, options, io);
-}
+
 
 /** The sysroot manifest for one target (sysroot-manifests/<target>.json).
  *  All manifests are statically imported with this module (see
@@ -3883,9 +3995,20 @@ async function tryMountOpfsBackend(native, bridge) {
  *                 own asset envelopes (the compiler module and the
  *                 sysroot) are retrieved; default "auto" — the
  *                 script transport in a file: context, fetch
- *                 otherwise. Or inject a module with module /
- *                 createModule / wasmExports / loadModule instead
- *                 of loading the shipped envelope at all
+ *                 otherwise
+ *    loadModule   async loader called with (target, files) that
+ *                 returns the target's asset envelope content —
+ *                 the envelope file's text, or its bytes as a
+ *                 Uint8Array or ArrayBuffer; files carries the
+ *                 envelope file name and its resolved URL. The
+ *                 package parses the envelope and builds the
+ *                 module from it itself, through the same code as
+ *                 a directly retrieved envelope; a return value
+ *                 that is not envelope content (a built module
+ *                 object above all) is rejected. The compiler
+ *                 module is only ever obtained from the shipped
+ *                 envelope — there is no option to supply a module
+ *                 object directly
  *    sysroot      true for this target's bundled manifest, or
  *                 { manifest, baseUrl, fetchImpl, includeBinaries }
  *    fsStore      a custom FsStore instance for the virtual FS
@@ -3900,13 +4023,18 @@ async function tryMountOpfsBackend(native, bridge) {
  *                 sysroot files among them are not fetched again).
  *    io           { out, err, in } JS functions; default console
  */
-export async function loadTinyc(options = {}) {
+/** Internal test seam — not part of the public API. Builds an
+ *  instance around a native module the caller already holds.
+ *  loadTinyc itself only ever obtains the module from the target's
+ *  asset envelope (directly, or through the loadModule hook); the
+ *  package's own test suite uses this seam to run against a mock
+ *  native module. */
+export async function loadTinycWithNative(native, options = {}) {
   const target = options.target ?? DEFAULT_TARGET;
   assertKnownTarget(target);
   const io = normalizeIO(options.io);
   const store = await openFsStore(target, options);
   const fs = new VirtualFS(store);
-  const native = await resolveNative(options, io, target);
   const bridge = new NativeBridge(native, io);
   const instance = new Tinyc(bridge, { fs, io, target });
 
@@ -3926,6 +4054,14 @@ export async function loadTinyc(options = {}) {
 
   await loadSysroot(instance, options.sysroot, options.transport);
   return instance;
+}
+
+export async function loadTinyc(options = {}) {
+  const target = options.target ?? DEFAULT_TARGET;
+  assertKnownTarget(target);
+  const io = normalizeIO(options.io);
+  const native = await loadTargetModule(target, options, io);
+  return loadTinycWithNative(native, options);
 }
 
 export default loadTinyc;

@@ -32,7 +32,7 @@ function shimBoundaryError(method) {
 }
 
 export class TinycWorker {
-  constructor({ workerUrl, wasmUrl, sysroot, glueUrl, target, io, shimModules } = {}) {
+  constructor({ workerUrl, sysroot, target, io, shimModules } = {}) {
     if (typeof Worker === 'undefined') {
       throw new Error('tinyc: TinycWorker needs the Worker API (browser main thread)');
     }
@@ -48,7 +48,7 @@ export class TinycWorker {
     // shim map; the worker imports them and registers the maps on
     // its instance (functions themselves cannot cross postMessage —
     // see registerShim below).
-    this._initPayload = { wasmUrl, sysroot, glueUrl, target, shimModules };
+    this._initPayload = { sysroot, target, shimModules };
     this._io = normalizeIO(io);
     this._pending = new Map();
     this._nextId = 1;
@@ -166,11 +166,6 @@ if (isDedicatedWorker) {
     if (!instancePromise) {
       instancePromise = (async () => {
         const opts = { io: workerIO, sysroot: payload?.sysroot, target: payload?.target };
-        if (payload?.glueUrl) {
-          const factory = (await import(/* @vite-ignore */ payload.glueUrl)).default;
-          opts.createModule = factory;
-        }
-        if (payload?.wasmUrl) opts.wasmUrl = payload.wasmUrl;
         const instance = await loadTinyc(opts);
         // Shim modules arrive as URLs (functions cannot cross
         // postMessage): import each one and register its default

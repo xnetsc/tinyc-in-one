@@ -37,6 +37,10 @@ gcc -o tests/test-two-states tests/test-two-states.c tests/wasm32-libtcc.o -Ibui
 ./tests/test-two-states; stage_rc $? "host"
 node tests/run-two-states.mjs; stage_rc $? "node"
 
+echo "== late-dylink: the browser TinycState.run sequence (libtcc API) =="
+gcc -o tests/test-late-dylink tests/test-late-dylink.c tests/wasm32-libtcc.o -Ibuild-src -lm -ldl -lpthread; stage_rc $? "host build"
+node tests/run-late-dylink.mjs; stage_rc $? "node"
+
 echo "== -run must be an explicit wasm error =="
 $TCC -nostdlib -run tests/test-input.c
 rc=$?

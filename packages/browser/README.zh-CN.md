@@ -17,7 +17,7 @@ TARGET=aarch64-linux-gnu ./build.sh  # 产出 tcc-aarch64-linux-gnu.tinyc.js
 
 每个模块导出 libtcc 的 `tcc_*` API 加一个主入口（内核提供时是 `tinyc_main`，否则是 `main`；胶水优先用 `tinyc_main`、回退到 `main`）。八个通用目标编上游 TCC 树。`wasm32-wasi` 模块由项目自己的 WebAssembly 代码生成后端构建（仓库根的 `wasm-backend/` 树）：`build.sh` 的该分支用后端的 `wasm-gen.c` / `wasm-link.c` 源码与其补丁组装上游树，然后与其它目标一样用 emcc 编译。
 
-胶水层（`index.mjs`、`worker.mjs`）不依赖 WASM 构建即完整：`loadTinyc` 也接受注入的模块（`module`、`createModule`、`wasmExports`，或异步的 `loadModule(target, files)` 加载器），测试套件就是这样跑它的。
+胶水层（`index.mjs`、`worker.mjs`）不依赖 WASM 构建即完整：编译器模块来自按目标分的资产信封——直接取回，或经异步的 `loadModule(target, files)` 加载器返回该信封的内容（文本或字节）、由包自身解析信封并构建模块；测试套件经内部测试接缝喂入 mock 原生模块来跑胶水层。
 
 ## 目标
 
@@ -267,4 +267,4 @@ npm test          # node --test test.mjs
 npm run test:web  # node --test test-web-bundle.mjs
 ```
 
-该套件在 Node 里对着一个注入的 mock 模块跑胶水逻辑，该 mock 实现 `tcc_*` 名字：从字符串、`Blob`/`File` 与 URL 来源摄入虚拟 FS，include 目录注册到达 `tcc_add_include_path`，在 Emscripten 接线点与经错误回调两条路上的 IO 路由，`callMain` 的 argv 组装，缺失导出错误，目标注册表（两个目标共存、虚拟文件系统隔离、按目标懒加载），非 wasm32 目标上的 run 守卫与 wasm32 run 路径，产物导出，以及各目标 sysroot 清单。run 路径还用真实手工汇编的 wasm 模块额外测过（`test.mjs` 里的字节数组，每个都附 WAT 描述）：一个函数式的 `add` 导出，一个经 WASI `fd_write` 垫片写出并经 `proc_exit` 退出的 `_start` 模块，WASI argv 垫片，缺省 libc 垫片（`printf` 格式化进 IO、`memcpy`、`malloc`/`free` 堆复用、`options.imports` 覆盖一个缺省垫片），以及自定义垫片面——带确切清单的缺失导入诊断、带 `ctx.readCString` 的实例级注册、对实例注册的单次运行覆盖、`unregisterShim`、`callMain -run` 的垫片转发、包级注册，与 `TinycWorker.registerShim` 的边界错误。第二个套件（`test-web-bundle.mjs`）重新构建 `tinyc-web.js`，把它作为经典脚本加载进一个打扮成浏览器页面的 Node `vm` 上下文（假的 `document.currentScript` 与 `location`），并核对：`TinycWeb` 全局与模块构建的导出清单、脚本场景的 base-URL 规则（脚本目录、页面目录回退、`baseUrl` 覆盖）、内联的各目标 sysroot 清单，以及 bundle 内的 mock 模块与手写 wasm run 路径。
+该套件在 Node 里对着一个实现 `tcc_*` 名字的 mock 模块跑胶水逻辑，mock 经本包内部测试接缝喂入：从字符串、`Blob`/`File` 与 URL 来源摄入虚拟 FS，include 目录注册到达 `tcc_add_include_path`，在 Emscripten 接线点与经错误回调两条路上的 IO 路由，`callMain` 的 argv 组装，缺失导出错误，目标注册表（两个目标共存、虚拟文件系统隔离、按目标懒加载），非 wasm32 目标上的 run 守卫与 wasm32 run 路径，产物导出，以及各目标 sysroot 清单。run 路径还用真实手工汇编的 wasm 模块额外测过（`test.mjs` 里的字节数组，每个都附 WAT 描述）：一个函数式的 `add` 导出，一个经 WASI `fd_write` 垫片写出并经 `proc_exit` 退出的 `_start` 模块，WASI argv 垫片，缺省 libc 垫片（`printf` 格式化进 IO、`memcpy`、`malloc`/`free` 堆复用、`options.imports` 覆盖一个缺省垫片），以及自定义垫片面——带确切清单的缺失导入诊断、带 `ctx.readCString` 的实例级注册、对实例注册的单次运行覆盖、`unregisterShim`、`callMain -run` 的垫片转发、包级注册，与 `TinycWorker.registerShim` 的边界错误。第二个套件（`test-web-bundle.mjs`）重新构建 `tinyc-web.js`，把它作为经典脚本加载进一个打扮成浏览器页面的 Node `vm` 上下文（假的 `document.currentScript` 与 `location`），并核对：`TinycWeb` 全局与模块构建的导出清单、脚本场景的 base-URL 规则（脚本目录、页面目录回退、`baseUrl` 覆盖）、内联的各目标 sysroot 清单，以及 bundle 内的 mock 模块与手写 wasm run 路径。

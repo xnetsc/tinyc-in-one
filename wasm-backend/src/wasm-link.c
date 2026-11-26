@@ -401,7 +401,7 @@ static void wasm_apply_data_relocs(TCCState *s,
     for (i = 1; i < s->nb_sections; i++) {
         Section *sec = s->sections[i];
         int nrel, k;
-        if (!sec->reloc || !sec->data || sec->sh_type == SHT_NOBITS)
+        if (!sec || !sec->reloc || !sec->data || sec->sh_type == SHT_NOBITS)
             continue;
         if (wsec_base[i] == (addr_t)-1) continue;
         nrel = sec->reloc->data_offset / sizeof(ElfW_Rel);
@@ -586,7 +586,7 @@ static const char **wasm_array_entries(TCCState *s, const char *secname,
     int i, n;
     *out_n = 0;
     for (i = 1; i < s->nb_sections; i++)
-        if (s->sections[i]->name && !strcmp(s->sections[i]->name, secname)) {
+        if (s->sections[i] && s->sections[i]->name && !strcmp(s->sections[i]->name, secname)) {
             sec = s->sections[i];
             break;
         }
@@ -672,6 +672,27 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     if (init_wf < 0 || fini_wf < 0)
         return tcc_error_noabort("wasm: too many functions");
 
+    /* ---- the dylink flavor is a code-generation-time property:
+       the prologue/epilogue record $__stack_pointer operand
+       positions (spfixs) only while the flavor is set, as the
+       functions are generated.  A state compiled first and given
+       -wasm-dylink only at output time carries standalone bodies
+       (global.set 0, the standalone stack-pointer index) into a
+       module whose global 0 is the immutable __memory_base
+       import: the module would fail validation instead of
+       compiling.  Refuse that combination loudly, naming the
+       ordering, rather than emitting an invalid module.  The
+       synthesized init/fini are built here at output time and
+       carry no spfixs of their own, so they are excluded. */
+    for (i = 0; i < nb_wfuns; i++) {
+        if (!wfuns[i].defined || i == init_wf || i == fini_wf) continue;
+        if (wfuns[i].nspfixs == 0) {
+            return tcc_error_noabort("wasm: -wasm-dylink was set after "
+                "compiling; set it before compiling (code generation "
+                "already ran in standalone form)");
+        }
+    }
+
     /* ---- assign final function indices: imports first ------------- */
     for (i = 0; i < nb_wfuns; i++) {
         if (wfuns[i].defined) continue;
@@ -689,7 +710,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
     for (i = 0; i < s->nb_sections; i++) wsec_base[i] = (addr_t)-1;
     for (i = 1; i < s->nb_sections; i++) {
         Section *sec = s->sections[i];
-        const char *nm = sec->name;
+        const char *nm = sec ? sec->name : NULL;
         if (!nm) continue;
         if (!strcmp(nm, ".rodata") || !strncmp(nm, ".rodata.", 8) ||
             !strcmp(nm, ".data") || !strncmp(nm, ".data.", 6) ||
@@ -1086,7 +1107,7 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         }
         for (i = 1; i < s->nb_sections; i++) {
             Section *sec = s->sections[i];
-            if (wsec_base[i] == (addr_t)-1 || sec->data_offset == 0 ||
+            if (!sec || wsec_base[i] == (addr_t)-1 || sec->data_offset == 0 ||
                 sec->sh_type == SHT_NOBITS) continue;
             memcpy(img.data + wsec_base[i], sec->data, sec->data_offset);
         }
@@ -1240,7 +1261,7 @@ static int wasm_output_module(TCCState *s, const char *filename)
     for (i = 0; i < s->nb_sections; i++) wsec_base[i] = (addr_t)-1;
     for (i = 1; i < s->nb_sections; i++) {
         Section *sec = s->sections[i];
-        const char *nm = sec->name;
+        const char *nm = sec ? sec->name : NULL;
         if (!nm) continue;
         if (!strcmp(nm, ".rodata") || !strncmp(nm, ".rodata.", 8) ||
             !strcmp(nm, ".data") || !strncmp(nm, ".data.", 6) ||
@@ -1406,14 +1427,14 @@ static int wasm_output_module(TCCState *s, const char *filename)
     {
         int nseg = 0;
         for (i = 1; i < s->nb_sections; i++)
-            if (wsec_base[i] != (addr_t)-1 && s->sections[i]->data_offset > 0 &&
+            if (s->sections[i] && wsec_base[i] != (addr_t)-1 && s->sections[i]->data_offset > 0 &&
                 s->sections[i]->sh_type != SHT_NOBITS) nseg++;
         if (nseg) {
             wb_init(&pay);
             wb_uleb(&pay, nseg);
             for (i = 1; i < s->nb_sections; i++) {
                 Section *sec = s->sections[i];
-                if (wsec_base[i] == (addr_t)-1 || sec->data_offset == 0 ||
+                if (!sec || wsec_base[i] == (addr_t)-1 || sec->data_offset == 0 ||
                     sec->sh_type == SHT_NOBITS) continue;
                 wb_uleb(&pay, 0); /* active, memory 0 */
                 wb_putc(&pay, 0x41); wb_sleb(&pay, (int32_t)wsec_base[i]);

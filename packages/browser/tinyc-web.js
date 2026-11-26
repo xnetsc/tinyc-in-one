@@ -54,6 +54,7 @@ var TinycWeb = (() => {
     isRunnableTarget: () => isRunnableTarget,
     loadSysrootManifest: () => loadSysrootManifest,
     loadTinyc: () => loadTinyc,
+    loadTinycWithNative: () => loadTinycWithNative,
     normalizeIO: () => normalizeIO,
     normalizeVfsPath: () => normalizeVfsPath,
     readModuleCString: () => readModuleCString,
@@ -3791,6 +3792,22 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
   function assetRegistry() {
     return globalThis[ASSET_REGISTRY] ??= /* @__PURE__ */ Object.create(null);
   }
+  function parseAssetEnvelopeText(text, url) {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      throw new TinycError(
+        `tinyc: asset envelope at ${url} is not in the envelope form`
+      );
+    }
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch (err) {
+      throw new TinycError(
+        `tinyc: asset envelope at ${url} does not parse: ${err.message}`
+      );
+    }
+  }
   async function retrieveAsset(transport, url, key, fetchImpl) {
     const registry = assetRegistry();
     if (registry[key] !== void 0) return registry[key];
@@ -3810,21 +3827,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
           `tinyc: cannot load asset "${key}" from ${url}: ${err.message}`
         );
       }
-      const start = text.indexOf("{");
-      const end = text.lastIndexOf("}");
-      if (start < 0 || end <= start) {
-        throw new TinycError(
-          `tinyc: asset envelope at ${url} is not in the envelope form`
-        );
-      }
-      let payload;
-      try {
-        payload = JSON.parse(text.slice(start, end + 1));
-      } catch (err) {
-        throw new TinycError(
-          `tinyc: asset envelope at ${url} does not parse: ${err.message}`
-        );
-      }
+      const payload = parseAssetEnvelopeText(text, url);
       registry[key] = payload;
       return payload;
     }
@@ -4960,6 +4963,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       envelopeUrl,
       `tcc-${target}`
     );
+    return buildModuleFromAsset(asset, envelopeUrl, target, io);
+  }
+  async function buildModuleFromAsset(asset, envelopeUrl, target, io) {
     if (!asset || typeof asset.glue !== "string" || typeof asset.wasm !== "string") {
       throw new TinycError(
         `tinyc: asset envelope at ${envelopeUrl} carries no compiler module for target "${target}"`
@@ -5010,16 +5016,32 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       locateFile: (path, prefix) => prefix + path
     });
   }
+  async function buildModuleFromHookContent(content, envelopeUrl, target, io) {
+    let text;
+    if (typeof content === "string") {
+      text = content;
+    } else if (content instanceof ArrayBuffer || ArrayBuffer.isView(content)) {
+      text = textDecoder2.decode(content);
+    } else {
+      throw new TinycError(
+        `tinyc: the loadModule hook for target "${target}" returned ${content === null ? "null" : typeof content}; it must return the asset envelope's content \u2014 the envelope file's text or its bytes \u2014 and the package builds the module from it`
+      );
+    }
+    const asset = parseAssetEnvelopeText(text, envelopeUrl);
+    return buildModuleFromAsset(asset, envelopeUrl, target, io);
+  }
   async function loadTargetModule(target, options, io) {
     const cached = targetModuleCache.get(target);
     if (cached) return cached;
     const files = targetModuleFiles(target);
     const promise = (async () => {
       if (typeof options.loadModule === "function") {
-        return options.loadModule(target, {
+        const envelopeUrl2 = assetUrl(files.envelopeFile, options.baseUrl);
+        const content = await options.loadModule(target, {
           ...files,
-          envelopeUrl: assetUrl(files.envelopeFile, options.baseUrl)
+          envelopeUrl: envelopeUrl2
         });
+        return buildModuleFromHookContent(content, envelopeUrl2, target, io);
       }
       const transport = createTransport(options.transport);
       const envelopeUrl = assetUrl(files.envelopeFile, options.baseUrl);
@@ -5030,18 +5052,6 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       if (targetModuleCache.get(target) === promise) targetModuleCache.delete(target);
     });
     return promise;
-  }
-  async function resolveNative(options, io, target) {
-    if (options.module) return options.module;
-    if (options.wasmExports) return options.wasmExports;
-    if (typeof options.createModule === "function") {
-      return await options.createModule({
-        print: (text) => io.out(text + "\n"),
-        printErr: (text) => io.err(text + "\n"),
-        locateFile: (path, prefix) => options.wasmUrl && path.endsWith(".wasm") ? options.wasmUrl : prefix + path
-      });
-    }
-    return loadTargetModule(target, options, io);
   }
   async function loadSysrootManifest(target = DEFAULT_TARGET) {
     assertKnownTarget(target);
@@ -5166,13 +5176,12 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     if (canMemo) opfsBackendByModule.set(native, result);
     return result;
   }
-  async function loadTinyc(options = {}) {
+  async function loadTinycWithNative(native, options = {}) {
     const target = options.target ?? DEFAULT_TARGET;
     assertKnownTarget(target);
     const io = normalizeIO(options.io);
     const store = await openFsStore(target, options);
     const fs = new VirtualFS(store);
-    const native = await resolveNative(options, io, target);
     const bridge = new NativeBridge(native, io);
     const instance = new Tinyc(bridge, { fs, io, target });
     instance._fsBackend = await tryMountOpfsBackend(native, bridge);
@@ -5180,6 +5189,13 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
     await loadSysroot(instance, options.sysroot, options.transport);
     return instance;
+  }
+  async function loadTinyc(options = {}) {
+    const target = options.target ?? DEFAULT_TARGET;
+    assertKnownTarget(target);
+    const io = normalizeIO(options.io);
+    const native = await loadTargetModule(target, options, io);
+    return loadTinycWithNative(native, options);
   }
   var index_default = loadTinyc;
   return __toCommonJS(web_entry_exports);

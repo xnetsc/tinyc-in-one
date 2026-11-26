@@ -1,5 +1,6 @@
-// Glue-logic tests for tinyc-web, run in Node against an injected
-// mock native module that implements the libtcc export names.
+// Glue-logic tests for tinyc-web, run in Node against a mock
+// native module that implements the libtcc export names, supplied
+// through the internal loadTinycWithNative test seam.
 // Run: npm test   (node --test test.mjs)
 
 import { test } from 'node:test';
@@ -8,6 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 
 import {
   loadTinyc,
+  loadTinycWithNative,
   VirtualFS,
   TinycMissingExportError,
   TinycRunNotSupportedError,
@@ -170,7 +172,7 @@ test('vfs: clear removes everything except the sysroot', async () => {
 });
 
 test('vfs: Tinyc instance shortcuts cover write/read/list/remove/clear', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   await tinyc.addFile('/src/a.c', 'int a;');
   tinyc.addFileSync('/out/a.wasm', new Uint8Array([7]));
   assert.equal(tinyc.readTextFile('/src/a.c'), 'int a;');
@@ -260,7 +262,7 @@ function makeFakeFsStore(backing = new Map(), { delayMs = 1 } = {}) {
 
 test('vfs store: files persist across instances of the same target', async () => {
   const backing = new Map();
-  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const first = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   await first.addFile('/src/keep.c', 'int keep;');
   first.addFileSync('/src/sync.c', 'int sync;');
   // The synchronous write is staged in memory immediately but only
@@ -269,7 +271,7 @@ test('vfs store: files persist across instances of the same target', async () =>
   await first.whenIdle();
   assert.equal(backing.has('/src/sync.c'), true);
 
-  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const second = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   assert.deepEqual(second.listFiles('/src'), ['/src/keep.c', '/src/sync.c']);
   assert.equal(await second.readTextFileAsync('/src/keep.c'), 'int keep;');
   assert.equal(await second.readTextFileAsync('/src/sync.c'), 'int sync;');
@@ -281,7 +283,7 @@ test('vfs store: files persist across instances of the same target', async () =>
 
 test('vfs store: removeFile and clear stay deleted across instances', async () => {
   const backing = new Map();
-  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const first = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   await first.addFile('/src/gone.c', 'x');
   await first.addFile('/src/cleared.c', 'y');
   await first.addFile('/sysroot/include/kept.h', 'z');
@@ -289,7 +291,7 @@ test('vfs store: removeFile and clear stay deleted across instances', async () =
   assert.equal(first.clearFiles(), 1); // only /src/cleared.c; sysroot is kept
   await first.whenIdle();
 
-  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const second = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   assert.deepEqual(second.listFiles(), ['/sysroot/include/kept.h']);
   assert.equal(second.hasFile('/src/gone.c'), false);
   assert.equal(second.hasFile('/src/cleared.c'), false);
@@ -305,16 +307,15 @@ test('vfs store: a second load of the same target sysroot fetches nothing', asyn
   };
   const opts = () => ({
     target: 'x86_64-windows',
-    wasmExports: makeMock(),
     fsStore: makeFakeFsStore(backing),
     sysroot: { fetchImpl, includeBinaries: true },
   });
-  const first = await loadTinyc(opts());
+  const first = await loadTinycWithNative(makeMock(), opts());
   assert.ok(fetches > 0);
   assert.ok(first.fs.hasFile('/sysroot/include/stddef.h'));
   const afterFirst = fetches;
 
-  const second = await loadTinyc(opts());
+  const second = await loadTinycWithNative(makeMock(), opts());
   assert.equal(fetches, afterFirst); // every entry was a store hit
   assert.ok(second.fs.hasFile('/sysroot/include/stddef.h'));
   assert.ok(second.fs.hasFile('/sysroot/lib/libtcc1.a'));
@@ -323,10 +324,10 @@ test('vfs store: a second load of the same target sysroot fetches nothing', asyn
 
 test('vfs store: sync read of a restored-but-uncached file names the async read', async () => {
   const backing = new Map();
-  const first = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const first = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   await first.addFile('/src/cold.c', 'int cold;');
 
-  const second = await loadTinyc({ wasmExports: makeMock(), fsStore: makeFakeFsStore(backing) });
+  const second = await loadTinycWithNative(makeMock(), { fsStore: makeFakeFsStore(backing) });
   assert.throws(() => second.readFile('/src/cold.c'), /readFileAsync/);
   assert.throws(() => second.exportFile('/src/cold.c'), /exportFileAsync/);
   assert.equal(await second.readTextFileAsync('/src/cold.c'), 'int cold;');
@@ -337,9 +338,8 @@ test('vfs store: sync read of a restored-but-uncached file names the async read'
 test('vfs store: storeFactory injection receives the target', async () => {
   const backing = new Map();
   const seen = [];
-  const tinyc = await loadTinyc({
+  const tinyc = await loadTinycWithNative(makeMock(), {
     target: 'aarch64-linux-gnu',
-    wasmExports: makeMock(),
     storeFactory: (target) => {
       seen.push(target);
       return makeFakeFsStore(backing);
@@ -423,7 +423,7 @@ test('vfs store: IndexedDB backend persists per target when the environment has 
   const stub = makeIndexedDbStub();
   globalThis.indexedDB = stub;
   try {
-    const first = await loadTinyc({ wasmExports: makeMock() });
+    const first = await loadTinycWithNative(makeMock());
     assert.equal(first.fs.storeKind, 'indexeddb');
     assert.ok(stub._databases.has('tinyc-web-fs-wasm32-wasi'));
     await first.addFile('/src/idb.c', 'int idb;');
@@ -431,12 +431,12 @@ test('vfs store: IndexedDB backend persists per target when the environment has 
     assert.equal(first.removeFile('/src/drop.c'), true);
     await first.whenIdle();
 
-    const second = await loadTinyc({ wasmExports: makeMock() });
+    const second = await loadTinycWithNative(makeMock());
     assert.deepEqual(second.listFiles('/src'), ['/src/idb.c']);
     assert.equal(await second.readTextFileAsync('/src/idb.c'), 'int idb;');
 
     // A different target gets its own database and sees nothing.
-    const other = await loadTinyc({ target: 'riscv64-linux-gnu', wasmExports: makeMock() });
+    const other = await loadTinycWithNative(makeMock(), { target: 'riscv64-linux-gnu' });
     assert.equal(other.hasFile('/src/idb.c'), false);
     assert.ok(stub._databases.has('tinyc-web-fs-riscv64-linux-gnu'));
   } finally {
@@ -447,7 +447,7 @@ test('vfs store: IndexedDB backend persists per target when the environment has 
 test('vfs store: without IndexedDB the default backend is memory and works', async () => {
   // This suite runs in Node, which has no IndexedDB, so loadTinyc
   // falls back to the in-memory backend.
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   assert.equal(tinyc.fs.storeKind, 'memory');
   await tinyc.addFile('/src/m.c', 'int m;');
   tinyc.addFileSync('/src/n.c', 'int n;');
@@ -501,13 +501,13 @@ function makeFakeEmscripten(overrides = {}) {
 }
 
 test('fsBackend: mock instances report memory', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   assert.equal(tinyc.fsBackend, 'memory');
 });
 
 test('fsBackend: emscripten module without the wasmfs exports falls back, mirroring intact', async () => {
   const fake = makeFakeEmscripten();
-  const tinyc = await loadTinyc({ module: fake });
+  const tinyc = await loadTinycWithNative(fake);
   assert.equal(tinyc.nativeMode, 'emscripten');
   assert.equal(tinyc.fsBackend, 'memory');
   // The failed attempt does not disturb the FS mirroring.
@@ -526,7 +526,7 @@ test('fsBackend: a worker-context module with working wasmfs exports mounts OPFS
         return name === 'wasmfs_create_opfs_backend' ? 4242 : 0;
       },
     });
-    const tinyc = await loadTinyc({ module: fake });
+    const tinyc = await loadTinycWithNative(fake);
     assert.equal(tinyc.fsBackend, 'opfs');
     assert.deepEqual(
       ccalls.map((c) => c[0]),
@@ -535,7 +535,7 @@ test('fsBackend: a worker-context module with working wasmfs exports mounts OPFS
     assert.deepEqual(ccalls[1][1], ['/opfs', 0o777, 4242]);
     // A second load of the same module reuses the outcome and does
     // not mount again.
-    const again = await loadTinyc({ module: fake });
+    const again = await loadTinycWithNative(fake);
     assert.equal(again.fsBackend, 'opfs');
     assert.equal(ccalls.length, 2);
   });
@@ -551,7 +551,7 @@ test('fsBackend: a failing OPFS mount attempt falls back to memory without throw
         return 0;
       },
     });
-    const tinyc = await loadTinyc({ module: throwing });
+    const tinyc = await loadTinycWithNative(throwing);
     assert.equal(tinyc.fsBackend, 'memory');
 
     const denied = makeFakeEmscripten({
@@ -561,7 +561,7 @@ test('fsBackend: a failing OPFS mount attempt falls back to memory without throw
         return name === 'wasmfs_create_opfs_backend' ? 7 : -13;
       },
     });
-    const tinyc2 = await loadTinyc({ module: denied });
+    const tinyc2 = await loadTinycWithNative(denied);
     assert.equal(tinyc2.fsBackend, 'memory');
   });
 });
@@ -591,7 +591,7 @@ test('fsBackend: a backend that traps on first use falls back to memory', async 
       if (!fake.nativeFiles.has(p)) throw new Error(`no such file: ${p}`);
       return fake.nativeFiles.get(p);
     };
-    const tinyc = await loadTinyc({ module: fake });
+    const tinyc = await loadTinycWithNative(fake);
     assert.equal(tinyc.fsBackend, 'memory');
     tinyc.addFileSync('/src/main.c', 'int main() {}');
     assert.ok(fake.nativeFiles.has('/src/main.c'));
@@ -673,7 +673,7 @@ function makeOpfsEmscripten(overrides = {}) {
 test('opfs paths: mirror, state paths, product read-back and unlink all land under /opfs', async () => {
   await withWorkerGlobals(async () => {
     const fake = makeOpfsEmscripten();
-    const tinyc = await loadTinyc({ module: fake });
+    const tinyc = await loadTinycWithNative(fake);
     assert.equal(tinyc.fsBackend, 'opfs');
     const ccallsNamed = (name) => fake.ccalls.filter((c) => c[0] === name);
 
@@ -729,8 +729,7 @@ test('opfs paths: state.run reads the product back from under the prefix', async
   await withWorkerGlobals(async () => {
     const fake = makeOpfsEmscripten({ productBytes: WASM_HELLO });
     const outChunks = [];
-    const tinyc = await loadTinyc({
-      module: fake,
+    const tinyc = await loadTinycWithNative(fake, {
       io: { out: (t) => outChunks.push(t), err: () => {} },
     });
     assert.equal(tinyc.fsBackend, 'opfs');
@@ -745,7 +744,7 @@ test('opfs paths: state.run reads the product back from under the prefix', async
 test('opfs paths: callMain argv is relocated under /opfs', async () => {
   await withWorkerGlobals(async () => {
     const fake = makeOpfsEmscripten();
-    const tinyc = await loadTinyc({ module: fake });
+    const tinyc = await loadTinycWithNative(fake);
     const rc = tinyc.callMain(
       ['-c', '/src/main.c', '-o', '/out/main.o', '-I/inc', '-L', '/libs', '-lm']
     );
@@ -771,7 +770,7 @@ test('opfs paths: callMain argv is relocated under /opfs', async () => {
 test('opfs paths: compileFile #line keeps the canonical virtual path', async () => {
   await withWorkerGlobals(async () => {
     const fake = makeOpfsEmscripten();
-    const tinyc = await loadTinyc({ module: fake });
+    const tinyc = await loadTinycWithNative(fake);
     tinyc.addFileSync('/src/a.c', 'int a;\n');
     const state = tinyc.createState();
     state.compileFile('/src/a.c');
@@ -785,7 +784,7 @@ test('opfs paths: memory backend keeps module-side paths byte-identical', async 
   // Same module shape but no worker globals: the OPFS mount is not
   // attempted, the backend stays memory, and nothing is relocated.
   const fake = makeOpfsEmscripten();
-  const tinyc = await loadTinyc({ module: fake });
+  const tinyc = await loadTinycWithNative(fake);
   assert.equal(tinyc.fsBackend, 'memory');
   tinyc.addFileSync('/src/main.c', 'int main() {}');
   assert.ok(fake.nativeFiles.has('/src/main.c'));
@@ -800,7 +799,7 @@ test('opfs paths: memory backend keeps module-side paths byte-identical', async 
 
 test('registerIncludeDir reaches tcc_add_include_path on createState', async () => {
   const mock = makeMock();
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   tinyc.registerIncludeDir('/deps/include');
   tinyc.registerIncludeDir('/deps/include'); // duplicate is a no-op
   const state = tinyc.createState();
@@ -817,7 +816,7 @@ test('registerIncludeDir reaches tcc_add_include_path on createState', async () 
 
 test('compileFile feeds virtual FS content with a #line marker', async () => {
   const mock = makeMock();
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   tinyc.addFileSync('/src/a.c', 'int a;\n');
   const state = tinyc.createState();
   state.compileFile('/src/a.c');
@@ -831,13 +830,45 @@ test('compileFile feeds virtual FS content with a #line marker', async () => {
 // IO routing
 // ---------------------------------------------------------------------
 
+/** Load through the envelope path with a stub fetch serving a
+ *  compiler envelope whose glue factory records the opts it is
+ *  called with and returns `mock`. Resolves to the factory opts. */
+async function loadViaEnvelopeCapturingFactory(mock, loadOpts = {}) {
+  const glue = `export default function factory(opts) {
+    globalThis.__IO_FACTORY_OPTS__ = opts;
+    return globalThis.__IO_MOCK__;
+  }`;
+  globalThis.__IO_MOCK__ = mock;
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => envelopeText('tcc-riscv64-linux-gnu', {
+      glue,
+      wasm: Buffer.from([0, 97, 115, 109]).toString('base64'),
+    }),
+  });
+  try {
+    await loadTinyc({
+      target: 'riscv64-linux-gnu',
+      transport: 'fetch',
+      fsStore: makeFakeFsStore(new Map()),
+      ...loadOpts,
+    });
+    return globalThis.__IO_FACTORY_OPTS__;
+  } finally {
+    globalThis.fetch = prevFetch;
+    delete globalThis.__IO_MOCK__;
+    delete globalThis.__IO_FACTORY_OPTS__;
+    clearTargetModuleCache();
+  }
+}
+
 test('io: Emscripten print/printErr wiring routes to custom io', async () => {
   const mock = makeMock();
-  let captured;
   const outChunks = [];
   const errChunks = [];
-  await loadTinyc({
-    createModule: async (opts) => { captured = opts; return mock; },
+  const captured = await loadViaEnvelopeCapturingFactory(mock, {
     io: { out: (t) => outChunks.push(t), err: (t) => errChunks.push(t) },
   });
   captured.print('hello');
@@ -848,8 +879,7 @@ test('io: Emscripten print/printErr wiring routes to custom io', async () => {
 
 test('io: default wiring lands on console', async () => {
   const mock = makeMock();
-  let captured;
-  await loadTinyc({ createModule: async (opts) => { captured = opts; return mock; } });
+  const captured = await loadViaEnvelopeCapturingFactory(mock);
   const logged = [];
   const origLog = console.log;
   console.log = (line) => logged.push(line);
@@ -861,11 +891,98 @@ test('io: default wiring lands on console', async () => {
   assert.deepEqual(logged, ['to-console']);
 });
 
+/** The envelope content a loadModule hook returns for `target`:
+ *  a compiler envelope whose glue factory hands back `mock`,
+ *  stashed on globalThis under `stashKey` (the same capture
+ *  technique as loadViaEnvelopeCapturingFactory). */
+function hookEnvelope(target, mock, stashKey) {
+  globalThis[stashKey] = mock;
+  return envelopeText(`tcc-${target}`, {
+    glue: `export default function factory() { return globalThis[${JSON.stringify(stashKey)}]; }`,
+    wasm: Buffer.from([0, 97, 115, 109]).toString('base64'),
+  });
+}
+
+test('loadTinyc: module-supplying options are not read; the module is built from the envelope the loadModule hook returns', async () => {
+  const mock = makeMock();
+  const boobyTrap = () => { throw new Error('a module-supplying option was read'); };
+  try {
+    const tinyc = await loadTinyc({
+      loadModule: async (target) => hookEnvelope(target, mock, '__HOOK_MOCK__'),
+      createModule: boobyTrap,
+      wasmExports: new Proxy({}, { get: boobyTrap }),
+      module: new Proxy({}, { get: boobyTrap }),
+      wasmUrl: 'https://example.invalid/unused.wasm',
+      fsStore: makeFakeFsStore(new Map()),
+    });
+    assert.equal(tinyc.target, DEFAULT_TARGET);
+    const state = tinyc.createState();
+    state.compileString('int x;');
+    assert.equal(callsNamed(mock, 'tcc_compile_string').length, 1);
+    state.delete();
+  } finally {
+    delete globalThis.__HOOK_MOCK__;
+    clearTargetModuleCache();
+  }
+});
+
+test('loadTinyc: a loadModule hook returning a module object is rejected by name', async () => {
+  const mock = makeMock();
+  try {
+    await assert.rejects(
+      loadTinyc({
+        loadModule: async () => mock,
+        fsStore: makeFakeFsStore(new Map()),
+      }),
+      /loadModule hook .* must return the asset envelope's content/);
+    clearTargetModuleCache();
+    // Content that is not an envelope is a named parse failure,
+    // never a fallback to some other load path.
+    await assert.rejects(
+      loadTinyc({
+        loadModule: async () => 'this is not an envelope',
+        fsStore: makeFakeFsStore(new Map()),
+      }),
+      /asset envelope .* is not in the envelope form/);
+  } finally {
+    clearTargetModuleCache();
+  }
+});
+
+test('loadTinyc: the loadModule hook may return the envelope as bytes', async () => {
+  const mock = makeMock();
+  const text = hookEnvelope(DEFAULT_TARGET, mock, '__HOOK_MOCK__');
+  try {
+    for (const content of [
+      new TextEncoder().encode(text),
+      new TextEncoder().encode(text).buffer,
+    ]) {
+      clearTargetModuleCache();
+      const tinyc = await loadTinyc({
+        loadModule: async () => content,
+        fsStore: makeFakeFsStore(new Map()),
+      });
+      assert.equal(tinyc.target, DEFAULT_TARGET);
+    }
+    clearTargetModuleCache();
+    const tinyc = await loadTinyc({
+      loadModule: async () => new TextEncoder().encode(text),
+      fsStore: makeFakeFsStore(new Map()),
+    });
+    const state = tinyc.createState();
+    state.compileString('int x;');
+    assert.equal(callsNamed(mock, 'tcc_compile_string').length, 1);
+    state.delete();
+  } finally {
+    delete globalThis.__HOOK_MOCK__;
+    clearTargetModuleCache();
+  }
+});
+
 test('io: state error callback routes to err io', async () => {
   const mock = makeMock();
   const errChunks = [];
-  const tinyc = await loadTinyc({
-    wasmExports: mock,
+  const tinyc = await loadTinycWithNative(mock, {
     io: { err: (t) => errChunks.push(t) },
   });
   const state = tinyc.createState();
@@ -881,7 +998,7 @@ test('io: state error callback routes to err io', async () => {
 
 test('callMain: argv assembled with virtual bin path, tinyc_main preferred', async () => {
   const mock = makeMock();
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   const rc = tinyc.callMain(['-o', 'a.out', 'a.c']);
   assert.equal(rc, 7); // tinyc_main's return, not main's
   assert.equal(callsNamed(mock, 'main').length, 0);
@@ -892,7 +1009,7 @@ test('callMain: argv assembled with virtual bin path, tinyc_main preferred', asy
 
 test('callMain: falls back to main when tinyc_main is absent', async () => {
   const mock = makeMock({ tinyc_main: undefined });
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   const rc = tinyc.callMain(['-v']);
   assert.equal(rc, 3);
   const entry = callsNamed(mock, 'main')[0];
@@ -901,7 +1018,7 @@ test('callMain: falls back to main when tinyc_main is absent', async () => {
 
 test('callMain: missing main export throws a named error', async () => {
   const mock = makeMock({ tinyc_main: undefined, main: undefined });
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   assert.throws(
     () => tinyc.callMain([]),
     (err) => err instanceof TinycMissingExportError && err.exportName === 'main'
@@ -914,7 +1031,7 @@ test('callMain: missing main export throws a named error', async () => {
 
 test('missing tcc_* export throws TinycMissingExportError naming it', async () => {
   const mock = makeMock({ tcc_compile_string: undefined });
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   const state = tinyc.createState();
   assert.throws(
     () => state.compileString('int x;'),
@@ -979,7 +1096,7 @@ test('targets: registry lists the supported targets, wasm32-wasi is the default'
 
 test('targets: unknown target is rejected with the supported list', async () => {
   await assert.rejects(
-    loadTinyc({ target: 'sparc-unknown', wasmExports: makeMock() }),
+    loadTinyc({ target: 'sparc-unknown' }),
     (err) => /unknown target "sparc-unknown"/.test(err.message) &&
       err.message.includes('wasm32-wasi')
   );
@@ -988,8 +1105,8 @@ test('targets: unknown target is rejected with the supported list', async () => 
 test('targets: two instances of different targets coexist, virtual FS isolated', async () => {
   const mockA = makeMock();
   const mockB = makeMock();
-  const a = await loadTinyc({ target: 'x86_64-linux-gnu', wasmExports: mockA });
-  const b = await loadTinyc({ target: 'wasm32-wasi', wasmExports: mockB });
+  const a = await loadTinycWithNative(mockA, { target: 'x86_64-linux-gnu' });
+  const b = await loadTinycWithNative(mockB, { target: 'wasm32-wasi' });
   assert.equal(a.target, 'x86_64-linux-gnu');
   assert.equal(b.target, 'wasm32-wasi');
   assert.equal(a.canRun, false);
@@ -1016,7 +1133,7 @@ test('targets: module files load lazily, per target, at most once', async () => 
   const loads = [];
   const loadModule = async (target, files) => {
     loads.push([target, files.envelopeFile]);
-    return makeMock();
+    return hookEnvelope(target, makeMock(), `__LAZY_MOCK_${target}`);
   };
   const one = await loadTinyc({ target: 'x86_64-windows', loadModule });
   assert.equal(one.target, 'x86_64-windows');
@@ -1030,6 +1147,8 @@ test('targets: module files load lazily, per target, at most once', async () => 
   await loadTinyc({ target: 'riscv64-linux-gnu', loadModule });
   assert.deepEqual(loads.map((l) => l[0]), ['x86_64-windows', 'riscv64-linux-gnu']);
   assert.deepEqual(getLoadedTargets().sort(), ['riscv64-linux-gnu', 'x86_64-windows']);
+  delete globalThis['__LAZY_MOCK_x86_64-windows'];
+  delete globalThis['__LAZY_MOCK_riscv64-linux-gnu'];
   clearTargetModuleCache();
 });
 
@@ -1221,7 +1340,7 @@ const WASM_CUSTOM_START = new Uint8Array([
 
 test('run guard: non-wasm target rejects -run in callMain before reaching native', async () => {
   const mock = makeMock();
-  const tinyc = await loadTinyc({ target: 'aarch64-linux-gnu', wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock, { target: 'aarch64-linux-gnu' });
   assert.throws(
     () => tinyc.callMain(['-run', '/src/a.c']),
     (err) => err instanceof TinycRunNotSupportedError &&
@@ -1243,7 +1362,7 @@ test('run guard: darwin target rejects -run and state.run before reaching native
   const mock = makeMock({
     tcc_run(h, argc, argv) { runCalls.push([h, argc, argv]); return 42; },
   });
-  const tinyc = await loadTinyc({ target: 'arm64-apple-darwin', wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock, { target: 'arm64-apple-darwin' });
   assert.equal(tinyc.canRun, false);
   assert.throws(
     () => tinyc.callMain(['-run', '/src/a.c']),
@@ -1268,7 +1387,7 @@ test('run guard: non-wasm target rejects state.run even when tcc_run exists', as
   const mock = makeMock({
     tcc_run(h, argc, argv) { runCalls.push([h, argc, argv]); return 42; },
   });
-  const tinyc = await loadTinyc({ target: 'riscv64-linux-gnu', wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock, { target: 'riscv64-linux-gnu' });
   const state = tinyc.createState();
   assert.throws(
     () => state.run([]),
@@ -1284,8 +1403,7 @@ test('run: wasm32 target state.run compiles to a file and instantiates it in the
     tcc_run(h, argc, argv) { runCalls.push([h, argc, argv]); return 42; },
   });
   const outChunks = [];
-  const tinyc = await loadTinyc({
-    wasmExports: mock,
+  const tinyc = await loadTinycWithNative(mock, {
     io: { out: (t) => outChunks.push(t), err: () => {} },
   });
   assert.equal(tinyc.target, 'wasm32-wasi');
@@ -1311,8 +1429,7 @@ test('run: wasm32 target callMain -run compiles then instantiates; native main n
     },
   });
   const outChunks = [];
-  const tinyc = await loadTinyc({
-    wasmExports: mock,
+  const tinyc = await loadTinycWithNative(mock, {
     io: { out: (t) => outChunks.push(t), err: () => {} },
   });
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_HELLO);
@@ -1328,8 +1445,7 @@ test('run: wasm32 target callMain -run compiles then instantiates; native main n
 test('runWasmFile: executes a product stored in the virtual FS without recompiling', async () => {
   const mock = makeMock({});
   const outChunks = [];
-  const tinyc = await loadTinyc({
-    wasmExports: mock,
+  const tinyc = await loadTinycWithNative(mock, {
     io: { out: (t) => outChunks.push(t), err: () => {} },
   });
   tinyc.addFileSync('/out/prog.wasm', WASM_HELLO);
@@ -1341,7 +1457,7 @@ test('runWasmFile: executes a product stored in the virtual FS without recompili
 
 test('runWasmFile: function-style entry and instance shims apply, same stack as -run', async () => {
   const mock = makeMock({});
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   tinyc.addFileSync('/out/add.wasm', WASM_ADD);
   assert.equal(tinyc.runWasmFile('/out/add.wasm', { entry: 'add', callArgs: [19, 23] }), 42);
   // WASM_CUSTOM imports env.my_custom_add and env.host_log; the
@@ -1357,7 +1473,7 @@ test('runWasmFile: function-style entry and instance shims apply, same stack as 
 });
 
 test('runWasmFile: unsatisfiable imports throw TinycMissingImportError naming every missing import', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   tinyc.addFileSync('/out/custom.wasm', WASM_CUSTOM);
   let caught;
   try {
@@ -1468,7 +1584,7 @@ test('custom shims: unsatisfiable imports throw TinycMissingImportError naming e
 });
 
 test('custom shims: instance-level registration serves state.run; ctx reads module memory', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_CUSTOM);
   const seen = [];
   const logs = [];
@@ -1483,7 +1599,7 @@ test('custom shims: instance-level registration serves state.run; ctx reads modu
 });
 
 test('custom shims: ctx.writeCString writes a NUL-terminated string read back via ctx.readCString', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_WRITE);
   const logs = [];
   let written = -1;
@@ -1501,7 +1617,7 @@ test('custom shims: ctx.writeCString writes a NUL-terminated string read back vi
 });
 
 test('custom shims: per-run shims override instance registrations for that run only', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_CUSTOM);
   tinyc.registerShim('my_custom_add', (ctx, a, b) => a + b);
   tinyc.registerShim('host_log', () => {});
@@ -1514,7 +1630,7 @@ test('custom shims: per-run shims override instance registrations for that run o
 });
 
 test('custom shims: unregisterShim removes an instance registration', async () => {
-  const tinyc = await loadTinyc({ wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock());
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_CUSTOM);
   tinyc.registerShims({
     my_custom_add: (ctx, a, b) => a + b,
@@ -1539,7 +1655,7 @@ test('custom shims: callMain -run forwards per-run shims to the execution', asyn
       return 0; // compilation succeeds
     },
   });
-  const tinyc = await loadTinyc({ wasmExports: mock });
+  const tinyc = await loadTinycWithNative(mock);
   tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_CUSTOM_START);
   // Without the shim, the missing-import diagnostic fires.
   assert.throws(
@@ -1560,7 +1676,7 @@ test('custom shims: package-global registration serves new instances and bare ru
   });
   try {
     assert.equal(runWasmModuleSync(WASM_CUSTOM, { entry: 'run' }), 42);
-    const tinyc = await loadTinyc({ wasmExports: makeMock() });
+    const tinyc = await loadTinycWithNative(makeMock());
     tinyc.addFileSync(DEFAULT_RUN_OUTPUT, WASM_CUSTOM);
     const state = tinyc.createState();
     assert.equal(state.run([], { entry: 'run' }), 42);
@@ -1588,7 +1704,7 @@ test('worker: TinycWorker.registerShim throws and points at the shimModules opti
 // ---------------------------------------------------------------------
 
 test('export: products come out of the virtual FS as bytes and as a Blob', async () => {
-  const tinyc = await loadTinyc({ target: 'x86_64-windows', wasmExports: makeMock() });
+  const tinyc = await loadTinycWithNative(makeMock(), { target: 'x86_64-windows' });
   const peBytes = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]); // "MZ" header
   tinyc.addFileSync('/out/prog.exe', peBytes);
   const out = tinyc.exportFile('/out/prog.exe');
@@ -1684,9 +1800,8 @@ test('sysroot: loading a target sysroot retrieves its envelope and registers its
   const fetched = [];
   const fetchImpl = await sysrootEnvelopeFetch('x86_64-windows', fetched);
   const mock = makeMock();
-  const tinyc = await loadTinyc({
+  const tinyc = await loadTinycWithNative(mock, {
     target: 'x86_64-windows',
-    wasmExports: mock,
     sysroot: { fetchImpl, includeBinaries: true },
   });
   // The whole sysroot arrives as one envelope file, retrieved once.
@@ -1736,8 +1851,7 @@ test('assets: sysroot loads from its envelope under the script transport', async
     registry['sysroot-wasm32-wasi'] = { files: { 'include/x.h': b64 } };
   });
   try {
-    const tinyc = await loadTinyc({
-      wasmExports: makeMock(),
+    const tinyc = await loadTinycWithNative(makeMock(), {
       fsStore: makeFakeFsStore(new Map()),
       sysroot: {
         transport: 'script',
@@ -1765,8 +1879,7 @@ test('assets: a sysroot file missing from the envelope is a named load failure',
   });
   try {
     await assert.rejects(
-      loadTinyc({
-        wasmExports: makeMock(),
+      loadTinycWithNative(makeMock(), {
         fsStore: makeFakeFsStore(new Map()),
         sysroot: {
           transport: 'script',
@@ -1833,8 +1946,7 @@ test('assets: sysroot loads from its envelope under the fetch transport', async 
     };
   };
   try {
-    const tinyc = await loadTinyc({
-      wasmExports: makeMock(),
+    const tinyc = await loadTinycWithNative(makeMock(), {
       fsStore: makeFakeFsStore(new Map()),
       sysroot: {
         fetchImpl,

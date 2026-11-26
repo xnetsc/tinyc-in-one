@@ -494,6 +494,31 @@ PATCHES = [
      "    \"__riscv\",              \"TCC_TARGET_RISCV64\",\n"
      "    \"__wasm32__\",           \"TCC_TARGET_WASM32\",\n",
      1),
+    # 33. libtcc.c: tcc_set_output_type calls tccelf_new on every
+    #     invocation, and tccelf_new is not idempotent: a second
+    #     call appends a second set of standard sections, with a
+    #     NULL section-zero slot in the middle of s->sections.
+    #     The browser glue calls set_output_type twice on one
+    #     state (MEMORY default at the first compile, EXE at run
+    #     or output time), so the second call left a NULL hole
+    #     that the wasm output stage dereferenced (strcmp on a
+    #     NULL section name) and silently dropped the exported
+    #     variables (the symtab global then pointed at the empty
+    #     second set).  Create the sections once per state: the
+    #     rest of the call (output type, library paths) still
+    #     runs.  A first call always finds nb_sections == 0
+    #     (tccelf_delete resets it), so single-call callers —
+    #     the CLI included — behave exactly as before.
+    ("libtcc.c",
+     "    /* add sections */\n"
+     "    tccelf_new(s);",
+     "    /* add sections, once per state: tccelf_new is not\n"
+     "       idempotent, and a second call would append a second\n"
+     "       set of standard sections with a NULL section-zero\n"
+     "       slot in the middle of s->sections. */\n"
+     "    if (s->nb_sections == 0)\n"
+     "        tccelf_new(s);",
+     1),
 ]
 
 for fname, old, new, count in PATCHES:
