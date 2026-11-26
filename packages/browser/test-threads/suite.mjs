@@ -149,6 +149,110 @@ export async function runSuite(env) {
     return checkLines(parseLines(text), { plain: [42, 0, 0, 0] });
   });
 
+  // The entry's return value travels back through the
+  // threaded run's promise (threads design §2.3): runMainModule
+  // resolves with it, it is not the exit code. This is the
+  // regression for CI run 45779099647, where the browser
+  // consumer compared TinycState.run's promise synchronously.
+  await runCase('entry_return', async () => {
+    const { proc } = freshProcess();
+    const v = proc.runMainModule(await env.guestBytes('entry_return'),
+      { path: '/a.out', entry: 'answer' });
+    if (!(v instanceof Promise)) return 'runMainModule did not return a promise';
+    const result = await v;
+    if (result !== 42) return `entry returned ${result}, want 42`;
+    return null;
+  });
+
+  await runCase('host_proxy', async () => {
+    const { proc, text } = freshProcess({
+      shims: {
+        host_add: (ctx, a, b) => a + b,
+        host_add64: (ctx, a, b) => a + b,
+        host_halve: (ctx, x) => x / 2,
+        host_scale: (ctx, x, f) => x * f,
+        host_bump: (ctx, ptr) => {
+          const dv = new DataView(ctx.memory().buffer);
+          const old = dv.getInt32(ptr, true);
+          dv.setInt32(ptr, old + 7, true);
+          return old;
+        },
+        host_async_add: (ctx, a, b) =>
+          new Promise((r) => setTimeout(() => r(a + b), 5)),
+      },
+    });
+    const res = await proc.runMainModule(await env.guestBytes('host_proxy'));
+    if (res.exitCode !== 0) return `exit ${res.exitCode}; output: ${text()}`;
+    const bad = checkLines(parseLines(text()), {
+      host_proxy: [42, 1, 45, 60],
+      host_proxy2: [41, 48, 3, 0],
+      host_proxy3: [1705032709, 0, 0, 0],
+    });
+    if (bad) return bad;
+    // The asynchronous host answer is the proxy's contract
+    // (§5.7); the simulated tier's direct binding does not
+    // await it and the line is not asserted there.
+    if (env.tier === 'real') {
+      return checkLines(parseLines(text()), { host_async: [42, 0, 0, 0] });
+    }
+    return null;
+  });
+  await runCase('host_fail', async () => {
+    const { proc } = freshProcess({
+      shims: {
+        host_add: (ctx, a, b) => a + b,
+        host_fail: () => { throw new Error('host_fail says no'); },
+      },
+    });
+    try {
+      await proc.runMainModule(await env.guestBytes('host_fail'));
+      return 'the run completed; a host failure was expected';
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      if (!/host_fail/.test(msg)) {
+        return `error does not name the function: ${msg}`;
+      }
+      if (!/says no/.test(msg)) return `error lost the host's text: ${msg}`;
+      return null;
+    }
+  });
+  await runCase('churn', async () => {
+    const { proc, text } = freshProcess();
+    const res = await proc.runMainModule(await env.guestBytes('churn'));
+    if (res.exitCode !== 0) return `exit ${res.exitCode}; output: ${text()}`;
+    const row = parseLines(text()).get('churn');
+    if (!row) return `missing churn line; output: ${text()}`;
+    // row: [rounds, detached rounds, heap growth after
+    // warmup, 0]. One round's regions are ~66 KiB (a 64 KiB
+    // stack, the key array, the record); 175 unreclaimed
+    // rounds would grow the frontier by ~11 MB.
+    if (row[0] !== 200 || row[1] !== 100) {
+      return `counts ${row[0]}/${row[1]}, want 200/100`;
+    }
+    if (row[2] < 0 || row[2] > 131072) {
+      return `heap grew ${row[2]} bytes after warmup, want <= 131072`;
+    }
+    return null;
+  });
+  if (env.tier === 'real') {
+    await runCase('dir_boundary', async () => {
+      const { proc, text } = freshProcess();
+      // Test-only seam: preset the process's thread-id
+      // counter (the §5.6 header word at byte 528) so the
+      // handful of threads this case creates straddles the
+      // directory's first block boundary at tid 8192. Not a
+      // public API; the suite reaches the process's memory
+      // the way any embedder holding the process can.
+      new Int32Array(proc.memory.buffer)[528 / 4] = 8190;
+      const res = await proc.runMainModule(await env.guestBytes('dir_boundary'));
+      if (res.exitCode !== 0) return `exit ${res.exitCode}; output: ${text()}`;
+      return checkLines(parseLines(text()), {
+        dir_boundary: [8191, 8192, 8193, 8194],
+        dir_join: [0, 66, 0, EINVAL],
+      });
+    });
+  }
+
   if (env.includeDeadlock) {
     await runCase('deadlock', async () => {
       const { proc } = freshProcess();

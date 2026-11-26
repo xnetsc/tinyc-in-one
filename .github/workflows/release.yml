@@ -170,6 +170,26 @@ jobs:
           cp wasm-backend/tests/test-output.txt test-outputs/wasm-backend-regression.log
           exit $rc
 
+      # The §11 thread suite (packages/browser/test-threads) was
+      # local-only until run 45779099647, so CI never judged it.
+      # It runs here, after the wasm-backend regression built
+      # wasm32-tcc, and reuses the Playwright install the
+      # browser-consumer step put in /tmp/pw. Node 22 needs the
+      # JSPI flag for the simulated tier; the page runner serves
+      # its own COOP/COEP headers, so the real tier needs no
+      # special page serving.
+      - name: Thread suite - Node simulated tier
+        run: |
+          node --experimental-wasm-jspi packages/browser/test-threads/run-node.mjs \
+            > test-outputs/test-threads-node.log 2>&1
+
+      - name: Thread suite - browser page tiers (real + file simulated)
+        env:
+          TINYC_PLAYWRIGHT_DIR: /tmp/pw
+        run: |
+          node packages/browser/test-threads/run-page.mjs \
+            > test-outputs/test-threads-page.log 2>&1
+
       - name: Android package - native libs, then the Gradle AAR
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}

@@ -49,6 +49,8 @@ const MAINS = [
   'create_join', 'mutex_excl', 'mutex_kinds', 'cond_buffer', 'once',
   'spin', 'key_tls', 'thread_var', 'atomics_storm', 'dlopen_thread',
   'deadlock', 'exit7', 'main_exit', 'plain_dylink', 'nojspi',
+  'host_proxy', 'host_fail', 'dir_boundary', 'churn',
+  'entry_return',
 ];
 const SIDES = ['libtls', 'libfetch', 'libsecond', 'libplain'];
 for (const m of MAINS) {

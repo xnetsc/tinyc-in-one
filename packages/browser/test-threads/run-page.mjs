@@ -46,6 +46,8 @@ const MAINS = [
   'create_join', 'mutex_excl', 'mutex_kinds', 'cond_buffer', 'once',
   'spin', 'key_tls', 'thread_var', 'atomics_storm', 'dlopen_thread',
   'deadlock', 'exit7', 'main_exit', 'plain_dylink', 'nojspi',
+  'host_proxy', 'host_fail', 'dir_boundary', 'churn',
+  'entry_return',
 ];
 const SIDES = ['libtls', 'libfetch', 'libsecond', 'libplain'];
 for (const m of MAINS) {
@@ -200,13 +202,19 @@ fs.writeFileSync(path.join(fileDir, 'page.html'), filePage);
 
 // -- drive both pages with Chromium --
 import { createRequire } from 'node:module';
-const requireFromRepro = createRequire(
-  path.join(process.env.HOME, 'workspace/ci-repro-browser/package.json'));
-const { chromium } = requireFromRepro('playwright');
+// The Playwright install lives in the local repro directory
+// by default; CI installs it elsewhere and points here with
+// TINYC_PLAYWRIGHT_DIR. CHROMIUM, when set, pins the browser
+// binary; otherwise Playwright resolves its own installed
+// Chromium build.
+const requireFromPw = createRequire(path.join(
+  process.env.TINYC_PLAYWRIGHT_DIR ??
+    path.join(process.env.HOME, 'workspace/ci-repro-browser'),
+  'package.json'));
+const { chromium } = requireFromPw('playwright');
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM ??
-    path.join(process.env.HOME,
-      '.cache/ms-playwright/chromium-1255/chrome-linux/chrome'),
+  ...(process.env.CHROMIUM
+    ? { executablePath: process.env.CHROMIUM } : {}),
   args: ['--no-sandbox'],
 });
 

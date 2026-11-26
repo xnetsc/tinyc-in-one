@@ -307,11 +307,27 @@ export class Scheduler {
 
   _reapThread(thread) {
     this.threads.delete(thread.id);
-    // Stack regions and TLS areas are retired, never reused:
-    // forgetting the record is the whole of reaping (§3.1).
-    for (const record of this.proc._loadOrder) {
-      record.stackRegions?.delete(thread.id);
-      record.tlsAreas?.delete(thread.id);
+    // Reaping returns the thread's regions to their size
+    // classes (§3.1): per-module stacks and TLS areas, and
+    // the key value array. The exit value has already been
+    // taken by the joiner, or the thread was detached.
+    const proc = this.proc;
+    for (const record of proc._loadOrder) {
+      const stack = record.stackRegions?.get(thread.id);
+      if (stack !== undefined) {
+        proc._regionFree(stack, record.meta.stackSize, 16);
+        record.stackRegions.delete(thread.id);
+      }
+      const tls = record.tlsAreas?.get(thread.id);
+      if (tls !== undefined) {
+        proc._regionFree(tls, record.meta.tlsSize,
+          record.meta.tlsAlign || 4);
+        record.tlsAreas.delete(thread.id);
+      }
+    }
+    if (thread.keyValuesAddr) {
+      proc._regionFree(thread.keyValuesAddr, PTHREAD_KEYS_MAX * 4, 4);
+      thread.keyValuesAddr = 0;
     }
   }
 
@@ -1116,6 +1132,53 @@ const CB_LOAD_SEQ = 0, CB_ACKS_DONE = 4, CB_LOAD_DONE = 8,
   CB_STDIN_LEN = 36, CB_LOAD_FAILED = 40;
 const TR_STATE = 0, TR_EXIT = 4, TR_ACK = 8, TR_DETACHED = 12,
   TR_JOIN_CLAIMED = 16;
+// The thread-record directory (§6.6): a block table of
+// DIR_BLOCKS pointers in shared memory; each block holds
+// DIR_BLOCK_TIDS record addresses (32 KiB). A block is
+// reserved, zeroed and published by CAS on first use, so a
+// reader that sees a pointer sees a zeroed block. The
+// arithmetic cap is DIR_BLOCKS * DIR_BLOCK_TIDS =
+// 33,554,432 cumulative thread ids.
+const DIR_BLOCK_TIDS = 8192, DIR_BLOCKS = 4096;
+// The host-call proxy block (§5.7): one per thread, reserved
+// from the shared allocator on the thread's first proxied
+// call. Scalars cross in the args/result words; pointer
+// arguments are plain addresses into the shared memory,
+// which the coordinator dereferences itself.
+const PX_STATE = 0,        // futex word: PX_IDLE/PX_REQUEST/PX_DONE
+  PX_GEN = 4,              // generation counter
+  PX_STATUS = 8,           // at PX_DONE: PX_OK or PX_ERROR
+  PX_NARGS = 12,
+  PX_RESTYPE = 16,         // result type code, 0 = none
+  PX_ARGTYPES = 20,        // PX_MAXARGS type-code bytes
+  PX_NAMELEN = 36,
+  PX_NAME = 40,            // PX_NAME_MAX bytes: "module.name"
+  PX_ERRLEN = 168,
+  PX_ERR = 172,            // PX_ERR_MAX bytes of error text
+  PX_ARGS = 688,           // PX_MAXARGS 8-byte argument words
+  PX_RESULT = 816;         // one 8-byte result word
+const PX_SIZE = 1024, PX_MAXARGS = 16,
+  PX_NAME_MAX = 128, PX_ERR_MAX = 512;
+const PX_IDLE = 0, PX_REQUEST = 1, PX_DONE = 2;
+const PX_OK = 0, PX_ERROR = 1;
+const PX_TYPE_CODES = { i32: 1, i64: 2, f32: 3, f64: 4 };
+// The thread-region allocator (§3.1): exact-size free lists
+// for the regions a thread owns — its record, its key array,
+// its per-module stacks and TLS areas — whose sizes are
+// fixed per class. A class table in shared memory maps
+// (size, align) to a free-list head stored in the first word
+// of each free block; every list operation runs under the
+// allocator spin lock (the header word at [520, 524), §5.6),
+// the same lock the shim allocator mutates under. A miss
+// carves a fresh region from the bump frontier. Module
+// statics are not served here: they keep the never-freed
+// reserveStatic path. Blocks of REGION_ZERO_MAX bytes or
+// less are handed out zeroed; stack regions are handed out
+// with unspecified contents, as a fresh stack is.
+const REGION_CLASSES = 64;
+const REGION_TABLE_SIZE = 16 + REGION_CLASSES * 16;
+const REGION_ZERO_MAX = 4096;
+const ALLOC_LOCK_WORD = 520;
 const POLL_MS = 4;
 const RT_DEFAULT_TYPE = { params: ['i32', 'i32', 'i32', 'i32'], results: ['i32'] };
 const rtEncoder = new TextEncoder();
@@ -1147,8 +1210,10 @@ export function startThreadWorker(boot, helpers, port) {
       id: boot.threadId,
       recordAddr: boot.recordAddr,
       keyArrayAddr: boot.keyArrayAddr || 0,
+      proxyAddr: 0,            // §5.7 proxy block, reserved lazily
       regions: boot.regions || {}, // canonical -> { stackBase, tlsArea }
     },
+    hostImports: new Set(boot.hostImports ?? []), // "module.name" keys
     joined: new Set(),
     detachedLocal: new Set(),
     dlerror: '',
@@ -1304,8 +1369,8 @@ function rtRefreshGotTls(rt) {
 /** Build the table slot a coordinator descriptor names, at the
  *  same index: a stub traps by name, a shim is this worker's
  *  own shim of that name (wrapped to the descriptor's type), a
- *  host function does not exist in a worker and traps by name
- *  (§5.1's stated boundary). */
+ *  host function is a §5.7 proxy stub forwarding the call to
+ *  the coordinator, where the function itself lives. */
 function rtBuildSlot(rt, desc) {
   rt.slotDesc.set(desc.slot, desc);
   while (rt.table.length <= desc.slot) rt.table.grow(1);
@@ -1317,16 +1382,239 @@ function rtBuildSlot(rt, desc) {
   if (desc.kind === 'shim') {
     raw = rt.shimEnv.env[desc.name] ??
       rt.shimEnv.wasi_snapshot_preview1[desc.name];
+  } else if (desc.kind === 'host') {
+    const key = `env.${desc.name}`;
+    raw = (...args) => rtHostProxyCall(rt, key, type, args);
   }
   if (!raw) {
-    const message = desc.kind === 'host'
-      ? `tinyc: call to host function "${desc.name}", which is not ` +
-        `available inside a thread worker`
-      : `tinyc: call to unresolved function "${desc.name}"`;
-    raw = () => { throw new Error(message); };
+    raw = () => {
+      throw new Error(`tinyc: call to unresolved function "${desc.name}"`);
+    };
   }
   rt.table.set(desc.slot,
     rt.helpers.makeWrapperFunction(raw, type));
+}
+
+/** This thread's §5.7 proxy block, taken from the (PX_SIZE, 8)
+ *  region class on first use and returned at the thread's
+ *  exit (§3.1); the class hands blocks out zeroed, so the
+ *  state word starts idle on every use. */
+function rtProxyBlock(rt) {
+  if (!rt.my.proxyAddr) {
+    rt.my.proxyAddr = rtRegionAlloc(rt, PX_SIZE, 8);
+  }
+  return rt.my.proxyAddr;
+}
+
+/** A host function call, proxied to the coordinator (§5.7).
+ *  The scalars of the signature are marshalled through this
+ *  thread's proxy block; pointer arguments are plain addresses
+ *  into the shared memory, which the coordinator's function
+ *  dereferences itself — the call is the same call, executed
+ *  in the context that holds the function. The thread blocks
+ *  on the block's futex word (a bounded wait, re-checking, so
+ *  no wakeup can be lost), servicing load tasks while parked
+ *  per §5.3. Host call tasks are not serviced here: a host
+ *  function that waits, through callExport, on the very
+ *  thread that called it deadlocks — the caller's
+ *  responsibility, as with main-thread proxying elsewhere. */
+function rtHostProxyCall(rt, key, type, args) {
+  if (type.params.length > PX_MAXARGS) {
+    throw new Error(
+      `tinyc: host function "${key}": ${type.params.length} parameters ` +
+      `exceed the proxy limit of ${PX_MAXARGS}`);
+  }
+  if (type.results.length > 1) {
+    throw new Error(
+      `tinyc: host function "${key}": ${type.results.length} results ` +
+      `exceed the proxy limit of 1`);
+  }
+  const codes = type.params.map((t) => PX_TYPE_CODES[t]);
+  const resCode = type.results.length ? PX_TYPE_CODES[type.results[0]] : 0;
+  if (codes.some((c) => !c) || (type.results.length && !resCode)) {
+    throw new Error(
+      `tinyc: host function "${key}": signature ` +
+      `(${type.params.join(', ')}) -> (${type.results.join(', ')}) ` +
+      `cannot cross the proxy`);
+  }
+  const keyBytes = rtEncoder.encode(key);
+  if (keyBytes.length > PX_NAME_MAX) {
+    throw new Error(`tinyc: host function "${key}": name too long to proxy`);
+  }
+  const base = rtProxyBlock(rt);
+  const dv = new DataView(rt.memory.buffer);
+  const m = new Uint8Array(rt.memory.buffer);
+  const view = rt.view();
+  const sidx = base / 4;
+  if (Atomics.load(view, sidx) !== PX_IDLE) {
+    throw new Error(
+      `tinyc: host function "${key}": a proxy call is already ` +
+      `outstanding on this thread`);
+  }
+  m.set(keyBytes, base + PX_NAME);
+  dv.setInt32(base + PX_NAMELEN, keyBytes.length, true);
+  dv.setInt32(base + PX_NARGS, args.length, true);
+  dv.setInt32(base + PX_RESTYPE, resCode, true);
+  for (let i = 0; i < args.length; i++) {
+    m[base + PX_ARGTYPES + i] = codes[i];
+    const at = base + PX_ARGS + i * 8;
+    if (codes[i] === 1) dv.setInt32(at, args[i] | 0, true);
+    else if (codes[i] === 2) dv.setBigInt64(at, BigInt(args[i]), true);
+    else if (codes[i] === 3) dv.setFloat32(at, args[i], true);
+    else dv.setFloat64(at, args[i], true);
+  }
+  const gen = (rt.readI32(base + PX_GEN) + 1) | 0;
+  dv.setInt32(base + PX_GEN, gen, true);
+  Atomics.store(view, sidx, PX_REQUEST);
+  rt.port.postMessage({ type: 'host-call', slot: base, gen });
+  const done = () =>
+    Atomics.load(view, sidx) === PX_DONE &&
+    rt.readI32(base + PX_GEN) === gen;
+  while (!done()) {
+    rtServiceLoads(rt);
+    if (done()) break;
+    const v = Atomics.load(view, sidx);
+    if (v !== PX_DONE) Atomics.wait(view, sidx, v, POLL_MS);
+  }
+  const status = rt.readI32(base + PX_STATUS);
+  let result;
+  if (status === PX_ERROR) {
+    const len = rt.readI32(base + PX_ERRLEN);
+    const text = rtDecoder.decode(
+      m.slice(base + PX_ERR, base + PX_ERR + len));
+    Atomics.store(view, sidx, PX_IDLE);
+    throw new Error(`tinyc: host function "${key}" failed: ${text}`);
+  }
+  if (resCode === 1) result = dv.getInt32(base + PX_RESULT, true);
+  else if (resCode === 2) result = dv.getBigInt64(base + PX_RESULT, true);
+  else if (resCode === 3) result = dv.getFloat32(base + PX_RESULT, true);
+  else if (resCode === 4) result = dv.getFloat64(base + PX_RESULT, true);
+  Atomics.store(view, sidx, PX_IDLE);
+  return result;
+}
+
+/** The directory block covering `tid` (§6.6), or 0 when the
+ *  tid is past the table's arithmetic cap. With `create`, a
+ *  missing block is reserved, zeroed and published by CAS:
+ *  the loser of a publication race discards its own block —
+ *  a 32 KiB reservation the frontier never reclaims — and
+ *  uses the winner's, so a reader that sees a block pointer
+ *  always sees a zeroed block. */
+function rtDirBlock(rt, tid, create) {
+  const idx = tid >> 13;
+  if (idx < 0 || idx >= DIR_BLOCKS) return 0;
+  const view = rt.view();
+  const at = rt.boot.dirAddr / 4 + idx;
+  let block = Atomics.load(view, at);
+  if (block || !create) return block;
+  let fresh;
+  try {
+    fresh = rt.alloc.reserve(DIR_BLOCK_TIDS * 4, 4);
+  } catch {
+    return 0;
+  }
+  new Uint8Array(rt.memory.buffer).fill(0, fresh, fresh + DIR_BLOCK_TIDS * 4);
+  const prev = Atomics.compareExchange(view, at, 0, fresh);
+  return prev === 0 ? fresh : prev;
+}
+
+function rtDirGet(rt, tid) {
+  const block = rtDirBlock(rt, tid, false);
+  if (!block) return 0;
+  return Atomics.load(rt.view(), block / 4 + (tid & (DIR_BLOCK_TIDS - 1)));
+}
+
+/** Register a thread's record before its id is handed out:
+ *  ensure the block exists, then write the entry. A tid past
+ *  the arithmetic cap is created unregistered, as before. */
+function rtDirSet(rt, tid, recordAddr) {
+  const block = rtDirBlock(rt, tid, true);
+  if (!block) return;
+  Atomics.store(rt.view(), block / 4 + (tid & (DIR_BLOCK_TIDS - 1)),
+    recordAddr);
+}
+
+// -- the thread-region allocator (§3.1) --
+
+function rtRegionLock(rt) {
+  const view = rt.view();
+  while (Atomics.compareExchange(view, ALLOC_LOCK_WORD / 4, 0, 1) !== 0) {
+    // The lock is never held across a wait; contention is a
+    // peer context mid-operation, so a plain spin is brief.
+  }
+}
+
+function rtRegionUnlock(rt) {
+  const view = rt.view();
+  Atomics.store(view, ALLOC_LOCK_WORD / 4, 0);
+  Atomics.notify(view, ALLOC_LOCK_WORD / 4, 1);
+}
+
+/** Find (or create) the class entry for (size, align); the
+ *  caller holds the region lock. Returns its address, or 0
+ *  when the class table is full. */
+function rtRegionClass(rt, size, align, create) {
+  const table = rt.boot.regionTableAddr;
+  const dv = new DataView(rt.memory.buffer);
+  const count = dv.getInt32(table, true);
+  for (let i = 0; i < count; i++) {
+    const at = table + 16 + i * 16;
+    if (dv.getInt32(at, true) === size && dv.getInt32(at + 4, true) === align) {
+      return at;
+    }
+  }
+  if (!create || count >= REGION_CLASSES) return 0;
+  const at = table + 16 + count * 16;
+  dv.setInt32(at, size, true);
+  dv.setInt32(at + 4, align, true);
+  dv.setInt32(at + 8, 0, true);
+  dv.setInt32(at + 12, 0, true);
+  dv.setInt32(table, count + 1, true);
+  return at;
+}
+
+/** Allocate a thread region of an exact size class. A hit on
+ *  the class free list recycles a reaped thread's region; a
+ *  miss carves fresh from the bump frontier (through the
+ *  shim allocator, after the region lock is released — that
+ *  allocator takes the same lock word itself). */
+function rtRegionAlloc(rt, size, align) {
+  align = align || 4;
+  let addr = 0;
+  rtRegionLock(rt);
+  try {
+    const cls = rtRegionClass(rt, size, align, true);
+    if (cls) {
+      const head = rt.readI32(cls + 8);
+      if (head) {
+        addr = head;
+        rt.writeI32(cls + 8, rt.readI32(head));
+      }
+    }
+  } finally {
+    rtRegionUnlock(rt);
+  }
+  if (!addr) return rt.alloc.reserve(size, align);
+  if (size <= REGION_ZERO_MAX) {
+    new Uint8Array(rt.memory.buffer).fill(0, addr, addr + size);
+  }
+  return addr;
+}
+
+/** Return a thread region to its class free list. */
+function rtRegionFree(rt, addr, size, align) {
+  if (!addr) return;
+  align = align || 4;
+  rtRegionLock(rt);
+  try {
+    const cls = rtRegionClass(rt, size, align, true);
+    if (cls) {
+      rt.writeI32(addr, rt.readI32(cls + 8));
+      rt.writeI32(cls + 8, addr);
+    }
+  } finally {
+    rtRegionUnlock(rt);
+  }
 }
 
 /** Instantiate one replica from its boot/task description and
@@ -1379,7 +1667,7 @@ function rtEnsureRegions(rt, wrec) {
     region = { stackBase: null, tlsArea: 0 };
     rt.my.regions[wrec.canonical] = region;
     if (rt.my.id !== 1 && wrec.meta.stackSize !== undefined) {
-      region.stackBase = rt.alloc.reserve(wrec.meta.stackSize, 16);
+      region.stackBase = rtRegionAlloc(rt, wrec.meta.stackSize, 16);
     }
   }
   if (wrec.meta.tlsSize > 0 && !region.tlsArea) {
@@ -1389,7 +1677,7 @@ function rtEnsureRegions(rt, wrec) {
 }
 
 function rtTlsAlloc(rt, wrec) {
-  const addr = rt.alloc.reserve(wrec.meta.tlsSize, wrec.meta.tlsAlign);
+  const addr = rtRegionAlloc(rt, wrec.meta.tlsSize, wrec.meta.tlsAlign || 4);
   const m = new Uint8Array(rt.memory.buffer);
   m.fill(0, addr, addr + wrec.meta.tlsSize);
   if (wrec.meta.tlsTemplate) m.set(wrec.meta.tlsTemplate, addr);
@@ -1524,6 +1812,14 @@ function rtReplicaImports(rt, wrec, compiled) {
 
 function rtFunctionImport(rt, wrec, imp, visible) {
   const type = wrec.importTypes.get(`${imp.module}.${imp.name}`) ?? RT_DEFAULT_TYPE;
+  if (rt.hostImports.has(`${imp.module}.${imp.name}`)) {
+    // A host-supplied function: it shadows any same-named
+    // package shim exactly as on the coordinator, and is
+    // reached through the §5.7 proxy.
+    const key = `${imp.module}.${imp.name}`;
+    return rt.helpers.makeWrapperFunction(
+      (...args) => rtHostProxyCall(rt, key, type, args), type);
+  }
   const shimLayer = rt.shimEnv[imp.module];
   const raw = shimLayer ? shimLayer[imp.name] : undefined;
   if (raw !== undefined) {
@@ -1585,6 +1881,23 @@ function rtWaitStep(rt, cond) {
 }
 
 function rtServicePending(rt) {
+  rtServiceLoads(rt);
+  if (rt.my.id === 1) {
+    const cb = rt.boot.controlAddr;
+    const cseq = rt.readI32(cb + CB_CALL_SEQ);
+    if (cseq > rt.lastCallSeq) {
+      rt.lastCallSeq = cseq;
+      rtServiceCall(rt, rt.readI32(cb + CB_CALL_TASK_ADDR));
+    }
+  }
+}
+
+/** The load half of the pending work: apply any load task the
+ *  coordinator has posted. The §5.7 proxy wait services loads
+ *  through this alone — a host call task (§5.5) is guest code
+ *  on this thread's stacks, and running it while the thread is
+ *  parked inside a host function would invert the call. */
+function rtServiceLoads(rt) {
   const cb = rt.boot.controlAddr;
   const seq = rt.readI32(cb + CB_LOAD_SEQ);
   if (seq > rt.lastTaskSeq) {
@@ -1601,13 +1914,6 @@ function rtServicePending(rt) {
       rt.lastTaskSeq = seq;
     } else {
       rtApplyLoadTask(rt, payloadAddr);
-    }
-  }
-  if (rt.my.id === 1) {
-    const cseq = rt.readI32(cb + CB_CALL_SEQ);
-    if (cseq > rt.lastCallSeq) {
-      rt.lastCallSeq = cseq;
-      rtServiceCall(rt, rt.readI32(cb + CB_CALL_TASK_ADDR));
     }
   }
 }
@@ -1690,6 +1996,8 @@ function rtApplyLoadTask(rt, payloadAddr) {
       needed: manifest.needed ?? [],
     });
   }
+  const hostCount = rd();
+  for (let i = 0; i < hostCount; i++) rt.hostImports.add(rstr());
   rt.lastTask = { seq, requester, handle, failed: false, error: '' };
   for (const g of gots) rtApplyGot(rt, g);
   for (const d of slotDescs) {
@@ -1848,6 +2156,36 @@ function rtRunKeyDestructors(rt) {
 
 function rtThreadExit(rt, value) {
   try { rtRunKeyDestructors(rt); } catch { /* exit proceeds */ }
+  if (rt.my.id !== 1) {
+    // Return this thread's regions to their size classes
+    // (§3.1) before the exit becomes observable in the
+    // record: a joiner reads only the record, and the record
+    // alone outlives the thread — the coordinator reaps it
+    // once a join has taken the exit value, or at a detached
+    // thread's exit. The main thread's regions are not
+    // returned; the process ends with it (§2.3).
+    for (const wrec of rt.records.values()) {
+      const region = rt.my.regions[wrec.canonical];
+      if (!region) continue;
+      if (region.stackBase) {
+        rtRegionFree(rt, region.stackBase, wrec.meta.stackSize, 16);
+        region.stackBase = null;
+      }
+      if (region.tlsArea) {
+        rtRegionFree(rt, region.tlsArea, wrec.meta.tlsSize,
+          wrec.meta.tlsAlign || 4);
+        region.tlsArea = 0;
+      }
+    }
+    if (rt.my.keyArrayAddr) {
+      rtRegionFree(rt, rt.my.keyArrayAddr, PTHREAD_KEYS_MAX * 4, 4);
+      rt.my.keyArrayAddr = 0;
+    }
+    if (rt.my.proxyAddr) {
+      rtRegionFree(rt, rt.my.proxyAddr, PX_SIZE, 8);
+      rt.my.proxyAddr = 0;
+    }
+  }
   if (rt.my.recordAddr) {
     const view = rt.view();
     Atomics.store(view, (rt.my.recordAddr + TR_EXIT) / 4, value | 0);
@@ -1870,7 +2208,7 @@ function createRealPthreadShims(rt) {
 
   function keyArray() {
     if (!rt.my.keyArrayAddr) {
-      rt.my.keyArrayAddr = rt.alloc.reserve(PTHREAD_KEYS_MAX * 4, 4);
+      rt.my.keyArrayAddr = rtRegionAlloc(rt, PTHREAD_KEYS_MAX * 4, 4);
     }
     return rt.my.keyArrayAddr;
   }
@@ -1980,22 +2318,25 @@ function createRealPthreadShims(rt) {
       const regions = {};
       try {
         id = Atomics.add(view(), HDR_TID_COUNTER / 4, 1) + 1;
-        recordAddr = rt.alloc.reserve(32, 4);
+        recordAddr = rtRegionAlloc(rt, 32, 4);
         for (let i = 0; i < 32; i += 4) rt.writeI32(recordAddr + i, 0);
         if (detached) rt.writeI32(recordAddr + TR_DETACHED, 1);
-        keyAddr = rt.alloc.reserve(PTHREAD_KEYS_MAX * 4, 4);
+        keyAddr = rtRegionAlloc(rt, PTHREAD_KEYS_MAX * 4, 4);
         for (const wrec of rt.records.values()) {
           const region = { stackBase: null, tlsArea: 0 };
           if (wrec.meta.stackSize !== undefined) {
-            region.stackBase = rt.alloc.reserve(wrec.meta.stackSize, 16);
+            region.stackBase = rtRegionAlloc(rt, wrec.meta.stackSize, 16);
           }
           if (wrec.meta.tlsSize > 0) region.tlsArea = rtTlsAlloc(rt, wrec);
           regions[wrec.canonical] = region;
         }
+        // Registration completes before the id is handed
+        // out (§6.6): block ensured, entry written, and only
+        // then the spawn message and the caller's threadPtr.
+        rtDirSet(rt, id, recordAddr);
       } catch {
         return EAGAIN;
       }
-      if (id < 8192) rt.writeI32(rt.boot.dirAddr + id * 4, recordAddr);
       rt.port.postMessage({
         type: 'thread-spawn', threadId: id, slot: startSlot, arg,
         detached, recordAddr, keyArrayAddr: keyAddr, regions,
@@ -2006,8 +2347,7 @@ function createRealPthreadShims(rt) {
     pthread_join(target, retvalPtr) {
       if (target === rt.my.id) return EDEADLK;
       if (rt.joined.has(target)) return EINVAL;
-      const recordAddr = target < 8192
-        ? rt.readI32(rt.boot.dirAddr + target * 4) : 0;
+      const recordAddr = rtDirGet(rt, target);
       if (!recordAddr) return ESRCH;
       if (rt.detachedLocal.has(target) ||
           rt.readI32(recordAddr + TR_DETACHED) !== 0) return EINVAL;
@@ -2022,8 +2362,7 @@ function createRealPthreadShims(rt) {
       return 0;
     },
     pthread_detach(target) {
-      const recordAddr = target < 8192
-        ? rt.readI32(rt.boot.dirAddr + target * 4) : 0;
+      const recordAddr = rtDirGet(rt, target);
       if (!recordAddr) return ESRCH;
       if (rt.detachedLocal.has(target)) return EINVAL;
       rt.detachedLocal.add(target);

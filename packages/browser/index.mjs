@@ -1672,7 +1672,10 @@ export class TinycState {
    *  the dylink process's runMainModule), and the instance's
    *  registered shims apply automatically; io is a text IO partial
    *  (default: this state's IO) whose out/err receive the program's
-   *  fd_write output, decoded. */
+   *  fd_write output, decoded. A dylink product runs through a
+   *  threaded process, so for it run returns a promise of the
+   *  exit code or entry return value (threads design §2.3); a
+   *  standalone product returns the value synchronously. */
   run(args = [], options = {}) {
     if (!isRunnableTarget(this._instance.target)) {
       throw new TinycRunNotSupportedError(this._instance.target);
@@ -2818,6 +2821,30 @@ const CB_LOAD_SEQ = 0, CB_ACKS_DONE = 4, CB_LOAD_DONE = 8,
   CB_CALL_DONE = 24, CB_STDIN_CURSOR = 28, CB_STDIN_ADDR = 32,
   CB_STDIN_LEN = 36, CB_LOAD_FAILED = 40;
 const TR_STATE = 0, TR_EXIT = 4, TR_ACK = 8, TR_DETACHED = 12;
+/** The thread-record directory (threads design §6.6): a
+ *  block table of DIR_BLOCKS pointers; each block holds
+ *  DIR_BLOCK_TIDS record addresses (32 KiB), reserved, zeroed
+ *  and published by CAS on first use. The arithmetic cap is
+ *  DIR_BLOCKS * DIR_BLOCK_TIDS = 33,554,432 cumulative
+ *  thread ids. */
+const DIR_BLOCK_TIDS = 8192, DIR_BLOCKS = 4096;
+/** The host-call proxy block (threads design §5.7), one per
+ *  thread in shared memory; the layout is shared with the
+ *  worker-side stub in threads.mjs. */
+const PX_STATE = 0, PX_GEN = 4, PX_STATUS = 8, PX_NARGS = 12,
+  PX_RESTYPE = 16, PX_ARGTYPES = 20, PX_NAMELEN = 36,
+  PX_NAME = 40, PX_ERRLEN = 168, PX_ERR = 172, PX_ARGS = 688,
+  PX_RESULT = 816;
+const PX_ERR_MAX = 512;
+const PX_DONE = 2, PX_OK = 0, PX_ERROR = 1;
+/** The thread-region allocator (threads design §3.1):
+ *  exact-size free lists over a class table in shared
+ *  memory, operated under the allocator spin lock — the
+ *  header word at [520, 524) (§5.6). */
+const REGION_CLASSES = 64;
+const REGION_TABLE_SIZE = 16 + REGION_CLASSES * 16;
+const REGION_ZERO_MAX = 4096;
+const ALLOC_LOCK_WORD = 520;
 
 /** The pthread shims that can block, supplied to a threaded
  *  simulated-tier process's modules wrapped in
@@ -2914,6 +2941,12 @@ export class TinycProcess {
     this._reserveStatic = def.reserveStatic;
     this._shimsOption = options.shims ?? null;
     this._importsOption = options.imports ?? null;
+    // Host-supplied functions by "module.name" key, as bound
+    // for this process's own instantiation (§5.7): in the
+    // real tier the workers reach exactly these through the
+    // proxy. Rebuilt by every _buildImports.
+    this._hostProvidedFns = new Map();
+    this._regionTableAddr = 0;  // §3.1 class table, on demand
     this._modules = new Map();      // canonical path -> record
     this._handles = new Map();      // handle id -> record
     this._nextHandle = 1;
@@ -3022,12 +3055,13 @@ export class TinycProcess {
   /** The thread's TLS area for a module, allocated and
    *  initialized (template bytes, zeroed tail) on first use —
    *  the later of thread creation and module load is when the
-   *  callers invoke this. Areas are retired with the thread,
-   *  never reused. */
+   *  callers invoke this. Areas come from the thread-region
+   *  allocator (§3.1) and return to it when the thread is
+   *  reaped. */
   _tlsAreaFor(tid, record) {
     let addr = record.tlsAreas.get(tid);
     if (addr === undefined) {
-      addr = this._reserveStatic(record.meta.tlsSize, record.meta.tlsAlign || 4);
+      addr = this._regionAlloc(record.meta.tlsSize, record.meta.tlsAlign || 4);
       const m = new Uint8Array(this.memory.buffer);
       m.fill(0, addr, addr + record.meta.tlsSize);
       if (record.meta.tlsTemplate) {
@@ -3042,12 +3076,12 @@ export class TinycProcess {
 
   /** A created thread's stack region for a module (§3.1): the
    *  main thread uses the module's baked span and has no
-   *  region. Regions are retired with the thread, never
-   *  reused. */
+   *  region. Regions come from the thread-region allocator
+   *  and return to it when the thread is reaped. */
   _stackRegionFor(tid, record) {
     let base = record.stackRegions.get(tid);
     if (base === undefined) {
-      base = this._reserveStatic(record.meta.stackSize, 16);
+      base = this._regionAlloc(record.meta.stackSize, 16);
       record.stackRegions.set(tid, base);
     }
     return base;
@@ -3122,7 +3156,7 @@ export class TinycProcess {
     this._writeI32(HDR_TID_COUNTER, id);
     const thread = new ThreadRecord(id);
     thread.detached = detached;
-    thread.keyValuesAddr = this._reserveStatic(128 * 4, 4);
+    thread.keyValuesAddr = this._regionAlloc(128 * 4, 4);
     for (const record of this._loadOrder) {
       if (record.meta.stackSize !== undefined && id !== 1) {
         this._stackRegionFor(id, record);
@@ -3334,7 +3368,7 @@ export class TinycProcess {
     return slot;
   }
 
-  _shimSlot(name, fn, requester = null) {
+  _shimSlot(name, fn, requester = null, isHost = false) {
     let slot = this._shimSlots.get(name);
     if (slot === undefined) {
       let type = requester?.importTypes?.get(`env.${name}`) ?? null;
@@ -3349,7 +3383,7 @@ export class TinycProcess {
       this._shimSlots.set(name, slot);
       if (this._slotDesc) {
         this._slotDesc.set(slot, {
-          kind: 'shim', name,
+          kind: isHost ? 'host' : 'shim', name,
           params: [...t.params], results: [...t.results],
         });
       }
@@ -3498,16 +3532,31 @@ export class TinycProcess {
       }
     }
     const ctx = createShimContext(this._holder, this._byteIO);
+    // Provenance of the final binding, per "module.name" key:
+    // a function supplied by a host layer (the package-global
+    // registry, the instance's shims, the process's shims or
+    // raw imports) exists only in this context. In the real
+    // tier the workers classify it 'host' and reach it
+    // through the §5.7 proxy; the package's own layers above
+    // are 'shim' and exist in every worker.
+    const hostFns = new Map();
     for (const layer of [globalShimRegistry, this._tinyc?._shims, this._shimsOption]) {
       if (!layer) continue;
       for (const [key, fn] of shimEntriesOf(layer)) {
         const { module: mn, name } = splitShimKey(key);
-        put(mn, name, (...a) => fn(ctx, ...a));
+        const bound = (...a) => fn(ctx, ...a);
+        put(mn, name, bound);
+        hostFns.set(`${mn}.${name}`, bound);
       }
     }
     for (const [mn, fns] of Object.entries(this._importsOption ?? {})) {
-      for (const [name, v] of Object.entries(fns)) put(mn, name, v);
+      for (const [name, v] of Object.entries(fns)) {
+        put(mn, name, v);
+        if (typeof v === 'function') hostFns.set(`${mn}.${name}`, v);
+        else hostFns.delete(`${mn}.${name}`);
+      }
     }
+    this._hostProvidedFns = hostFns;
     // Structural imports: process-owned, not overridable.
     put('env', 'memory', this.memory);
     put('env', '__indirect_function_table', this.table);
@@ -3547,7 +3596,7 @@ export class TinycProcess {
             if (hit) this._fillGotTls(imp.name, hit.definer, hit.offset);
             else unresolvedGotTls.push(imp.name);
           } else {
-            const hit = this._resolveGot(kind, imp.name, record, provided);
+            const hit = this._resolveGot(kind, imp.name, record, provided, hostFns);
             if (hit) this._fillGot(kind, imp.name, hit.value, hit.definer);
             else if (kind === 'mem') unresolvedGotMem.push(imp.name);
           }
@@ -3596,12 +3645,16 @@ export class TinycProcess {
 
   /** A GOT value for a not-yet-filled entry, in the §5 order:
    *  shim layer (functions only), global table, requester closure. */
-  _resolveGot(kind, name, record, provided) {
+  _resolveGot(kind, name, record, provided, hostFns) {
     const wantKind = kind === 'func' ? 0 : 1;
     if (kind === 'func') {
       const shim = provided.get(`env.${name}`);
       if (typeof shim === 'function') {
-        return { value: this._shimSlot(name, shim, record), definer: 'shim' };
+        return {
+          value: this._shimSlot(name, shim, record,
+            hostFns?.has(`env.${name}`) ?? false),
+          definer: 'shim',
+        };
       }
     }
     const g = this._globalSymbols.get(name);
@@ -4246,7 +4299,7 @@ export class TinycProcess {
     // module's data image is about to land on.
     const mainThread = this._scheduler?.mainThread;
     if (mainThread && !mainThread.keyValuesAddr) {
-      mainThread.keyValuesAddr = this._reserveStatic(128 * 4, 4);
+      mainThread.keyValuesAddr = this._regionAlloc(128 * 4, 4);
     }
     const exports = record.instance.exports;
     const invoke = (fn, args) => this._jspi
@@ -4319,7 +4372,8 @@ export class TinycProcess {
     if (R.control) return;
     R.control = this._reserveStatic(64, 4);
     R.keyTableAddr = this._reserveStatic(128 * 4, 4);
-    R.dirAddr = this._reserveStatic(8192 * 4, 4);
+    R.dirAddr = this._reserveStatic(DIR_BLOCKS * 4, 4);
+    this._regionTable();
     const stdin = this._stdinOption;
     if (stdin !== null && stdin !== undefined) {
       const bytes = typeof stdin === 'string'
@@ -4336,8 +4390,139 @@ export class TinycProcess {
     const addr = this._reserveStatic(32, 4);
     const dv = new DataView(this.memory.buffer);
     for (let i = 0; i < 32; i += 4) dv.setInt32(addr + i, 0, true);
-    if (tid < 8192) this._writeI32(this._real.dirAddr + tid * 4, addr);
+    this._dirSet(tid, addr);
     return addr;
+  }
+
+  /** The directory block covering `tid` (§6.6), or 0 when the
+   *  tid is past the table's arithmetic cap. With `create`, a
+   *  missing block is reserved, zeroed and published by CAS —
+   *  the same protocol the workers use (threads.mjs), so a
+   *  race between a worker registering its thread and the
+   *  coordinator registering the main record has one winner
+   *  and the loser discards its block. */
+  _dirBlock(tid, create) {
+    const idx = tid >> 13;
+    if (idx < 0 || idx >= DIR_BLOCKS) return 0;
+    const view = new Int32Array(this.memory.buffer);
+    const at = this._real.dirAddr / 4 + idx;
+    let block = Atomics.load(view, at);
+    if (block || !create) return block;
+    const fresh = this._reserveStatic(DIR_BLOCK_TIDS * 4, 4);
+    new Uint8Array(this.memory.buffer)
+      .fill(0, fresh, fresh + DIR_BLOCK_TIDS * 4);
+    const prev = Atomics.compareExchange(view, at, 0, fresh);
+    return prev === 0 ? fresh : prev;
+  }
+
+  _dirSet(tid, recordAddr) {
+    const block = this._dirBlock(tid, true);
+    if (!block) return;
+    Atomics.store(new Int32Array(this.memory.buffer),
+      block / 4 + (tid & (DIR_BLOCK_TIDS - 1)), recordAddr);
+  }
+
+  _dirClear(tid) {
+    const block = this._dirBlock(tid, false);
+    if (!block) return;
+    Atomics.store(new Int32Array(this.memory.buffer),
+      block / 4 + (tid & (DIR_BLOCK_TIDS - 1)), 0);
+  }
+
+  // -- the thread-region allocator (§3.1) ---------------------
+
+  /** The shared class table for thread-region size classes,
+   *  reserved once per threaded process. */
+  _regionTable() {
+    if (!this._regionTableAddr) {
+      const addr = this._reserveStatic(REGION_TABLE_SIZE, 16);
+      new Uint8Array(this.memory.buffer)
+        .fill(0, addr, addr + REGION_TABLE_SIZE);
+      this._regionTableAddr = addr;
+    }
+    return this._regionTableAddr;
+  }
+
+  _regionLock() {
+    const view = new Int32Array(this.memory.buffer);
+    while (Atomics.compareExchange(view, ALLOC_LOCK_WORD / 4, 0, 1) !== 0) {
+      // Never held across a wait; a plain spin is brief.
+    }
+  }
+
+  _regionUnlock() {
+    const view = new Int32Array(this.memory.buffer);
+    Atomics.store(view, ALLOC_LOCK_WORD / 4, 0);
+    Atomics.notify(view, ALLOC_LOCK_WORD / 4, 1);
+  }
+
+  /** Find (or create) the class entry for (size, align); the
+   *  caller holds the region lock. */
+  _regionClass(size, align, create) {
+    const table = this._regionTableAddr;
+    const dv = new DataView(this.memory.buffer);
+    const count = dv.getInt32(table, true);
+    for (let i = 0; i < count; i++) {
+      const at = table + 16 + i * 16;
+      if (dv.getInt32(at, true) === size &&
+          dv.getInt32(at + 4, true) === align) return at;
+    }
+    if (!create || count >= REGION_CLASSES) return 0;
+    const at = table + 16 + count * 16;
+    dv.setInt32(at, size, true);
+    dv.setInt32(at + 4, align, true);
+    dv.setInt32(at + 8, 0, true);
+    dv.setInt32(at + 12, 0, true);
+    dv.setInt32(table, count + 1, true);
+    return at;
+  }
+
+  /** Allocate a thread region of an exact size class: a
+   *  reaped thread's region of the same class is recycled
+   *  before the bump frontier advances. In a non-threaded
+   *  process there is nothing to reclaim — the single thread
+   *  lives to process end — and the plain reserve serves, so
+   *  the 0.4.0 layout is untouched. */
+  _regionAlloc(size, align) {
+    align = align || 4;
+    if (!this._threaded) return this._reserveStatic(size, align);
+    this._regionTable();
+    let addr = 0;
+    this._regionLock();
+    try {
+      const cls = this._regionClass(size, align, true);
+      if (cls) {
+        const head = this._readI32(cls + 8);
+        if (head) {
+          addr = head;
+          this._writeI32(cls + 8, this._readI32(head));
+        }
+      }
+    } finally {
+      this._regionUnlock();
+    }
+    if (!addr) return this._reserveStatic(size, align);
+    if (size <= REGION_ZERO_MAX) {
+      new Uint8Array(this.memory.buffer).fill(0, addr, addr + size);
+    }
+    return addr;
+  }
+
+  /** Return a thread region to its class free list. */
+  _regionFree(addr, size, align) {
+    if (!addr || !this._threaded) return;
+    align = align || 4;
+    this._regionTable();
+    this._regionLock();
+    try {
+      const cls = this._regionClass(size, align, true);
+      if (cls) {
+        this._writeI32(addr, this._readI32(cls + 8));
+        this._writeI32(cls + 8, addr);
+      }
+    } finally {
+      this._regionUnlock();
+    }
   }
 
   _bootData(tid, entry, extra = {}) {
@@ -4371,6 +4556,8 @@ export class TinycProcess {
       controlAddr: R.control,
       keyTableAddr: R.keyTableAddr,
       dirAddr: R.dirAddr,
+      regionTableAddr: this._regionTableAddr,
+      hostImports: [...this._hostProvidedFns.keys()],
       recordAddr: extra.recordAddr ?? 0,
       keyArrayAddr: extra.keyArrayAddr ?? 0,
       args: [...this._args],
@@ -4636,6 +4823,9 @@ export class TinycProcess {
       const pad2 = (4 - (body.length % 4)) % 4;
       if (pad2) push(new Uint8Array(pad2));
     }
+    const hostImports = [...this._hostProvidedFns.keys()];
+    w32(hostImports.length);
+    for (const key of hostImports) wstr(key);
     const addr = this._reserveStatic(size, 4);
     const m = new Uint8Array(this.memory.buffer);
     let at = addr;
@@ -4729,6 +4919,102 @@ export class TinycProcess {
     });
   }
 
+  /** Reap a created thread in the real tier (§6.6). The
+   *  exiting worker has already returned the thread's big
+   *  regions — its per-module stacks and TLS areas and its
+   *  key array — before its exit became observable; what
+   *  remains here is the record itself, freed last, and its
+   *  directory entry. The main thread's record is never
+   *  reaped; it lives to teardown. */
+  _reapRealThread(tid) {
+    const w = this._real?.workers.get(tid);
+    if (!w || w.reaped || !w.recordAddr) return;
+    w.reaped = true;
+    this._regionFree(w.recordAddr, 32, 4);
+    this._dirClear(tid);
+  }
+
+  /** Execute one proxied host call (§5.7). The worker that
+   *  owns the block is blocked on its futex word; the
+   *  coordinator never blocks — a synchronous result is
+   *  written back at once, a thenable's when it settles, and
+   *  in both cases the answer lands in the block before the
+   *  word is set and notified. Blocks are per thread, so
+   *  concurrent calls from different workers proceed and
+   *  complete in any order. A throw or a rejection crosses
+   *  back as the error text the worker's stub rethrows. */
+  _realHostCall(msg) {
+    const base = msg.slot;
+    if (!base) return;
+    const dv = new DataView(this.memory.buffer);
+    const m = new Uint8Array(this.memory.buffer);
+    const view = new Int32Array(this.memory.buffer);
+    const finish = (status, apply) => {
+      try { if (apply) apply(); } finally {
+        dv.setInt32(base + PX_STATUS, status, true);
+        Atomics.store(view, base / 4, PX_DONE);
+        Atomics.notify(view, base / 4);
+      }
+    };
+    const fail = (text) => finish(PX_ERROR, () => {
+      const bytes = textEncoder.encode(String(text))
+        .subarray(0, PX_ERR_MAX);
+      m.set(bytes, base + PX_ERR);
+      dv.setInt32(base + PX_ERRLEN, bytes.length, true);
+    });
+    try {
+      const nameLen = dv.getInt32(base + PX_NAMELEN, true);
+      const key = textDecoder.decode(
+        m.slice(base + PX_NAME, base + PX_NAME + nameLen));
+      const fn = this._hostProvidedFns.get(key);
+      if (typeof fn !== 'function') {
+        fail(`tinyc: host function "${key}" is not registered ` +
+          `with this process`);
+        return;
+      }
+      const nargs = dv.getInt32(base + PX_NARGS, true);
+      const args = [];
+      for (let i = 0; i < nargs; i++) {
+        const code = m[base + PX_ARGTYPES + i];
+        const at = base + PX_ARGS + i * 8;
+        if (code === 1) args.push(dv.getInt32(at, true));
+        else if (code === 2) args.push(dv.getBigInt64(at, true));
+        else if (code === 3) args.push(dv.getFloat32(at, true));
+        else if (code === 4) args.push(dv.getFloat64(at, true));
+        else {
+          fail(`tinyc: host function "${key}": argument ${i} ` +
+            `carries an unknown type code ${code}`);
+          return;
+        }
+      }
+      const resCode = dv.getInt32(base + PX_RESTYPE, true);
+      const writeResult = (value) => finish(PX_OK, () => {
+        const at = base + PX_RESULT;
+        if (resCode === 1) dv.setInt32(at, value | 0, true);
+        else if (resCode === 2) {
+          let b;
+          try {
+            b = typeof value === 'bigint' ? value : BigInt(value);
+          } catch {
+            b = BigInt(Math.trunc(Number(value) || 0));
+          }
+          dv.setBigInt64(at, b, true);
+        }
+        else if (resCode === 3) dv.setFloat32(at, Number(value), true);
+        else if (resCode === 4) dv.setFloat64(at, Number(value), true);
+      });
+      const out = fn(...args);
+      if (out && typeof out.then === 'function') {
+        out.then(writeResult,
+          (err) => fail(err && err.message ? err.message : String(err)));
+      } else {
+        writeResult(out);
+      }
+    } catch (err) {
+      fail(err && err.message ? err.message : String(err));
+    }
+  }
+
   _onWorkerMessage(tid, msg) {
     const R = this._real;
     if (!R || !msg || typeof msg !== 'object') return;
@@ -4758,6 +5044,16 @@ export class TinycProcess {
         const w = R.workers.get(tid);
         if (w) w.alive = false;
         if (tid === 1) R.mainExited = true;
+        if (w && tid !== 1) {
+          w.exited = true;
+          // Reap (§6.6): a detached thread is reaped at its
+          // exit; a joinable one when the joiner's reap note
+          // arrives. The two messages come from different
+          // workers and race, so either may land first.
+          const detached = w.recordAddr &&
+            this._readI32(w.recordAddr + TR_DETACHED) !== 0;
+          if (detached || w.reapAsked) this._reapRealThread(tid);
+        }
         // Rule 3: the main thread pthread_exited and every
         // other thread has since exited.
         if (R.mainRun && R.mainExited) {
@@ -4765,6 +5061,21 @@ export class TinycProcess {
           for (const o of R.workers.values()) if (o.alive) anyAlive = true;
           if (!anyAlive) this._settleMainRun({ type: 'all-exited' });
         }
+        break;
+      }
+      case 'thread-reap': {
+        // A join has taken the thread's exit value (or a
+        // detach found it already exited): the record may go
+        // once the exit itself has been seen.
+        const w = R.workers.get(msg.threadId);
+        if (w && msg.threadId !== 1) {
+          w.reapAsked = true;
+          if (w.exited) this._reapRealThread(msg.threadId);
+        }
+        break;
+      }
+      case 'host-call': {
+        this._realHostCall(msg);
         break;
       }
       case 'main-returned':

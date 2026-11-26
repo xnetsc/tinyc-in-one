@@ -79,15 +79,18 @@ try {
   const st = t.createState();
   check('state compileString returns 0',
     st.compileString('int answer() { return 42; }') === 0);
+  // run() returns a promise for a dylink product (the run goes
+  // through a threaded process; threads design §2.3), so the
+  // entry's return value is awaited, not compared synchronously.
   check('state-compiled answer() returns 42',
-    st.run([], { entry: 'answer' }) === 42);
+    await st.run([], { entry: 'answer' }) === 42);
   st.delete();
 
   t.addFile('/answer.c', 'int answer2() { return 42; }\n');
   const st2 = t.createState();
   check('state compileFile returns 0', st2.compileFile('/answer.c') === 0);
   check('file-compiled answer2() returns 42',
-    st2.run([], { entry: 'answer2' }) === 42);
+    await st2.run([], { entry: 'answer2' }) === 42);
   st2.delete();
 
   // A later state's product must contain only its own program's
