@@ -1835,6 +1835,12 @@ export class Tinyc {
   constructor(bridge, { fs, io, target = DEFAULT_TARGET }) {
     this._bridge = bridge;
     this.fs = fs;
+    // Session memory cache of dylink library units whose
+    // write-back into the virtual FS failed: canonical path ->
+    // unit-file envelope text. Every process of this instance
+    // shares it (see TinycProcess._libraryMemCache); an entry
+    // exists only while the virtual FS does not hold the unit.
+    this._libraryMemCache = new Map();
     this._io = io;
     this.target = target;
     this._states = new Set();
@@ -3263,11 +3269,27 @@ export class TinycProcess {
 
   // -- library resolution (design §13) --------------------------------
 
+  /** The session memory cache of retrieved library units whose
+   *  write-back into the virtual FS failed: canonical path ->
+   *  unit-file envelope text (the exact text the write-back
+   *  tried to store; its body was hash-verified at retrieval).
+   *  The cache lives on the attached instance — the session
+   *  owning the virtual FS — so all of the instance's processes
+   *  share it. A standalone process has no virtual FS and never
+   *  writes back, so it has no cache either. */
+  _libraryMemCache() {
+    const t = this._tinyc;
+    if (!t) return null;
+    return (t._libraryMemCache ??= new Map());
+  }
+
   /** A library from local sources only — the resolved cache, the
    *  script registry, the attached instance's virtual FS, the
-   *  readModule callback. A local file that fails its integrity
-   *  check counts as absent; the reason is remembered for error
-   *  messages. Returns null when nothing usable is local. */
+   *  readModule callback, the session memory cache of units
+   *  whose write-back failed. A local file that fails its
+   *  integrity check counts as absent; the reason is remembered
+   *  for error messages. Returns null when nothing usable is
+   *  local. */
   _libraryLocal(canonical) {
     const cached = this._libraries.get(canonical);
     if (cached) return cached;
@@ -3302,6 +3324,27 @@ export class TinycProcess {
         }
       }
     }
+    if (!lib) {
+      const memCache = this._libraryMemCache();
+      const text = memCache?.get(canonical);
+      if (text !== undefined) {
+        try {
+          lib = libraryFromBytes(canonical, textEncoder.encode(text));
+        } catch (err) {
+          this._libraryErrors.set(canonical, err.message);
+        }
+        if (lib && this._tinyc) {
+          // A memory hit retries the write-back: the unit
+          // belongs in the virtual FS, and a write that lands
+          // now evicts the memory entry (later loads read the
+          // FS copy); a write that still fails keeps it.
+          try {
+            this._tinyc.fs.addFileSync(canonical, text);
+            memCache.delete(canonical);
+          } catch { /* still unwritable: keep the memory entry */ }
+        }
+      }
+    }
     if (lib) {
       this._libraries.set(canonical, lib);
       this._libraryErrors.delete(canonical);
@@ -3323,7 +3366,8 @@ export class TinycProcess {
 
   /** A library, retrieving its manifest through the transport when
    *  no usable copy is local; a retrieval is written back into the
-   *  virtual FS, best-effort. */
+   *  virtual FS, best-effort — a failed write-back leaves the unit
+   *  in the session memory cache instead (see _libraryLocal). */
   async _libraryFetched(canonical) {
     const local = this._libraryLocal(canonical);
     if (local) return local;
@@ -3346,10 +3390,19 @@ export class TinycProcess {
     this._libraries.set(canonical, lib);
     this._libraryErrors.delete(canonical);
     if (this._tinyc) {
+      // Write-back is best-effort; never a load failure. A unit
+      // that lands is served from the virtual FS afterwards, so
+      // no memory copy is kept; a unit whose write fails goes to
+      // the session memory cache instead and resolves from
+      // memory next time, until a retried write lands and
+      // evicts it.
+      const text = manifestEnvelopeText(canonical, manifest);
       try {
-        this._tinyc.fs.addFileSync(
-          canonical, manifestEnvelopeText(canonical, manifest));
-      } catch { /* write-back is best-effort; never a load failure */ }
+        this._tinyc.fs.addFileSync(canonical, text);
+        this._libraryMemCache()?.delete(canonical);
+      } catch {
+        this._libraryMemCache()?.set(canonical, text);
+      }
     }
     return lib;
   }

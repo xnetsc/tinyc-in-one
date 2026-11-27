@@ -6,11 +6,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 import {
   loadTinyc,
   loadTinycWithNative,
   VirtualFS,
+  TinycProcess,
   TinycMissingExportError,
   TinycRunNotSupportedError,
   VIRTUAL_BIN_PATH,
@@ -2091,4 +2093,152 @@ test('assets: the compiler module loads from its envelope under the fetch transp
     delete globalThis.__ENVELOPE_FACTORY_OPTS__;
     clearTargetModuleCache();
   }
+});
+
+// ---------------------------------------------------------------------
+// Dylink loader: memory cache for units whose write-back failed
+//
+// The loader's resolution is TinycProcess._prefetchClosure (the
+// first step of loadModule): local sources, then retrieval, then
+// a best-effort write-back into the attached instance's virtual
+// FS. The harness attaches a fake instance whose FS is a Map with
+// a switchable write failure, and stubs the global fetch the
+// transport reads, counting every retrieval.
+// ---------------------------------------------------------------------
+
+/** A dylink unit manifest over arbitrary body bytes, in the form
+ *  the loader validates: version 1, base64 body, its SHA-256. */
+function unitManifest(bodyBytes) {
+  return {
+    version: 1,
+    flavor: 0,
+    body: Buffer.from(bodyBytes).toString('base64'),
+    hash: createHash('sha256').update(bodyBytes).digest('hex'),
+    mem_size: 1024,
+    mem_align: 16,
+    bss_off: 1024,
+    bss_size: 0,
+    table_size: 0,
+    needed: [],
+    exports: [],
+  };
+}
+
+/** The unit file's envelope text: the form the write-back stores
+ *  and the envelope parser reads back. */
+function unitEnvelopeText(canonical, manifest) {
+  return (
+    'globalThis.__TINYC_DYLINK_REGISTRY__ ??= Object.create(null);\n' +
+    `globalThis.__TINYC_DYLINK_REGISTRY__[${JSON.stringify(canonical)}] = ` +
+    `${JSON.stringify(manifest)};\n`
+  );
+}
+
+function makeLoaderHarness(canonical, bodyBytes) {
+  const files = new Map();
+  const fs = {
+    failWrites: false,
+    hasFile: (p) => files.has(p),
+    readFile: (p) => files.get(p) ?? null,
+    addFileSync: (p, content) => {
+      if (fs.failWrites) throw new Error('tinyc test: store write failed');
+      files.set(p, typeof content === 'string'
+        ? new TextEncoder().encode(content) : content);
+      return p;
+    },
+    removeFile: (p) => files.delete(p),
+  };
+  const fetched = [];
+  const envelope = unitEnvelopeText(canonical, unitManifest(bodyBytes));
+  const fetchStub = async (url) => {
+    fetched.push(String(url));
+    return { ok: true, status: 200, text: async () => envelope };
+  };
+  const tinyc = { fs }; // one attached instance shared by every process
+  const newProcess = () => new TinycProcess({
+    tinyc, baseUrl: 'https://libs.example.test/', transport: 'fetch',
+  });
+  return { files, fs, fetched, fetchStub, newProcess };
+}
+
+async function withLoaderFetch(stub, fn) {
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = stub;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+}
+
+test('loader cache: a failed write-back is served from memory, not refetched', async () => {
+  const canonical = '/sysroot/libmem-a.tinyc.js';
+  const body = new Uint8Array([1, 2, 3, 4, 5]);
+  const h = makeLoaderHarness(canonical, body);
+  h.fs.failWrites = true;
+  await withLoaderFetch(h.fetchStub, async () => {
+    await h.newProcess()._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 1);
+    const proc2 = h.newProcess();
+    await proc2._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 1); // memory hit: no second fetch
+    assert.deepEqual(proc2._libraryLocal(canonical).bodyBytes, body);
+  });
+});
+
+test('loader cache: a successful write-back leaves no memory copy', async () => {
+  const canonical = '/sysroot/libmem-b.tinyc.js';
+  const h = makeLoaderHarness(canonical, new Uint8Array([9, 8, 7]));
+  await withLoaderFetch(h.fetchStub, async () => {
+    await h.newProcess()._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 1);
+    assert.equal(h.fs.hasFile(canonical), true);
+    h.fs.removeFile(canonical); // the sysroot copy is deleted
+    await h.newProcess()._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 2); // no memory copy: fetched again
+  });
+});
+
+test('loader cache: after a failed write-back the unit loads with no sysroot copy', async () => {
+  const canonical = '/sysroot/libmem-c.tinyc.js';
+  const body = new Uint8Array([3, 1, 4]);
+  const h = makeLoaderHarness(canonical, body);
+  h.fs.failWrites = true;
+  await withLoaderFetch(h.fetchStub, async () => {
+    const proc = h.newProcess();
+    await proc._prefetchClosure(canonical); // the failed write is not a load failure
+    assert.equal(h.fs.hasFile(canonical), false); // the entry is memory-only
+    assert.deepEqual(proc._libraryLocal(canonical).bodyBytes, body);
+  });
+});
+
+test('loader cache: a memory hit retries the write-back and evicts on success', async () => {
+  const canonical = '/sysroot/libmem-d.tinyc.js';
+  const h = makeLoaderHarness(canonical, new Uint8Array([4, 2]));
+  await withLoaderFetch(h.fetchStub, async () => {
+    h.fs.failWrites = true;
+    await h.newProcess()._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 1);
+    assert.equal(h.fs.hasFile(canonical), false);
+    h.fs.failWrites = false; // writes recover
+    await h.newProcess()._prefetchClosure(canonical); // memory hit + retry
+    assert.equal(h.fetched.length, 1); // served from memory
+    assert.equal(h.fs.hasFile(canonical), true); // the retry landed it
+    h.fs.removeFile(canonical); // the sysroot copy is deleted
+    await h.newProcess()._prefetchClosure(canonical);
+    assert.equal(h.fetched.length, 2); // memory was evicted: fetched again
+  });
+});
+
+test('loader cache: a memory hit whose retry write still fails keeps the entry', async () => {
+  const canonical = '/sysroot/libmem-e.tinyc.js';
+  const h = makeLoaderHarness(canonical, new Uint8Array([6, 6, 6]));
+  h.fs.failWrites = true;
+  await withLoaderFetch(h.fetchStub, async () => {
+    await h.newProcess()._prefetchClosure(canonical);
+    await h.newProcess()._prefetchClosure(canonical); // hit, retry fails, kept
+    await h.newProcess()._prefetchClosure(canonical); // hit again
+    assert.equal(h.fetched.length, 1);
+    assert.equal(h.fs.hasFile(canonical), false);
+  });
 });

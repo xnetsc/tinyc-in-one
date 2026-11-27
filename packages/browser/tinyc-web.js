@@ -6108,6 +6108,7 @@ ${src}`;
     constructor(bridge, { fs, io, target = DEFAULT_TARGET }) {
       this._bridge = bridge;
       this.fs = fs;
+      this._libraryMemCache = /* @__PURE__ */ new Map();
       this._io = io;
       this.target = target;
       this._states = /* @__PURE__ */ new Set();
@@ -7478,11 +7479,26 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       return textDecoder2.decode(m.slice(ptr, end));
     }
     // -- library resolution (design §13) --------------------------------
+    /** The session memory cache of retrieved library units whose
+     *  write-back into the virtual FS failed: canonical path ->
+     *  unit-file envelope text (the exact text the write-back
+     *  tried to store; its body was hash-verified at retrieval).
+     *  The cache lives on the attached instance — the session
+     *  owning the virtual FS — so all of the instance's processes
+     *  share it. A standalone process has no virtual FS and never
+     *  writes back, so it has no cache either. */
+    _libraryMemCache() {
+      const t = this._tinyc;
+      if (!t) return null;
+      return t._libraryMemCache ??= /* @__PURE__ */ new Map();
+    }
     /** A library from local sources only — the resolved cache, the
      *  script registry, the attached instance's virtual FS, the
-     *  readModule callback. A local file that fails its integrity
-     *  check counts as absent; the reason is remembered for error
-     *  messages. Returns null when nothing usable is local. */
+     *  readModule callback, the session memory cache of units
+     *  whose write-back failed. A local file that fails its
+     *  integrity check counts as absent; the reason is remembered
+     *  for error messages. Returns null when nothing usable is
+     *  local. */
     _libraryLocal(canonical) {
       const cached = this._libraries.get(canonical);
       if (cached) return cached;
@@ -7521,6 +7537,24 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
           }
         }
       }
+      if (!lib) {
+        const memCache = this._libraryMemCache();
+        const text = memCache?.get(canonical);
+        if (text !== void 0) {
+          try {
+            lib = libraryFromBytes(canonical, textEncoder2.encode(text));
+          } catch (err) {
+            this._libraryErrors.set(canonical, err.message);
+          }
+          if (lib && this._tinyc) {
+            try {
+              this._tinyc.fs.addFileSync(canonical, text);
+              memCache.delete(canonical);
+            } catch {
+            }
+          }
+        }
+      }
       if (lib) {
         this._libraries.set(canonical, lib);
         this._libraryErrors.delete(canonical);
@@ -7539,7 +7573,8 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     }
     /** A library, retrieving its manifest through the transport when
      *  no usable copy is local; a retrieval is written back into the
-     *  virtual FS, best-effort. */
+     *  virtual FS, best-effort — a failed write-back leaves the unit
+     *  in the session memory cache instead (see _libraryLocal). */
     async _libraryFetched(canonical) {
       const local = this._libraryLocal(canonical);
       if (local) return local;
@@ -7560,12 +7595,12 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       this._libraries.set(canonical, lib);
       this._libraryErrors.delete(canonical);
       if (this._tinyc) {
+        const text = manifestEnvelopeText(canonical, manifest);
         try {
-          this._tinyc.fs.addFileSync(
-            canonical,
-            manifestEnvelopeText(canonical, manifest)
-          );
+          this._tinyc.fs.addFileSync(canonical, text);
+          this._libraryMemCache()?.delete(canonical);
         } catch {
+          this._libraryMemCache()?.set(canonical, text);
         }
       }
       return lib;
