@@ -1339,6 +1339,17 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
             if (i) wb_putc(&text, ',');
             dy_json_str(&text, s->wasm_dylink_needs[i]);
         }
+        /* The search directories for the needed names (the
+           DT_RUNPATH analogue): an ordered list, sysroot-root
+           relative, with $ORIGIN standing for this unit's own
+           directory. The toolchain writes this default — the
+           unit's own directory, the sysroot's lib directory,
+           then the sysroot root (where units were placed before
+           this field existed). The field travels with the unit:
+           its owner may edit it in the manifest afterwards, no
+           recompilation needed — the loader reads it as-is. */
+        wb_write(&text, "],\"search_dirs\":[\"$ORIGIN\",\"lib\",\".\"",
+            (int)strlen("],\"search_dirs\":[\"$ORIGIN\",\"lib\",\".\""));
         /* The GOT.func symbols static data references: the loader
            binds these eagerly (the init copies their values into
            data slots, where a later binding could not reach). */

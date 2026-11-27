@@ -6694,6 +6694,11 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       tlsAlign: manifest.tls_align || 4,
       tlsTemplate: typeof manifest.tls_template === "string" ? base64ToBytes(manifest.tls_template) : null,
       needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
+      // The module's library search directories (the manifest's
+      // search_dirs, the DT_RUNPATH analogue): undefined when the
+      // manifest carries none — the loader then applies its
+      // documented default (DEFAULT_SEARCH_DIRS).
+      searchDirs: Array.isArray(manifest.search_dirs) ? manifest.search_dirs.map(String) : void 0,
       dataGotFunc: Array.isArray(manifest.data_got_func) ? manifest.data_got_func.map(String) : [],
       exports: (Array.isArray(manifest.exports) ? manifest.exports : []).map((e) => ({
         name: String(e.name),
@@ -6865,6 +6870,48 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       throw new TinycDylinkError("tinyc: module path must be a non-empty string");
     }
     return path.startsWith("/") ? normalizeVfsPath(path) : normalizeVfsPath(`${baseDir}/${path}`);
+  }
+  var DEFAULT_SEARCH_DIRS = ["$ORIGIN", "lib", "."];
+  function libraryNameForms(name) {
+    const forms = [name];
+    const withExt = name.endsWith(".tinyc.js") ? name : `${name}.tinyc.js`;
+    if (withExt !== name) forms.push(withExt);
+    if (!name.startsWith("lib")) forms.push(`lib${withExt}`);
+    return forms;
+  }
+  function searchDirsResolved(searchDirs, originDir) {
+    const dirs = [];
+    for (const entry of searchDirs ?? DEFAULT_SEARCH_DIRS) {
+      let dir;
+      if (entry === "$ORIGIN" || entry.startsWith("$ORIGIN/")) {
+        if (originDir == null) continue;
+        dir = entry === "$ORIGIN" ? originDir : `${originDir}/${entry.slice("$ORIGIN/".length)}`;
+      } else if (entry.startsWith("/")) {
+        dir = entry;
+      } else {
+        dir = `/sysroot/${entry}`;
+      }
+      dir = normalizeVfsPath(dir);
+      if (!dirs.includes(dir)) dirs.push(dir);
+    }
+    return dirs;
+  }
+  function libraryCandidates(name, searchDirs, originDir, pathBase) {
+    if (typeof name !== "string" || name.length === 0) {
+      throw new TinycDylinkError("tinyc: module path must be a non-empty string");
+    }
+    if (name.includes("/")) {
+      return [canonicalModulePath(name, pathBase ?? "/sysroot")];
+    }
+    const dirs = searchDirsResolved(searchDirs, originDir);
+    const out = [];
+    for (const form of libraryNameForms(name)) {
+      for (const dir of dirs) {
+        const candidate = normalizeVfsPath(`${dir}/${form}`);
+        if (!out.includes(candidate)) out.push(candidate);
+      }
+    }
+    return out;
   }
   function vfsDirname(p) {
     const i = p.lastIndexOf("/");
@@ -7240,6 +7287,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       this._hostProvidedFns = /* @__PURE__ */ new Map();
       this._regionTableAddr = 0;
       this._modules = /* @__PURE__ */ new Map();
+      this._modulesByName = /* @__PURE__ */ new Map();
       this._handles = /* @__PURE__ */ new Map();
       this._nextHandle = 1;
       this._globalSymbols = /* @__PURE__ */ new Map();
@@ -7561,6 +7609,106 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       }
       return lib;
     }
+    /** The search scope of one module's needed entries: its own
+     *  manifest's search_dirs, with $ORIGIN at its own directory.
+     *  Each module's recorded names resolve through its own list
+     *  (the DT_RUNPATH rule: the list applies to the carrying
+     *  module's direct dependencies). */
+    _neededScope(lib, canonical) {
+      const dir = vfsDirname(canonical);
+      return { searchDirs: lib.meta.searchDirs, originDir: dir, pathBase: dir };
+    }
+    /** The process's dlopen search scope: the main module's
+     *  manifest search_dirs, with $ORIGIN at the main module's
+     *  directory — a process's library search range follows its
+     *  main module, whoever calls dlopen (a guest module, the
+     *  host, a worker request). Before a main module exists the
+     *  default list applies and $ORIGIN has no referent, so it
+     *  contributes no candidate. (dlopen entries reject path
+     *  spellings by name before resolving; a path spelling that
+     *  still reaches resolution through this scope keeps its
+     *  historical base, '/sysroot'.) */
+    _processSearch() {
+      const main = this._main;
+      return {
+        searchDirs: main?.meta.searchDirs,
+        originDir: main ? vfsDirname(main.canonical) : null,
+        pathBase: "/sysroot"
+      };
+    }
+    /** Resolve a library name against local sources, through
+     *  the given search scope. Returns the winning candidate's
+     *  canonical path, or null when no candidate is local.
+     *
+     *  The one resolution rule, shared by needed entries and
+     *  dlopen: the candidate name forms (libraryNameForms) are
+     *  tried in order, and each form is looked up in two sources
+     *  in order — first among the modules already loaded into
+     *  this process, by file name (a module is registered under
+     *  the file name of the unit it was loaded from, wherever
+     *  that unit lives: see _registerModuleName), then on disk
+     *  through the scope's search directories in order. The
+     *  first hit wins, so an earlier name form found loaded
+     *  beats a later form found on disk, and within one form a
+     *  loaded module beats the disk. A spelling containing '/'
+     *  is an old-format needed entry, not a name: it resolves
+     *  to its single historical location (see
+     *  libraryCandidates). */
+    _resolveLibraryLocal(name, scope) {
+      if (name.includes("/")) {
+        const candidate = canonicalModulePath(name, scope.pathBase ?? "/sysroot");
+        return this._libraryLocal(candidate) ? candidate : null;
+      }
+      const dirs = searchDirsResolved(scope.searchDirs, scope.originDir);
+      for (const form of libraryNameForms(name)) {
+        const loaded = this._modulesByName.get(form);
+        if (loaded) return loaded.canonical;
+        for (const dir of dirs) {
+          const candidate = normalizeVfsPath(`${dir}/${form}`);
+          if (this._libraryLocal(candidate)) return candidate;
+        }
+      }
+      return null;
+    }
+    /** Resolve a library name, retrieving through the transport
+     *  when nothing is local: the local rule runs first, in
+     *  full; only when it misses everywhere are candidates
+     *  retrieved, in the same candidate order — a retrieval is
+     *  requested under the same relative layout (the candidate's
+     *  path below the root, appended to the base URL, by
+     *  _libraryFetched). Returns the winning canonical path;
+     *  throws naming every location tried when none yields the
+     *  library. */
+    async _resolveLibraryFetched(name, scope) {
+      const local = this._resolveLibraryLocal(name, scope);
+      if (local !== null) return local;
+      const candidates = libraryCandidates(
+        name,
+        scope.searchDirs,
+        scope.originDir,
+        scope.pathBase
+      );
+      let lastError = null;
+      for (const candidate of candidates) {
+        try {
+          await this._libraryFetched(candidate);
+          return candidate;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw new TinycDylinkError(
+        `tinyc: cannot find library "${name}" (searched: ${candidates.join(", ")})` + (lastError ? `: ${lastError.message}` : "")
+      );
+    }
+    /** Resolve a dlopen-style library name through the process
+     *  search scope, retrieving where needed, and prefetch its
+     *  whole needed closure. Returns the canonical path. */
+    async _prefetchByName(name) {
+      const canonical = await this._resolveLibraryFetched(name, this._processSearch());
+      await this._prefetchClosure(canonical);
+      return canonical;
+    }
     /** Whether a library and its whole needed closure are
      *  available from local sources — the guest dlopen fast path
      *  in a threaded process (§9.1). */
@@ -7569,7 +7717,11 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       seen.add(canonical);
       const lib = this._libraryLocal(canonical);
       if (!lib) return false;
-      return lib.meta.needed.every((n) => this._closureLocal(canonicalModulePath(n, vfsDirname(canonical)), seen));
+      const scope = this._neededScope(lib, canonical);
+      return lib.meta.needed.every((n) => {
+        const dep = this._resolveLibraryLocal(n, scope);
+        return dep !== null && this._closureLocal(dep, seen);
+      });
     }
     /** A library, retrieving its manifest through the transport when
      *  no usable copy is local; a retrieval is written back into the
@@ -7606,15 +7758,18 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       return lib;
     }
     /** Resolve the whole needed closure of a root library through
-     *  _libraryFetched, so the synchronous load below never waits. */
+     *  _libraryFetched, so the synchronous load below never waits.
+     *  Each needed name resolves through its declaring module's
+     *  search directories (see _resolveLibraryFetched). */
     async _prefetchClosure(rootCanonical) {
       const seen = /* @__PURE__ */ new Set();
       const walk = async (canonical) => {
         if (seen.has(canonical)) return;
         seen.add(canonical);
         const lib = await this._libraryFetched(canonical);
+        const scope = this._neededScope(lib, canonical);
         for (const need of lib.meta.needed) {
-          await walk(canonicalModulePath(need, vfsDirname(canonical)));
+          await walk(await this._resolveLibraryFetched(need, scope));
         }
       };
       await walk(rootCanonical);
@@ -7975,6 +8130,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         throw new TinycDylinkError("tinyc: the process has ended");
       }
       const lib = opts.lib ?? this._libraryLocal(canonical);
+      if (lib && !this._libraries.has(canonical)) {
+        this._libraries.set(canonical, lib);
+      }
       if (!lib) {
         const why = this._libraryErrors.get(canonical);
         throw new TinycDylinkError(why ? `tinyc: cannot load "${canonical}": ${why}` : `tinyc: cannot load "${canonical}": not present locally (a host loadModule call retrieves it from the base URL first)`);
@@ -8012,6 +8170,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       if (holderKey !== null) record.handleHolders.set(holderKey, 1);
       this._modules.set(canonical, record);
       this._handles.set(record.handle, record);
+      this._registerModuleName(record);
       try {
         record.memoryBase = this._reserveForModule(meta, record.isMain);
         record.tableBase = this._allocTable(meta.tableSize);
@@ -8026,8 +8185,20 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         }
         if (flags & RTLD_GLOBAL || record.isMain) this._registerGlobals(record);
         const childFlags = flags & RTLD_NOW ? RTLD_NOW : RTLD_LAZY;
+        const scope = this._neededScope(lib, canonical);
         for (const need of meta.needed) {
-          const depCanonical = canonicalModulePath(need, vfsDirname(canonical));
+          const depCanonical = this._resolveLibraryLocal(need, scope);
+          if (depCanonical === null) {
+            const searched = libraryCandidates(
+              need,
+              scope.searchDirs,
+              scope.originDir,
+              scope.pathBase
+            );
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": its needed library "${need}" is not present locally (searched: ${searched.join(", ")}; a host loadModule call retrieves libraries from the base URL first)`
+            );
+          }
           const dep = this._loadModule(depCanonical, {
             flags: childFlags,
             requester: record
@@ -8185,6 +8356,25 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       }
       return null;
     }
+    /** Register a freshly loaded module under its unit file
+     *  name — the file-name part of its canonical path, whatever
+     *  spelling or location it was loaded through — so later
+     *  name lookups find it by name (see _resolveLibraryLocal).
+     *  First loaded wins: a name already registered is not
+     *  taken over by a later module with the same file name
+     *  (that module is still reachable by its canonical path). */
+    _registerModuleName(record) {
+      const base = record.canonical.slice(record.canonical.lastIndexOf("/") + 1);
+      if (!this._modulesByName.has(base)) {
+        this._modulesByName.set(base, record);
+      }
+    }
+    _unregisterModuleName(record) {
+      const base = record.canonical.slice(record.canonical.lastIndexOf("/") + 1);
+      if (this._modulesByName.get(base) === record) {
+        this._modulesByName.delete(base);
+      }
+    }
     /** Undo a failed load: release the references the record took,
      *  withdraw its registrations, discard the record. Its memory
      *  region and table slots are retired, never reused. */
@@ -8194,6 +8384,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       for (let i = deps.length - 1; i >= 0; i--) this._releaseRef(deps[i]);
       this._withdrawGlobals(record);
       this._modules.delete(record.canonical);
+      this._unregisterModuleName(record);
       this._handles.delete(record.handle);
       record.state = "discarded";
     }
@@ -8219,6 +8410,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       }
       this._withdrawGlobals(record);
       this._modules.delete(record.canonical);
+      this._unregisterModuleName(record);
       this._handles.delete(record.handle);
       const li = this._loadOrder.indexOf(record);
       if (li >= 0) this._loadOrder.splice(li, 1);
@@ -8313,30 +8505,55 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
             return 0;
           }
           const path = proc._readCString(pathPtr);
+          if (path.includes("/")) {
+            proc._setDlerror(
+              `tinyc: dlopen: "${path}": dlopen takes a library name, not a path \u2014 where a name is found is decided by the main module's manifest search_dirs`
+            );
+            return 0;
+          }
+          const scope = proc._processSearch();
           let canonical;
           try {
-            canonical = canonicalModulePath(path, "/sysroot");
+            canonical = proc._resolveLibraryLocal(path, scope);
           } catch (err) {
             proc._setDlerror(err.message);
             return 0;
           }
-          const load = () => proc._loadModule(canonical, {
-            flags,
-            requester,
-            runtimeEdge: true
-          });
-          if (proc._scheduler && !proc._closureLocal(canonical)) {
+          const load = () => {
+            if (canonical === null) {
+              const searched = libraryCandidates(
+                path,
+                scope.searchDirs,
+                scope.originDir,
+                scope.pathBase
+              );
+              throw new TinycDylinkError(
+                `tinyc: dlopen: "${path}" is not present locally (searched: ${searched.join(", ")})`
+              );
+            }
+            return proc._loadModule(canonical, {
+              flags,
+              requester,
+              runtimeEdge: true
+            });
+          };
+          if (proc._scheduler && (canonical === null || !proc._closureLocal(canonical))) {
             if (!proc._jspi) {
               throw new Error(
-                `tinyc: dlopen: loading "${canonical}" requires a retrieval, which suspends the calling thread; that needs WebAssembly.promising (JSPI), which this engine does not provide (threads design \xA74.2)`
+                `tinyc: dlopen: loading "${path}" requires a retrieval, which suspends the calling thread; that needs WebAssembly.promising (JSPI), which this engine does not provide (threads design \xA74.2)`
               );
             }
             const thread = proc._scheduler.actingThread();
-            return proc._scheduler.parkOnHost(
-              thread,
-              () => proc._prefetchClosure(canonical)
-            ).then(() => {
+            let resolvedCanonical = canonical;
+            return proc._scheduler.parkOnHost(thread, async () => {
+              if (resolvedCanonical === null) {
+                resolvedCanonical = await proc._prefetchByName(path);
+              } else {
+                await proc._prefetchClosure(resolvedCanonical);
+              }
+            }).then(() => {
               try {
+                canonical = resolvedCanonical;
                 return load().handle;
               } catch (err) {
                 proc._setDlerror(err.message);
@@ -8365,11 +8582,20 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     // -- host surface -------------------------------------------------------
     /** Load a library and its whole needed closure, retrieving
      *  manifests through the transport where no usable copy is
-     *  local. Returns the module's handle. */
+     *  local. Returns the module's handle. The host names the
+     *  unit explicitly: a path spelling is taken as the unit's
+     *  canonical location (the host is the placement authority),
+     *  while a bare name is searched — and retrieved — through
+     *  the process's search scope, like a needed entry. */
     async loadModule(path, flags = RTLD_LOCAL) {
       if (this._ended) throw new TinycDylinkError("tinyc: the process has ended");
-      const canonical = canonicalModulePath(path, "/sysroot");
-      await this._prefetchClosure(canonical);
+      let canonical;
+      if (typeof path === "string" && path.includes("/")) {
+        canonical = canonicalModulePath(path, "/sysroot");
+        await this._prefetchClosure(canonical);
+      } else {
+        canonical = await this._prefetchByName(path);
+      }
       if (this._scheduler && this._scheduler.drivingRun && !this._scheduler.hostDriving) {
         return this._scheduler.enqueueHostOp(() => {
           return this._loadModule(canonical, { flags, hostEdge: true }).handle;
@@ -8394,9 +8620,11 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     }
     /** Synchronous dlopen: the library and its closure must already
      *  be local (see loadModule for the retrieving form). Returns
-     *  the handle; throws TinycDylinkError on failure. In a
-     *  threaded process the synchronous form does not exist — a
-     *  load can run constructors on another context and wait for
+     *  the handle; throws TinycDylinkError on failure. Like the
+     *  guest dlopen, this takes a library *name*, searched through
+     *  the process's search scope; a path spelling fails by name.
+     *  In a threaded process the synchronous form does not exist —
+     *  a load can run constructors on another context and wait for
      *  replicas — and it fails by name (§2.3). */
     dlopen(path, flags = RTLD_LAZY) {
       if (this._threaded) {
@@ -8404,13 +8632,45 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
           "tinyc: dlopen: a threaded process loads asynchronously; use loadModule (threads design \xA72.3)"
         );
       }
-      const canonical = canonicalModulePath(path, "/sysroot");
+      if (typeof path === "string" && path.includes("/")) {
+        throw new TinycDylinkError(
+          `tinyc: dlopen: "${path}": dlopen takes a library name, not a path \u2014 where a name is found is decided by the main module's manifest search_dirs`
+        );
+      }
+      const scope = this._processSearch();
+      const canonical = this._resolveLibraryLocal(path, scope);
+      if (canonical === null) {
+        const searched = libraryCandidates(
+          path,
+          scope.searchDirs,
+          scope.originDir,
+          scope.pathBase
+        );
+        throw new TinycDylinkError(
+          `tinyc: dlopen: "${path}" is not present locally (searched: ${searched.join(", ")})`
+        );
+      }
       return this._loadModule(canonical, { flags, hostEdge: true }).handle;
     }
-    /** The handle of an already-loaded module by path, or 0. */
+    /** The handle of an already-loaded module, by canonical path
+     *  or by library name (the same name resolution as dlopen,
+     *  without loading anything), or 0. */
     moduleHandle(path) {
-      const rec = this._modules.get(canonicalModulePath(path, "/sysroot"));
-      return rec ? rec.handle : 0;
+      if (typeof path === "string" && path.includes("/")) {
+        const rec = this._modules.get(canonicalModulePath(path, "/sysroot"));
+        return rec ? rec.handle : 0;
+      }
+      const scope = this._processSearch();
+      const dirs = searchDirsResolved(scope.searchDirs, scope.originDir);
+      for (const form of libraryNameForms(path)) {
+        const byName = this._modulesByName.get(form);
+        if (byName) return byName.handle;
+        for (const dir of dirs) {
+          const rec = this._modules.get(normalizeVfsPath(`${dir}/${form}`));
+          if (rec) return rec.handle;
+        }
+      }
+      return 0;
     }
     dlsym(handle, name) {
       const value = this._dlsym(handle, name);
@@ -8750,7 +9010,12 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         manifest: record.lib.manifest,
         bodyBytes: record.bodyBytes ?? record.lib.bodyBytes,
         exports: [...record.exports].map(([name, e]) => [name, { kind: e.kind, value: e.value, tls: e.tls ? 1 : 0 }]),
-        needed: [...record.meta.needed]
+        // Workers receive the coordinator's *resolved* canonical
+        // paths for the needed edges, never the recorded names:
+        // name resolution (the declaring module's search_dirs)
+        // happens once, here, so a replica's visibility checks
+        // compare canonical paths with canonical paths.
+        needed: record.neededRecords.map((r) => r.canonical)
       }));
       const got = [];
       for (const [key, e] of this._got) {
@@ -9051,6 +9316,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         push(body);
         const pad2 = (4 - body.length % 4) % 4;
         if (pad2) push(new Uint8Array(pad2));
+        const needed = rec.neededRecords.map((r) => r.canonical);
+        w32(needed.length);
+        for (const n of needed) wstr(n);
       }
       const hostImports = [...this._hostProvidedFns.keys()];
       w32(hostImports.length);
@@ -9075,8 +9343,12 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         const req = R.loadQueue[0];
         R.loadsInFlight++;
         try {
-          const canonical = canonicalModulePath(req.path, "/sysroot");
-          await this._prefetchClosure(canonical);
+          if (typeof req.path === "string" && req.path.includes("/")) {
+            throw new TinycDylinkError(
+              `tinyc: dlopen: "${req.path}": dlopen takes a library name, not a path \u2014 where a name is found is decided by the main module's manifest search_dirs`
+            );
+          }
+          const canonical = await this._prefetchByName(req.path);
           const before = this._loadOrder.length;
           this._loadModule(canonical, {
             flags: req.flags,

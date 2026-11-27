@@ -305,7 +305,7 @@ PATCHES = [
      1),
     # 7. tcc.h: TCCState fields for the wasm dylink output flavor
     #    (-wasm-dylink=main|side) and its recorded dependency list
-    #    (--dylink-need=<path>), wasm builds only.
+    #    (--dylink-need=<name>), wasm builds only.
     ("tcc.h",
      "    /* output type, see TCC_OUTPUT_XXX */\n"
      "    int output_type;",
@@ -314,13 +314,13 @@ PATCHES = [
      "#ifdef TCC_TARGET_WASM32\n"
      "    /* wasm dylink output flavor: 0 = standalone, 1 = main, 2 = side */\n"
      "    int wasm_dylink_flavor;\n"
-     "    /* dependency paths recorded by --dylink-need=, verbatim */\n"
+     "    /* dependency names recorded by --dylink-need= (file name only) */\n"
      "    char **wasm_dylink_needs;\n"
      "    int nb_wasm_dylink_needs;\n"
      "#endif",
      1),
     # 8. libtcc.c: option ids, table entries and parser handling for
-    #    -wasm-dylink=main|side and --dylink-need=<path> (wasm only).
+    #    -wasm-dylink=main|side and --dylink-need=<name> (wasm only).
     ("libtcc.c",
      "    TCC_OPTION_install_name,\n"
      "    TCC_OPTION_compatibility_version ,\n"
@@ -365,10 +365,22 @@ PATCHES = [
      "            break;\n"
      "        case TCC_OPTION_dylink_need:\n"
      "            if (*optarg == '=') ++optarg;\n"
-     "            s->wasm_dylink_needs = tcc_realloc(s->wasm_dylink_needs,\n"
-     "                (s->nb_wasm_dylink_needs + 1) * sizeof(char*));\n"
-     "            s->wasm_dylink_needs[s->nb_wasm_dylink_needs++] =\n"
-     "                tcc_strdup(optarg);\n"
+     "            if (!*optarg || optarg[strlen(optarg) - 1] == '/')\n"
+     "                return tcc_error_noabort(\"--dylink-need '%s' does \"\n"
+     "                    \"not name a file\", optarg);\n"
+     "            {\n"
+     "                /* Record the dependency's name only, never the\n"
+     "                 * path it was spelled with: like a DT_NEEDED\n"
+     "                 * entry, which carries the library's soname,\n"
+     "                 * not a lookup path. Where the library is\n"
+     "                 * found is the manifest's search_dirs business,\n"
+     "                 * resolved by the loader at load time. */\n"
+     "                const char *base = strrchr(optarg, '/');\n"
+     "                s->wasm_dylink_needs = tcc_realloc(s->wasm_dylink_needs,\n"
+     "                    (s->nb_wasm_dylink_needs + 1) * sizeof(char*));\n"
+     "                s->wasm_dylink_needs[s->nb_wasm_dylink_needs++] =\n"
+     "                    tcc_strdup(base ? base + 1 : optarg);\n"
+     "            }\n"
      "            break;\n"
      "#endif",
      1),

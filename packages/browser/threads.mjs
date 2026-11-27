@@ -1632,10 +1632,16 @@ function rtAddReplica(rt, m) {
     meta,
     manifest: m.manifest,
     bodyBytes: m.bodyBytes,
-    // Needed names arrive as recorded (a raw --dylink-need
-    // spelling); canonicalize them against this module's own
-    // directory — the coordinator's rule — so visibility
-    // checks against replica records compare like with like.
+    // Needed entries arrive as the coordinator's resolved
+    // canonical paths (both senders — boot data and load
+    // tasks — resolve the recorded names through the
+    // declaring module's manifest search_dirs before
+    // sending); canonicalizing them here is a normalization
+    // no-op for absolute paths, kept so visibility checks
+    // against replica records compare like with like. The
+    // meta.needed fallback (raw recorded names, resolved
+    // against this module's own directory) covers a sender
+    // that still passes spellings.
     needed: (m.needed ?? meta.needed ?? []).map((n) =>
       rt.helpers.canonicalModulePath(n,
         m.canonical.slice(0, m.canonical.lastIndexOf('/')) || '/')),
@@ -1986,6 +1992,13 @@ function rtApplyLoadTask(rt, payloadAddr) {
     const bodyLen = rd();
     const bodyBytes = m.slice(p, p + bodyLen);
     p += bodyLen + ((4 - (bodyLen % 4)) % 4);
+    // The needed edges arrive as the coordinator's resolved
+    // canonical paths, written after the body (see the
+    // coordinator's load-task writer); the manifest's recorded
+    // names are not consulted here.
+    const neededCount = rd();
+    const needed = [];
+    for (let i = 0; i < neededCount; i++) needed.push(rstr());
     mods.push({
       canonical, memoryBase, tableBase, handle: modHandle,
       global, manifest, bodyBytes,
@@ -1993,7 +2006,7 @@ function rtApplyLoadTask(rt, payloadAddr) {
         .map((e) => [String(e.name), {
           kind: e.kind | 0, value: e.value | 0, tls: e.tls ? 1 : 0,
         }]),
-      needed: manifest.needed ?? [],
+      needed,
     });
   }
   const hostCount = rd();

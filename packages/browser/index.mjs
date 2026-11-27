@@ -2417,6 +2417,12 @@ function manifestToLibrary(manifest, canonical) {
     tlsTemplate: typeof manifest.tls_template === 'string'
       ? base64ToBytes(manifest.tls_template) : null,
     needed: Array.isArray(manifest.needed) ? manifest.needed.map(String) : [],
+    // The module's library search directories (the manifest's
+    // search_dirs, the DT_RUNPATH analogue): undefined when the
+    // manifest carries none — the loader then applies its
+    // documented default (DEFAULT_SEARCH_DIRS).
+    searchDirs: Array.isArray(manifest.search_dirs)
+      ? manifest.search_dirs.map(String) : undefined,
     dataGotFunc: Array.isArray(manifest.data_got_func)
       ? manifest.data_got_func.map(String) : [],
     exports: (Array.isArray(manifest.exports) ? manifest.exports : [])
@@ -2608,10 +2614,11 @@ async function retrieveAsset(transport, url, key, fetchImpl) {
   return registry[key] ?? null;
 }
 
-/** A module path's canonical virtual-FS location: an absolute path
- *  is used as given; a relative path resolves against `baseDir`
- *  (/sysroot for dlopen and host loads, the naming manifest's
- *  directory for needed entries). */
+/** A module path spelling's canonical virtual-FS location: an
+ *  absolute path is used as given; a relative path resolves
+ *  against `baseDir`. Bare library *names* (no '/') are not
+ *  resolved here — they go through the search directories in
+ *  libraryCandidates. */
 function canonicalModulePath(path, baseDir = '/sysroot') {
   if (typeof path !== 'string' || path.length === 0) {
     throw new TinycDylinkError('tinyc: module path must be a non-empty string');
@@ -2619,6 +2626,95 @@ function canonicalModulePath(path, baseDir = '/sysroot') {
   return path.startsWith('/')
     ? normalizeVfsPath(path)
     : normalizeVfsPath(`${baseDir}/${path}`);
+}
+
+/** The default library search directories, applied when a
+ *  module's manifest carries no search_dirs (manifests written
+ *  before the field existed behave as if they carried the
+ *  toolchain default): the module's own directory ($ORIGIN),
+ *  the sysroot's lib directory, and the sysroot root — the
+ *  historical landing spot for units placed at /sysroot/<name>. */
+const DEFAULT_SEARCH_DIRS = ['$ORIGIN', 'lib', '.'];
+
+/** The name forms a bare library name expands to, in try
+ *  order. A name may be a full unit file name
+ *  ('libside.tinyc.js') or a short name ('side'); the forms
+ *  are the name as spelled, then (like dlopen("c") finding
+ *  libc.so) its completions, staged so each adds only what
+ *  is missing: first the '.tinyc.js' extension, when the
+ *  name does not already end with it; then the 'lib' prefix
+ *  on the extension-completed form, when the name does not
+ *  already start with one (never 'liblib'). So 'side' gives
+ *  'side', 'side.tinyc.js', 'libside.tinyc.js'; 'libside'
+ *  gives 'libside', 'libside.tinyc.js' and stops there; a
+ *  full 'libside.tinyc.js' gives only itself. */
+function libraryNameForms(name) {
+  const forms = [name];
+  const withExt = name.endsWith('.tinyc.js') ? name : `${name}.tinyc.js`;
+  if (withExt !== name) forms.push(withExt);
+  if (!name.startsWith('lib')) forms.push(`lib${withExt}`);
+  return forms;
+}
+
+/** A search-directory list resolved to absolute directories,
+ *  in order: an entry is '$ORIGIN' — the reference module's
+ *  directory, optionally with a subpath ('$ORIGIN/sub') — an
+ *  absolute VFS path, or a directory relative to the sysroot
+ *  root ('lib' means /sysroot/lib, '.' the sysroot root
+ *  itself). A null originDir (no main module yet) leaves
+ *  $ORIGIN entries with no referent: they contribute no
+ *  directory. */
+function searchDirsResolved(searchDirs, originDir) {
+  const dirs = [];
+  for (const entry of searchDirs ?? DEFAULT_SEARCH_DIRS) {
+    let dir;
+    if (entry === '$ORIGIN' || entry.startsWith('$ORIGIN/')) {
+      if (originDir == null) continue;
+      dir = entry === '$ORIGIN'
+        ? originDir : `${originDir}/${entry.slice('$ORIGIN/'.length)}`;
+    } else if (entry.startsWith('/')) {
+      dir = entry;
+    } else {
+      dir = `/sysroot/${entry}`;
+    }
+    dir = normalizeVfsPath(dir);
+    if (!dirs.includes(dir)) dirs.push(dir);
+  }
+  return dirs;
+}
+
+/** The candidate canonical paths for a library request, in
+ *  search order. This enumerates the disk side of the one
+ *  name-resolution rule shared by needed entries and dlopen
+ *  (see TinycProcess._resolveLibraryLocal for the full rule,
+ *  which interleaves the already-loaded modules, registered
+ *  by file name, ahead of the disk at each name form).
+ *
+ *  A spelling containing '/' is a path, not a name. dlopen
+ *  entries reject it by name before reaching here (a runtime
+ *  lookup is by name; a path would bypass the manifest's
+ *  search policy). A needed entry can still carry one — in a
+ *  manifest written before needed recorded names only — and
+ *  it resolves as it always has (absolute as given, relative
+ *  against `pathBase`, the declaring module's directory) as
+ *  the only candidate: the compatibility rule for old-format
+ *  manifests. */
+function libraryCandidates(name, searchDirs, originDir, pathBase) {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new TinycDylinkError('tinyc: module path must be a non-empty string');
+  }
+  if (name.includes('/')) {
+    return [canonicalModulePath(name, pathBase ?? '/sysroot')];
+  }
+  const dirs = searchDirsResolved(searchDirs, originDir);
+  const out = [];
+  for (const form of libraryNameForms(name)) {
+    for (const dir of dirs) {
+      const candidate = normalizeVfsPath(`${dir}/${form}`);
+      if (!out.includes(candidate)) out.push(candidate);
+    }
+  }
+  return out;
 }
 
 function vfsDirname(p) {
@@ -3009,6 +3105,7 @@ export class TinycProcess {
     this._hostProvidedFns = new Map();
     this._regionTableAddr = 0;  // §3.1 class table, on demand
     this._modules = new Map();      // canonical path -> record
+    this._modulesByName = new Map(); // unit file name -> record (first loaded wins)
     this._handles = new Map();      // handle id -> record
     this._nextHandle = 1;
     this._globalSymbols = new Map(); // name -> { kind, value, record }
@@ -3352,6 +3449,108 @@ export class TinycProcess {
     return lib;
   }
 
+  /** The search scope of one module's needed entries: its own
+   *  manifest's search_dirs, with $ORIGIN at its own directory.
+   *  Each module's recorded names resolve through its own list
+   *  (the DT_RUNPATH rule: the list applies to the carrying
+   *  module's direct dependencies). */
+  _neededScope(lib, canonical) {
+    const dir = vfsDirname(canonical);
+    return { searchDirs: lib.meta.searchDirs, originDir: dir, pathBase: dir };
+  }
+
+  /** The process's dlopen search scope: the main module's
+   *  manifest search_dirs, with $ORIGIN at the main module's
+   *  directory — a process's library search range follows its
+   *  main module, whoever calls dlopen (a guest module, the
+   *  host, a worker request). Before a main module exists the
+   *  default list applies and $ORIGIN has no referent, so it
+   *  contributes no candidate. (dlopen entries reject path
+   *  spellings by name before resolving; a path spelling that
+   *  still reaches resolution through this scope keeps its
+   *  historical base, '/sysroot'.) */
+  _processSearch() {
+    const main = this._main;
+    return {
+      searchDirs: main?.meta.searchDirs,
+      originDir: main ? vfsDirname(main.canonical) : null,
+      pathBase: '/sysroot',
+    };
+  }
+
+  /** Resolve a library name against local sources, through
+   *  the given search scope. Returns the winning candidate's
+   *  canonical path, or null when no candidate is local.
+   *
+   *  The one resolution rule, shared by needed entries and
+   *  dlopen: the candidate name forms (libraryNameForms) are
+   *  tried in order, and each form is looked up in two sources
+   *  in order — first among the modules already loaded into
+   *  this process, by file name (a module is registered under
+   *  the file name of the unit it was loaded from, wherever
+   *  that unit lives: see _registerModuleName), then on disk
+   *  through the scope's search directories in order. The
+   *  first hit wins, so an earlier name form found loaded
+   *  beats a later form found on disk, and within one form a
+   *  loaded module beats the disk. A spelling containing '/'
+   *  is an old-format needed entry, not a name: it resolves
+   *  to its single historical location (see
+   *  libraryCandidates). */
+  _resolveLibraryLocal(name, scope) {
+    if (name.includes('/')) {
+      const candidate = canonicalModulePath(name, scope.pathBase ?? '/sysroot');
+      return this._libraryLocal(candidate) ? candidate : null;
+    }
+    const dirs = searchDirsResolved(scope.searchDirs, scope.originDir);
+    for (const form of libraryNameForms(name)) {
+      const loaded = this._modulesByName.get(form);
+      if (loaded) return loaded.canonical;
+      for (const dir of dirs) {
+        const candidate = normalizeVfsPath(`${dir}/${form}`);
+        if (this._libraryLocal(candidate)) return candidate;
+      }
+    }
+    return null;
+  }
+
+  /** Resolve a library name, retrieving through the transport
+   *  when nothing is local: the local rule runs first, in
+   *  full; only when it misses everywhere are candidates
+   *  retrieved, in the same candidate order — a retrieval is
+   *  requested under the same relative layout (the candidate's
+   *  path below the root, appended to the base URL, by
+   *  _libraryFetched). Returns the winning canonical path;
+   *  throws naming every location tried when none yields the
+   *  library. */
+  async _resolveLibraryFetched(name, scope) {
+    const local = this._resolveLibraryLocal(name, scope);
+    if (local !== null) return local;
+    const candidates = libraryCandidates(
+      name, scope.searchDirs, scope.originDir, scope.pathBase);
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        await this._libraryFetched(candidate);
+        return candidate;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw new TinycDylinkError(
+      `tinyc: cannot find library "${name}" (searched: ` +
+      `${candidates.join(', ')})` +
+      (lastError ? `: ${lastError.message}` : ''));
+  }
+
+  /** Resolve a dlopen-style library name through the process
+   *  search scope, retrieving where needed, and prefetch its
+   *  whole needed closure. Returns the canonical path. */
+  async _prefetchByName(name) {
+    const canonical = await this._resolveLibraryFetched(name, this._processSearch());
+    await this._prefetchClosure(canonical);
+    return canonical;
+  }
+
   /** Whether a library and its whole needed closure are
    *  available from local sources — the guest dlopen fast path
    *  in a threaded process (§9.1). */
@@ -3360,8 +3559,11 @@ export class TinycProcess {
     seen.add(canonical);
     const lib = this._libraryLocal(canonical);
     if (!lib) return false;
-    return lib.meta.needed.every((n) =>
-      this._closureLocal(canonicalModulePath(n, vfsDirname(canonical)), seen));
+    const scope = this._neededScope(lib, canonical);
+    return lib.meta.needed.every((n) => {
+      const dep = this._resolveLibraryLocal(n, scope);
+      return dep !== null && this._closureLocal(dep, seen);
+    });
   }
 
   /** A library, retrieving its manifest through the transport when
@@ -3408,15 +3610,18 @@ export class TinycProcess {
   }
 
   /** Resolve the whole needed closure of a root library through
-   *  _libraryFetched, so the synchronous load below never waits. */
+   *  _libraryFetched, so the synchronous load below never waits.
+   *  Each needed name resolves through its declaring module's
+   *  search directories (see _resolveLibraryFetched). */
   async _prefetchClosure(rootCanonical) {
     const seen = new Set();
     const walk = async (canonical) => {
       if (seen.has(canonical)) return;
       seen.add(canonical);
       const lib = await this._libraryFetched(canonical);
+      const scope = this._neededScope(lib, canonical);
       for (const need of lib.meta.needed) {
-        await walk(canonicalModulePath(need, vfsDirname(canonical)));
+        await walk(await this._resolveLibraryFetched(need, scope));
       }
     };
     await walk(rootCanonical);
@@ -3803,6 +4008,9 @@ export class TinycProcess {
       throw new TinycDylinkError('tinyc: the process has ended');
     }
     const lib = opts.lib ?? this._libraryLocal(canonical);
+    if (lib && !this._libraries.has(canonical)) {
+      this._libraries.set(canonical, lib);
+    }
     if (!lib) {
       const why = this._libraryErrors.get(canonical);
       throw new TinycDylinkError(why
@@ -3840,6 +4048,7 @@ export class TinycProcess {
     if (holderKey !== null) record.handleHolders.set(holderKey, 1);
     this._modules.set(canonical, record);
     this._handles.set(record.handle, record);
+    this._registerModuleName(record);
     try {
       // Allocate and register exports before the needed walk, so a
       // dependency cycle binds against them (design §9.3).
@@ -3861,9 +4070,23 @@ export class TinycProcess {
       }
       if ((flags & RTLD_GLOBAL) || record.isMain) this._registerGlobals(record);
       // Needed walk: depth-first; LAZY/NOW propagate, GLOBAL does not.
+      // Each name resolves through this module's own search
+      // directories (see _neededScope); the load itself is
+      // synchronous, so an unresolvable name fails here, naming
+      // every location searched.
       const childFlags = (flags & RTLD_NOW) ? RTLD_NOW : RTLD_LAZY;
+      const scope = this._neededScope(lib, canonical);
       for (const need of meta.needed) {
-        const depCanonical = canonicalModulePath(need, vfsDirname(canonical));
+        const depCanonical = this._resolveLibraryLocal(need, scope);
+        if (depCanonical === null) {
+          const searched = libraryCandidates(
+            need, scope.searchDirs, scope.originDir, scope.pathBase);
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${canonical}": its needed library ` +
+            `"${need}" is not present locally (searched: ` +
+            `${searched.join(', ')}; a host loadModule call retrieves ` +
+            `libraries from the base URL first)`);
+        }
         const dep = this._loadModule(depCanonical, {
           flags: childFlags, requester: record,
         });
@@ -4043,6 +4266,27 @@ export class TinycProcess {
     return null;
   }
 
+  /** Register a freshly loaded module under its unit file
+   *  name — the file-name part of its canonical path, whatever
+   *  spelling or location it was loaded through — so later
+   *  name lookups find it by name (see _resolveLibraryLocal).
+   *  First loaded wins: a name already registered is not
+   *  taken over by a later module with the same file name
+   *  (that module is still reachable by its canonical path). */
+  _registerModuleName(record) {
+    const base = record.canonical.slice(record.canonical.lastIndexOf('/') + 1);
+    if (!this._modulesByName.has(base)) {
+      this._modulesByName.set(base, record);
+    }
+  }
+
+  _unregisterModuleName(record) {
+    const base = record.canonical.slice(record.canonical.lastIndexOf('/') + 1);
+    if (this._modulesByName.get(base) === record) {
+      this._modulesByName.delete(base);
+    }
+  }
+
   /** Undo a failed load: release the references the record took,
    *  withdraw its registrations, discard the record. Its memory
    *  region and table slots are retired, never reused. */
@@ -4052,6 +4296,7 @@ export class TinycProcess {
     for (let i = deps.length - 1; i >= 0; i--) this._releaseRef(deps[i]);
     this._withdrawGlobals(record);
     this._modules.delete(record.canonical);
+    this._unregisterModuleName(record);
     this._handles.delete(record.handle);
     record.state = 'discarded';
   }
@@ -4078,6 +4323,7 @@ export class TinycProcess {
     }
     this._withdrawGlobals(record);
     this._modules.delete(record.canonical);
+    this._unregisterModuleName(record);
     this._handles.delete(record.handle);
     const li = this._loadOrder.indexOf(record);
     if (li >= 0) this._loadOrder.splice(li, 1);
@@ -4177,17 +4423,49 @@ export class TinycProcess {
           return 0;
         }
         const path = proc._readCString(pathPtr);
+        // dlopen takes a library *name*, never a path: a path
+        // spelling would bypass the search policy the main
+        // module's manifest declares, so it fails by name
+        // instead of resolving somewhere unsearched. (The
+        // compile-time --dylink-need option makes the opposite
+        // choice for the opposite situation — it *records* a
+        // dependency the user points at with a path, and like
+        // the linker recording a soname it keeps the name and
+        // drops the path.)
+        if (path.includes('/')) {
+          proc._setDlerror(
+            `tinyc: dlopen: "${path}": dlopen takes a library name, ` +
+            `not a path — where a name is found is decided by the ` +
+            `main module's manifest search_dirs`);
+          return 0;
+        }
+        // A bare name is searched through the process's search
+        // scope — the main module's manifest search_dirs,
+        // $ORIGIN at the main module's directory — under the
+        // same name-resolution rule as needed entries (see
+        // _processSearch and libraryCandidates).
+        const scope = proc._processSearch();
         let canonical;
         try {
-          canonical = canonicalModulePath(path, '/sysroot');
+          canonical = proc._resolveLibraryLocal(path, scope);
         } catch (err) {
           proc._setDlerror(err.message);
           return 0;
         }
-        const load = () => proc._loadModule(canonical, {
-          flags, requester, runtimeEdge: true,
-        });
-        if (proc._scheduler && !proc._closureLocal(canonical)) {
+        const load = () => {
+          if (canonical === null) {
+            const searched = libraryCandidates(
+              path, scope.searchDirs, scope.originDir, scope.pathBase);
+            throw new TinycDylinkError(
+              `tinyc: dlopen: "${path}" is not present locally ` +
+              `(searched: ${searched.join(', ')})`);
+          }
+          return proc._loadModule(canonical, {
+            flags, requester, runtimeEdge: true,
+          });
+        };
+        if (proc._scheduler &&
+            (canonical === null || !proc._closureLocal(canonical))) {
           // Threaded, simulated tier (§9.1): the closure is not
           // local, so park the calling thread on the retrieval —
           // other threads rotate meanwhile — and complete the
@@ -4196,21 +4474,32 @@ export class TinycProcess {
           // operation (§5.4), not this path.
           if (!proc._jspi) {
             throw new Error(
-              `tinyc: dlopen: loading "${canonical}" requires a ` +
+              `tinyc: dlopen: loading "${path}" requires a ` +
               `retrieval, which suspends the calling thread; that ` +
               `needs WebAssembly.promising (JSPI), which this ` +
               `engine does not provide (threads design §4.2)`);
           }
           const thread = proc._scheduler.actingThread();
-          return proc._scheduler.parkOnHost(thread,
-            () => proc._prefetchClosure(canonical)).then(() => {
-              try {
-                return load().handle;
-              } catch (err) {
-                proc._setDlerror(err.message);
-                return 0;
-              }
-            });
+          // The park promise's own resolution value is the
+          // scheduler's wake marker, not the retrieval's
+          // result — the resolved canonical travels through
+          // this closure variable instead.
+          let resolvedCanonical = canonical;
+          return proc._scheduler.parkOnHost(thread, async () => {
+            if (resolvedCanonical === null) {
+              resolvedCanonical = await proc._prefetchByName(path);
+            } else {
+              await proc._prefetchClosure(resolvedCanonical);
+            }
+          }).then(() => {
+            try {
+              canonical = resolvedCanonical;
+              return load().handle;
+            } catch (err) {
+              proc._setDlerror(err.message);
+              return 0;
+            }
+          });
         }
         try {
           return load().handle;
@@ -4235,11 +4524,20 @@ export class TinycProcess {
 
   /** Load a library and its whole needed closure, retrieving
    *  manifests through the transport where no usable copy is
-   *  local. Returns the module's handle. */
+   *  local. Returns the module's handle. The host names the
+   *  unit explicitly: a path spelling is taken as the unit's
+   *  canonical location (the host is the placement authority),
+   *  while a bare name is searched — and retrieved — through
+   *  the process's search scope, like a needed entry. */
   async loadModule(path, flags = RTLD_LOCAL) {
     if (this._ended) throw new TinycDylinkError('tinyc: the process has ended');
-    const canonical = canonicalModulePath(path, '/sysroot');
-    await this._prefetchClosure(canonical);
+    let canonical;
+    if (typeof path === 'string' && path.includes('/')) {
+      canonical = canonicalModulePath(path, '/sysroot');
+      await this._prefetchClosure(canonical);
+    } else {
+      canonical = await this._prefetchByName(path);
+    }
     if (this._scheduler && this._scheduler.drivingRun &&
         !this._scheduler.hostDriving) {
       // A load's init runs guest code; mid-run it goes through
@@ -4270,9 +4568,11 @@ export class TinycProcess {
 
   /** Synchronous dlopen: the library and its closure must already
    *  be local (see loadModule for the retrieving form). Returns
-   *  the handle; throws TinycDylinkError on failure. In a
-   *  threaded process the synchronous form does not exist — a
-   *  load can run constructors on another context and wait for
+   *  the handle; throws TinycDylinkError on failure. Like the
+   *  guest dlopen, this takes a library *name*, searched through
+   *  the process's search scope; a path spelling fails by name.
+   *  In a threaded process the synchronous form does not exist —
+   *  a load can run constructors on another context and wait for
    *  replicas — and it fails by name (§2.3). */
   dlopen(path, flags = RTLD_LAZY) {
     if (this._threaded) {
@@ -4280,14 +4580,43 @@ export class TinycProcess {
         'tinyc: dlopen: a threaded process loads asynchronously; ' +
         'use loadModule (threads design §2.3)');
     }
-    const canonical = canonicalModulePath(path, '/sysroot');
+    if (typeof path === 'string' && path.includes('/')) {
+      throw new TinycDylinkError(
+        `tinyc: dlopen: "${path}": dlopen takes a library name, ` +
+        `not a path — where a name is found is decided by the ` +
+        `main module's manifest search_dirs`);
+    }
+    const scope = this._processSearch();
+    const canonical = this._resolveLibraryLocal(path, scope);
+    if (canonical === null) {
+      const searched = libraryCandidates(
+        path, scope.searchDirs, scope.originDir, scope.pathBase);
+      throw new TinycDylinkError(
+        `tinyc: dlopen: "${path}" is not present locally ` +
+        `(searched: ${searched.join(', ')})`);
+    }
     return this._loadModule(canonical, { flags, hostEdge: true }).handle;
   }
 
-  /** The handle of an already-loaded module by path, or 0. */
+  /** The handle of an already-loaded module, by canonical path
+   *  or by library name (the same name resolution as dlopen,
+   *  without loading anything), or 0. */
   moduleHandle(path) {
-    const rec = this._modules.get(canonicalModulePath(path, '/sysroot'));
-    return rec ? rec.handle : 0;
+    if (typeof path === 'string' && path.includes('/')) {
+      const rec = this._modules.get(canonicalModulePath(path, '/sysroot'));
+      return rec ? rec.handle : 0;
+    }
+    const scope = this._processSearch();
+    const dirs = searchDirsResolved(scope.searchDirs, scope.originDir);
+    for (const form of libraryNameForms(path)) {
+      const byName = this._modulesByName.get(form);
+      if (byName) return byName.handle;
+      for (const dir of dirs) {
+        const rec = this._modules.get(normalizeVfsPath(`${dir}/${form}`));
+        if (rec) return rec.handle;
+      }
+    }
+    return 0;
   }
 
   dlsym(handle, name) {
@@ -4645,7 +4974,12 @@ export class TinycProcess {
       bodyBytes: record.bodyBytes ?? record.lib.bodyBytes,
       exports: [...record.exports].map(([name, e]) =>
         [name, { kind: e.kind, value: e.value, tls: e.tls ? 1 : 0 }]),
-      needed: [...record.meta.needed],
+      // Workers receive the coordinator's *resolved* canonical
+      // paths for the needed edges, never the recorded names:
+      // name resolution (the declaring module's search_dirs)
+      // happens once, here, so a replica's visibility checks
+      // compare canonical paths with canonical paths.
+      needed: record.neededRecords.map((r) => r.canonical),
     }));
     const got = [];
     for (const [key, e] of this._got) {
@@ -4930,6 +5264,11 @@ export class TinycProcess {
       push(body);
       const pad2 = (4 - (body.length % 4)) % 4;
       if (pad2) push(new Uint8Array(pad2));
+      // The module's needed edges as resolved canonical paths
+      // (see _bootData): the workers never resolve names.
+      const needed = rec.neededRecords.map((r) => r.canonical);
+      w32(needed.length);
+      for (const n of needed) wstr(n);
     }
     const hostImports = [...this._hostProvidedFns.keys()];
     w32(hostImports.length);
@@ -4952,8 +5291,18 @@ export class TinycProcess {
       const req = R.loadQueue[0];
       R.loadsInFlight++;
       try {
-        const canonical = canonicalModulePath(req.path, '/sysroot');
-        await this._prefetchClosure(canonical);
+        // A guest dlopen request carries a library name, like
+        // every dlopen: a path spelling fails by name (the
+        // failure is reported to the requesting worker through
+        // the task area below); a bare name resolves through
+        // the process's search scope, retrieving as needed.
+        if (typeof req.path === 'string' && req.path.includes('/')) {
+          throw new TinycDylinkError(
+            `tinyc: dlopen: "${req.path}": dlopen takes a library ` +
+            `name, not a path — where a name is found is decided ` +
+            `by the main module's manifest search_dirs`);
+        }
+        const canonical = await this._prefetchByName(req.path);
         const before = this._loadOrder.length;
         this._loadModule(canonical, {
           flags: req.flags, requester: null, runtimeEdge: true,

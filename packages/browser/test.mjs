@@ -2242,3 +2242,312 @@ test('loader cache: a memory hit whose retry write still fails keeps the entry',
     assert.equal(h.fs.hasFile(canonical), false);
   });
 });
+
+// ---------------------------------------------------------------------
+// dylink name resolution (search_dirs): needed records names
+// only; a name resolves through the declaring manifest's
+// search_dirs with staged name forms — first among the modules
+// already loaded, by file name, then on disk — and retrieval
+// happens only when nothing is local. The units below carry a
+// minimal hand-built wasm body: no imports; the exports are
+// the dylink init/fini hooks (init returns 0) and, for a main
+// module, a main returning 42 — so loads and runs are real.
+// ---------------------------------------------------------------------
+
+/** A minimal loadable dylink body (see the section comment). */
+function synthUnitBody(withMain) {
+  const bytes = [
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // type section: type0 ()->(), type1 ()->i32, type2 (i32)->i32
+    0x01, 0x0d, 0x03, 0x60, 0x00, 0x00, 0x60, 0x00, 0x01, 0x7f,
+    0x60, 0x01, 0x7f, 0x01, 0x7f,
+    // function section: init=type2, fini=type0, main=type1
+    ...(withMain
+      ? [0x03, 0x04, 0x03, 0x02, 0x00, 0x01]
+      : [0x03, 0x03, 0x02, 0x02, 0x00]),
+  ];
+  const name = (s) => [s.length, ...[...s].map((c) => c.charCodeAt(0))];
+  const exportsList = [
+    ...name('__tinyc_dylink_init'), 0x00, 0x00,
+    ...name('__tinyc_dylink_fini'), 0x00, 0x01,
+    ...(withMain ? [...name('main'), 0x00, 0x02] : []),
+  ];
+  const exportPayload = [withMain ? 3 : 2, ...exportsList];
+  bytes.push(0x07, exportPayload.length, ...exportPayload);
+  const initBody = [0x04, 0x00, 0x41, 0x00, 0x0b]; // return 0
+  const emptyBody = [0x02, 0x00, 0x0b];
+  const mainBody = [0x04, 0x00, 0x41, 0x2a, 0x0b]; // return 42
+  const codePayload = withMain
+    ? [0x03, ...initBody, ...emptyBody, ...mainBody]
+    : [0x02, ...initBody, ...emptyBody];
+  bytes.push(0x0a, codePayload.length, ...codePayload);
+  return new Uint8Array(bytes);
+}
+
+/** A unit manifest in the current format over a synth body. */
+function synthManifest(withMain, extra = {}) {
+  return {
+    ...unitManifest(synthUnitBody(withMain)),
+    flavor: 2, mem_size: 16, bss_off: 16,
+    ...extra,
+  };
+}
+
+function makeSearchHarness() {
+  const files = new Map();
+  const fs = {
+    hasFile: (p) => files.has(p),
+    readFile: (p) => files.get(p) ?? null,
+    addFileSync: (p, content) => {
+      files.set(p, typeof content === 'string'
+        ? new TextEncoder().encode(content) : content);
+      return p;
+    },
+    removeFile: (p) => files.delete(p),
+  };
+  const tinyc = { fs };
+  const newProcess = () => new TinycProcess({
+    tinyc, baseUrl: 'https://libs.example.test/', transport: 'fetch',
+  });
+  const place = (canonical, manifest) => {
+    files.set(canonical,
+      new TextEncoder().encode(unitEnvelopeText(canonical, manifest)));
+  };
+  const unitBytes = (canonical, manifest) =>
+    new TextEncoder().encode(unitEnvelopeText(canonical, manifest));
+  return { files, fs, newProcess, place, unitBytes };
+}
+
+const DEFAULT_DIRS = ['$ORIGIN', 'lib', '.'];
+const loadedPaths = (proc) => [...proc._modules.keys()];
+
+/** Run a synth main module placed at /app/main.tinyc.js. */
+function runSynthMain(h, { needed = [], searchDirs } = {}) {
+  const proc = h.newProcess();
+  const manifest = synthManifest(true, {
+    needed,
+    ...(searchDirs !== undefined ? { search_dirs: searchDirs } : {}),
+  });
+  const result = proc.runMainModule(
+    h.unitBytes('/app/main.tinyc.js', manifest),
+    { path: '/app/main.tinyc.js' });
+  return { proc, result };
+}
+
+test('search: a needed name is found in the declaring module\'s own directory ($ORIGIN)', () => {
+  const h = makeSearchHarness();
+  h.place('/app/libside.tinyc.js', synthManifest(false));
+  const { proc, result } = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(result.exitCode, 42);
+  assert.ok(loadedPaths(proc).includes('/app/libside.tinyc.js'));
+});
+
+test('search: a needed name is found in the sysroot lib directory', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const { proc, result } = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(result.exitCode, 42);
+  assert.ok(loadedPaths(proc).includes('/sysroot/lib/libside.tinyc.js'));
+});
+
+test('search: a needed name is found at the sysroot root (the "." entry)', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/libside.tinyc.js', synthManifest(false));
+  const { proc, result } = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(result.exitCode, 42);
+  assert.ok(loadedPaths(proc).includes('/sysroot/libside.tinyc.js'));
+});
+
+test('search: a needed name found nowhere locally is retrieved under the same layout, in candidate order', async () => {
+  const h = makeSearchHarness();
+  const served = new Map([
+    ['/sysroot/libside.tinyc.js', synthManifest(false)],
+  ]);
+  const fetched = [];
+  const stub = async (url) => {
+    fetched.push(String(url));
+    const canonical =
+      `/sysroot/${String(url).slice('https://libs.example.test/'.length)}`;
+    const manifest = served.get(canonical);
+    if (!manifest) return { ok: false, status: 404, text: async () => '' };
+    return {
+      ok: true, status: 200,
+      text: async () => unitEnvelopeText(canonical, manifest),
+    };
+  };
+  await withLoaderFetch(stub, async () => {
+    const proc = h.newProcess();
+    const mainManifest = synthManifest(true, {
+      needed: ['libside.tinyc.js'], search_dirs: DEFAULT_DIRS,
+    });
+    h.place('/app/main.tinyc.js', mainManifest);
+    await proc._prefetchClosure('/app/main.tinyc.js');
+    const result = proc.runMainModule(
+      h.unitBytes('/app/main.tinyc.js', mainManifest),
+      { path: '/app/main.tinyc.js' });
+    assert.equal(result.exitCode, 42);
+    assert.deepEqual(fetched, [
+      'https://libs.example.test/app/libside.tinyc.js',
+      'https://libs.example.test/lib/libside.tinyc.js',
+      'https://libs.example.test/libside.tinyc.js',
+    ]);
+    assert.ok(loadedPaths(proc).includes('/sysroot/libside.tinyc.js'));
+    assert.ok(h.fs.hasFile('/sysroot/libside.tinyc.js')); // written back
+  });
+});
+
+test('search: editing search_dirs in the manifest changes what is found', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const ok = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(ok.result.exitCode, 42);
+  // The same unit with 'lib' edited out of its manifest's
+  // search_dirs no longer finds the library there.
+  assert.throws(
+    () => runSynthMain(h, {
+      needed: ['libside.tinyc.js'], searchDirs: ['$ORIGIN', '.'],
+    }),
+    /needed library "libside\.tinyc\.js" is not present locally \(searched: \/app\/libside\.tinyc\.js, \/sysroot\/libside\.tinyc\.js;/);
+});
+
+test('search: the search_dirs order decides between same-named units in different directories', () => {
+  const h = makeSearchHarness();
+  h.place('/app/libside.tinyc.js', synthManifest(false));
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const a = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: ['$ORIGIN', 'lib', '.'],
+  });
+  assert.ok(loadedPaths(a.proc).includes('/app/libside.tinyc.js'));
+  assert.ok(!loadedPaths(a.proc).includes('/sysroot/lib/libside.tinyc.js'));
+  const b = runSynthMain(h, {
+    needed: ['libside.tinyc.js'], searchDirs: ['lib', '$ORIGIN', '.'],
+  });
+  assert.ok(loadedPaths(b.proc).includes('/sysroot/lib/libside.tinyc.js'));
+  assert.ok(!loadedPaths(b.proc).includes('/app/libside.tinyc.js'));
+});
+
+test('search: the name as spelled is tried through every directory before any completion', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/side', synthManifest(false)); // original form, last directory
+  h.place('/app/libside.tinyc.js', synthManifest(false)); // completed form, first directory
+  const { proc, result } = runSynthMain(h, {
+    needed: ['side'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(result.exitCode, 42);
+  assert.ok(loadedPaths(proc).includes('/sysroot/side'));
+  assert.ok(!loadedPaths(proc).includes('/app/libside.tinyc.js'));
+});
+
+test('search: the extension completion is tried through every directory before the lib prefix', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/side.tinyc.js', synthManifest(false)); // stage 2, last directory
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false)); // stage 3, earlier directory
+  const proc = h.newProcess();
+  assert.ok(proc.dlopen('side') > 0);
+  assert.ok(loadedPaths(proc).includes('/sysroot/side.tinyc.js'));
+  assert.ok(!loadedPaths(proc).includes('/sysroot/lib/libside.tinyc.js'));
+});
+
+test('search: a name already carrying the lib prefix gains only the extension', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const proc = h.newProcess();
+  assert.ok(proc.dlopen('libside') > 0);
+  assert.ok(loadedPaths(proc).includes('/sysroot/lib/libside.tinyc.js'));
+  // The prefix is never doubled: with only a liblib* unit
+  // present, the same request finds nothing.
+  const h2 = makeSearchHarness();
+  h2.place('/sysroot/lib/liblibside.tinyc.js', synthManifest(false));
+  assert.throws(() => h2.newProcess().dlopen('libside'),
+    /is not present locally/);
+});
+
+test('search: dlopen takes the full name and the short name; needed takes the short name', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  assert.ok(h.newProcess().dlopen('libside.tinyc.js') > 0);
+  assert.ok(h.newProcess().dlopen('side') > 0);
+  const { result } = runSynthMain(h, {
+    needed: ['side'], searchDirs: DEFAULT_DIRS,
+  });
+  assert.equal(result.exitCode, 42);
+});
+
+test('search: dlopen rejects a path spelling by name', () => {
+  const proc = makeSearchHarness().newProcess();
+  assert.throws(() => proc.dlopen('/sysroot/lib/libside.tinyc.js'),
+    /dlopen takes a library name, not a path/);
+  assert.throws(() => proc.dlopen('lib/libside.tinyc.js'),
+    /dlopen takes a library name, not a path/);
+});
+
+test('search: an old-format manifest whose needed entry is an absolute path still loads', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const { result } = runSynthMain(h, {
+    needed: ['/sysroot/lib/libside.tinyc.js'],
+  });
+  assert.equal(result.exitCode, 42);
+});
+
+test('search: an old-format manifest whose needed entry is a relative path resolves against its own directory', () => {
+  const h = makeSearchHarness();
+  h.place('/app/sub/libside.tinyc.js', synthManifest(false));
+  const { proc, result } = runSynthMain(h, {
+    needed: ['sub/libside.tinyc.js'],
+  });
+  assert.equal(result.exitCode, 42);
+  assert.ok(loadedPaths(proc).includes('/app/sub/libside.tinyc.js'));
+});
+
+test('search: a manifest without search_dirs resolves with the toolchain default', () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/libside.tinyc.js', synthManifest(false));
+  const { result } = runSynthMain(h, { needed: ['libside.tinyc.js'] });
+  assert.equal(result.exitCode, 42);
+});
+
+test('search: a module loaded from outside the search directories is found by name', async () => {
+  const h = makeSearchHarness();
+  h.place('/elsewhere/libside.tinyc.js', synthManifest(false));
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const proc = h.newProcess();
+  const placed = await proc.loadModule('/elsewhere/libside.tinyc.js');
+  assert.ok(placed > 0);
+  // The short name reaches the loaded module by name before
+  // the disk copy of the completed form is even considered.
+  assert.equal(proc.dlopen('side'), placed);
+  assert.equal(proc.moduleHandle('side'), placed);
+  assert.ok(!loadedPaths(proc).includes('/sysroot/lib/libside.tinyc.js'));
+});
+
+test('search: an earlier name form found loaded beats a later form found on disk', async () => {
+  const h = makeSearchHarness();
+  h.place('/elsewhere/side', synthManifest(false));
+  h.place('/sysroot/lib/libside.tinyc.js', synthManifest(false));
+  const proc = h.newProcess();
+  const placed = await proc.loadModule('/elsewhere/side');
+  assert.equal(proc.dlopen('side'), placed);
+  assert.ok(!loadedPaths(proc).includes('/sysroot/lib/libside.tinyc.js'));
+});
+
+test('search: a needed short name binds a module already loaded from outside the search directories', async () => {
+  const h = makeSearchHarness();
+  h.place('/elsewhere/libside.tinyc.js', synthManifest(false));
+  h.place('/app/main.tinyc.js', synthManifest(true, {
+    needed: ['side'], search_dirs: DEFAULT_DIRS,
+  }));
+  const proc = h.newProcess();
+  const placed = await proc.loadModule('/elsewhere/libside.tinyc.js');
+  await proc.loadModule('/app/main.tinyc.js');
+  assert.equal(proc.moduleHandle('libside.tinyc.js'), placed);
+  assert.ok(loadedPaths(proc).includes('/app/main.tinyc.js'));
+});
