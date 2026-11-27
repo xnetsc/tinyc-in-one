@@ -51,8 +51,8 @@ struct addrinfo {
 	int		ai_socktype;
 	int		ai_protocol;
 	socklen_t	ai_addrlen;
-	struct sockaddr	*ai_addr;
 	char		*ai_canonname;
+	struct sockaddr	*ai_addr;
 	struct addrinfo	*ai_next;
 };
 
@@ -60,22 +60,27 @@ struct addrinfo {
 #define AI_PASSIVE	0x00000001
 #define AI_CANONNAME	0x00000002
 #define AI_NUMERICHOST	0x00000004
-#define AI_NUMERICSERV	0x00000008
+#define AI_NUMERICSERV	0x00001000
 #define AI_ALL		0x00000100
 #define AI_V4MAPPED_CFG 0x00000200
 #define AI_ADDRCONFIG	0x00000400
 #define AI_V4MAPPED	0x00000800
 
-/* getaddrinfo error codes. */
-#define EAI_BADFLAGS	1
-#define EAI_NONAME	2
-#define EAI_AGAIN	3
+/* getaddrinfo error codes: the Darwin assignments, in numeric
+ * order (EAI_ADDRFAMILY 1 .. EAI_SYSTEM 11, EAI_OVERFLOW 14).
+ * An earlier draft had these in the wrong order (1, 2, 3 for
+ * BADFLAGS, NONAME, AGAIN); the macOS CI probe settled them
+ * against the platform headers. */
+#define EAI_ADDRFAMILY	1
+#define EAI_AGAIN	2
+#define EAI_BADFLAGS	3
 #define EAI_FAIL	4
-#define EAI_NODATA	5
-#define EAI_FAMILY	6
-#define EAI_SOCKTYPE	7
-#define EAI_SERVICE	8
-#define EAI_MEMORY	10
+#define EAI_FAMILY	5
+#define EAI_MEMORY	6
+#define EAI_NODATA	7
+#define EAI_NONAME	8
+#define EAI_SERVICE	9
+#define EAI_SOCKTYPE	10
 #define EAI_SYSTEM	11
 #define EAI_OVERFLOW	14
 

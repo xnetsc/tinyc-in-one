@@ -244,6 +244,7 @@ if [ "$MODE" = "native-libs" ]; then
     # side keys its extraction cache on ASSETS_VERSION).
     PLACEHOLDER_ASSETS=0
     [ -f src/main/assets/toolchain/aarch64-linux-android/include/.gitkeep ] && PLACEHOLDER_ASSETS=1
+    [ -f src/main/assets/sysroot/aarch64-linux-android/include/.gitkeep ] && PLACEHOLDER_ASSETS=1
     for triple in aarch64-linux-android x86_64-linux-android; do
         dst=src/main/assets/toolchain/$triple
         mkdir -p "$dst/include" "$dst/lib"
@@ -255,6 +256,31 @@ if [ "$MODE" = "native-libs" ]; then
             cp "$SRC/libtcc1.a" "$dst/lib/libtcc1.a"
             cp "$SRC/runmain.o" "$dst/lib/runmain.o"
         fi
+        rm -f "$dst/.gitkeep" "$dst/include/.gitkeep" "$dst/lib/.gitkeep"
+    done
+
+    # Stage the bionic sysroot from the top-level build's android
+    # dists (the same tree add_android_to_dist copied into each
+    # dist: include-libc holds the headers, libc the crt objects
+    # and link stubs). The device-side compiler reads the system
+    # headers and link inputs only from the extracted sysroot
+    # (Tinyc.java registers sysrootDir/include and sysrootDir/lib),
+    # so an AAR built without this step ships an empty sysroot and
+    # any program including a system header fails to compile on
+    # the device at its first #include. The dists are built by the
+    # top-level build.sh before this mode runs in CI.
+    for triple in aarch64-linux-android x86_64-linux-android; do
+        src_inc="$ROOT/build/dist/$triple/lib/tcc/include-libc"
+        src_lib="$ROOT/build/dist/$triple/lib/tcc/libc"
+        if [ ! -d "$src_inc" ] || [ ! -d "$src_lib" ]; then
+            echo "android dist sysroot missing for $triple: $src_inc" >&2
+            echo "run the top-level build.sh first" >&2
+            exit 1
+        fi
+        dst=src/main/assets/sysroot/$triple
+        mkdir -p "$dst/include" "$dst/lib"
+        cp -r "$src_inc/." "$dst/include/"
+        cp -r "$src_lib/." "$dst/lib/"
         rm -f "$dst/.gitkeep" "$dst/include/.gitkeep" "$dst/lib/.gitkeep"
     done
     if [ $PLACEHOLDER_ASSETS -eq 1 ]; then

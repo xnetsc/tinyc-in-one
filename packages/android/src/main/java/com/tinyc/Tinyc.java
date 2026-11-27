@@ -84,6 +84,14 @@ public final class Tinyc implements AutoCloseable {
             sysrootApplied = true;
             TinycNative.nativeAddSysincludePath(state,
                     new File(bundledPaths.sysrootDir, "include").getAbsolutePath());
+            // The bionic tree keeps the machine-specific headers
+            // (asm/, machine/) under include/<triple>/, and the
+            // top-level headers reach them as <asm/...>; without
+            // this second path even #include <string.h> fails
+            // (sys/types.h -> linux/types.h -> asm/types.h).
+            TinycNative.nativeAddSysincludePath(state,
+                    new File(new File(bundledPaths.sysrootDir, "include"),
+                            bundledPaths.triple).getAbsolutePath());
             TinycNative.nativeAddLibraryPath(state,
                     new File(bundledPaths.sysrootDir, "lib").getAbsolutePath());
         }

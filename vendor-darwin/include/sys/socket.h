@@ -76,7 +76,7 @@ struct sockaddr_storage {
 #define SO_DONTROUTE	0x0010
 #define SO_BROADCAST	0x0020
 #define SO_USELOOPBACK	0x0040
-#define SO_LINGER	0x1080
+#define SO_LINGER	0x0080
 #define SO_OOBINLINE	0x0100
 #define SO_REUSEPORT	0x0200
 #define SO_SNDBUF	0x1001

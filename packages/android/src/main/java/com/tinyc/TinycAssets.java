@@ -25,7 +25,7 @@ import java.io.OutputStream;
 public final class TinycAssets {
 
     /** assets 解压版本号。assets 内容变化时改这个值，旧目录不覆盖、并行保留。 */
-    public static final String ASSETS_VERSION = "1";
+    public static final String ASSETS_VERSION = "2";
 
     private static final String ROOT_DIR_NAME = "tinyc";
 

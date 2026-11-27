@@ -16,6 +16,11 @@
 /packages/android/src/main/jniLibs/*/libtinyc.so
 /packages/android/src/main/assets/toolchain/*/include/*.h
 /packages/android/src/main/assets/toolchain/*/lib/*.a
+/packages/android/src/main/assets/toolchain/*/lib/*.o
+# Staged by packages/android/build.sh native-libs from the
+# top-level build's android dists (bionic sysroot).
+/packages/android/src/main/assets/sysroot/*/include/**
+/packages/android/src/main/assets/sysroot/*/lib/**
 /wasm-backend/build-src/
 /wasm-backend/work/
 mac-test-bundle/tinyc-mac-test.tar.gz
