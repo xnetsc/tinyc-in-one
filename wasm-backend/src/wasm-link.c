@@ -1250,14 +1250,15 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         WBuf *body;
         if (!wfuns[i].defined) continue;
         body = &wfuns[i].final_body;
-        wb_uleb(&pay, body->len + 13);
-        wb_uleb(&pay, 6);
+        wb_uleb(&pay, body->len + 15);
+        wb_uleb(&pay, 7);
         wb_uleb(&pay, 8);  wb_putc(&pay, WT_I32);
         wb_uleb(&pay, 8);  wb_putc(&pay, WT_F64);
         wb_uleb(&pay, 43); wb_putc(&pay, WT_I32);
         wb_uleb(&pay, 4);  wb_putc(&pay, 0x7b);
         wb_uleb(&pay, 2);  wb_putc(&pay, WT_I32);
         wb_uleb(&pay, 1);  wb_putc(&pay, WT_I64);
+        wb_uleb(&pay, 40); wb_putc(&pay, WT_F64);
         wb_write(&pay, body->data, body->len);
     }
     sec_begin(&mod, 10, &pay); wb_free(&pay);
@@ -1597,21 +1598,23 @@ static int wasm_output_module(TCCState *s, const char *filename)
         WBuf *body;
         if (!wfuns[i].defined) continue;
         body = &wfuns[i].final_body;
-        /* entry size = locals vec (13 bytes: count + 6 groups) + body.
+        /* entry size = locals vec (15 bytes: count + 7 groups) + body.
            Local index layout after the parameters (must match
            wasm-gen.c wloc_reg/wloc_fp/wloc_scratch/wloc_vec/
-           wloc_pc/wloc_i64): +0..7 i32 regs, +8..15 f64 regs,
-           +16..58 i32 (pseudo fp/sp slots, $fp, call scratch),
-           +59..62 v128 slots, +63 i32 dispatch $pc, +64 i32
-           carry (llong add/sub), +65 i64 scratch */
-        wb_uleb(&pay, body->len + 13);
-        wb_uleb(&pay, 6);                    /* 6 local groups */
+           wloc_pc/wloc_i64/wloc_fscratch): +0..7 i32 regs, +8..15
+           f64 regs, +16..58 i32 (pseudo fp/sp slots, $fp, call
+           scratch), +59..62 v128 slots, +63 i32 dispatch $pc,
+           +64 i32 carry (llong add/sub), +65 i64 scratch,
+           +66..105 f64 call-arg scratch */
+        wb_uleb(&pay, body->len + 15);
+        wb_uleb(&pay, 7);                    /* 7 local groups */
         wb_uleb(&pay, 8);  wb_putc(&pay, WT_I32); /* TCC int regs 0..7 */
         wb_uleb(&pay, 8);  wb_putc(&pay, WT_F64); /* TCC float regs 8..15 */
         wb_uleb(&pay, 43); wb_putc(&pay, WT_I32); /* pseudo fp/sp, $fp, scratch */
         wb_uleb(&pay, 4);  wb_putc(&pay, 0x7b);   /* v128 vector slots */
         wb_uleb(&pay, 2);  wb_putc(&pay, WT_I32); /* dispatch $pc, carry */
         wb_uleb(&pay, 1);  wb_putc(&pay, WT_I64); /* i64 scratch */
+        wb_uleb(&pay, 40); wb_putc(&pay, WT_F64); /* f64 call-arg scratch */
         wb_write(&pay, body->data, body->len);
     }
     sec_begin(&mod, 10, &pay); wb_free(&pay);

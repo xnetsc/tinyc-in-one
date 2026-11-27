@@ -412,6 +412,7 @@ static int wloc_scratch(int i) { return wcur_func->nparams + NB_REGS + 1 + i; }
 static int wloc_pc(void)     { return wcur_func->nparams + 63; } /* basic-block dispatch $pc */
 static int wloc_carry(void)  { return wcur_func->nparams + 64; } /* carry between ADDC1/ADDC2 */
 static int wloc_i64(void)    { return wcur_func->nparams + 65; } /* i64 scratch (cvt/llong call glue) */
+static int wloc_fscratch(int i) { return wcur_func->nparams + 66 + i; } /* f64 call-arg scratch (gfunc_call) */
 
 static void we(int c) /* emit one byte, mirrored into the ELF text section */
 {
@@ -1388,7 +1389,14 @@ ST_FUNC void load(int r, SValue *sv)
             we(0x43); we(u & 0xff); we((u >> 8) & 0xff); we((u >> 16) & 0xff); we((u >> 24) & 0xff);
             break; }
         case VT_DOUBLE: case VT_LDOUBLE: {
-            double d = sv->c.d; uint64_t u; int i; memcpy(&u, &d, 8);
+            /* a long double constant lives in c.ld (the frontend
+               parses and folds with the host long double); this
+               target's long double is f64, so convert - reading
+               c.d instead would take the low half of the host's
+               80-bit representation */
+            double d = (sv->type.t & VT_BTYPE) == VT_LDOUBLE
+                       ? (double)sv->c.ld : sv->c.d;
+            uint64_t u; int i; memcpy(&u, &d, 8);
             we(0x44); for (i = 0; i < 8; i++) we((u >> (8 * i)) & 0xff);
             break; }
         case VT_LLONG:
@@ -1877,9 +1885,12 @@ ST_FUNC void gen_cvt_ftof(int t)
     if (st == dt)
         return;
     rs = gv(RC_FLOAT);
-    if (dt == VT_DOUBLE) {
+    if (dt == VT_DOUBLE || dt == VT_LDOUBLE) {
         /* the register already holds the exact value as an f64
-           (float values are kept promoted) */
+           (float values are kept promoted, and long double is
+           f64 on this target): no conversion to emit.  Falling
+           through to the float path below would demote a double
+           to f32 precision on its way to a long double. */
         vtop->r = rs;
         return;
     }
@@ -2607,11 +2618,16 @@ ST_FUNC void gfunc_call(int nb_args)
         } else if ((sv->type.t & VT_BTYPE) == VT_FLOAT ||
                    (sv->type.t & VT_BTYPE) == VT_DOUBLE ||
                    (sv->type.t & VT_BTYPE) == VT_LDOUBLE) {
-            /* float registers hold f64, the scratch locals are i32:
-               stage through REG_FRET and narrow back to the
-               argument's own type on the operand stack */
-            load(REG_FRET, sv);
-            we_local_get(wloc_reg(REG_FRET));
+            /* float registers hold f64 and the scalar scratch
+               locals are i32: stage each argument into its own
+               f64 scratch local, then push from there.  Staging
+               every float argument through the single REG_FRET
+               local instead would destroy an argument that
+               already lives in REG_FRET - the result of the
+               immediately preceding call - as soon as an earlier
+               argument is staged into it. */
+            load(66 + i, sv);
+            we_local_get(wloc_fscratch(i));
             if ((sv->type.t & VT_BTYPE) == VT_FLOAT && !is_va)
                 we(0xb6); /* f32.demote_f64 (variadic args stay
                              promoted to f64) */
