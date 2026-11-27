@@ -60,6 +60,12 @@ const ALLOC_USED = 0xa110ce11;
  *   processTable  a WebAssembly.Table that atexit handlers are
  *             resolved through on exit (a process's shared table);
  *             default: the running instance's exported table.
+ *   fileSystem  backing store for the stdio file functions
+ *             (fopen & family): { read(path) -> Uint8Array|null,
+ *             write(path, bytes), remove(path) }, synchronous,
+ *             paths absolute and normalized. Default: a private
+ *             in-memory map owned by this shim set, so a run's
+ *             files live exactly as long as the run.
  *   args/env  accepted for symmetry with the WASI shim options;
  *             libc shims do not consume argv, and getenv returns
  *             null by design, so neither is read.
@@ -391,6 +397,88 @@ export function createDefaultShims(options = {}) {
     if (dest) writeBytes(dest, copy);
     return dest;
   }
+  function memchr(ptr, c, n) {
+    const m = u8();
+    const want = c & 0xff;
+    for (let i = 0; i < n; i++) {
+      if (m[ptr + i] === want) return ptr + i;
+    }
+    return 0;
+  }
+  function strspn(ptr, acceptPtr) {
+    const s = readCString(ptr);
+    const accept = readCString(acceptPtr);
+    let n = 0;
+    while (n < s.length && accept.includes(s[n])) n++;
+    return n;
+  }
+  function strcspn(ptr, rejectPtr) {
+    const s = readCString(ptr);
+    const reject = readCString(rejectPtr);
+    let n = 0;
+    while (n < s.length && !reject.includes(s[n])) n++;
+    return n;
+  }
+  function strpbrk(ptr, acceptPtr) {
+    const n = strcspn(ptr, acceptPtr);
+    return n < strlen(ptr) ? ptr + n : 0;
+  }
+  let strtokSave = 0;
+  function strtok(ptr, delimPtr) {
+    const delim = readCString(delimPtr);
+    let start;
+    if (ptr) {
+      start = ptr;
+    } else {
+      if (!strtokSave) return 0;
+      start = strtokSave;
+    }
+    const m = u8();
+    let i = start;
+    while (m[i] !== 0 && delim.includes(String.fromCharCode(m[i]))) i++;
+    if (m[i] === 0) {
+      strtokSave = 0;
+      return 0;
+    }
+    const token = i;
+    while (m[i] !== 0 && !delim.includes(String.fromCharCode(m[i]))) i++;
+    if (m[i] !== 0) {
+      m[i] = 0;
+      strtokSave = i + 1;
+    } else {
+      strtokSave = 0;
+    }
+    return token;
+  }
+  function strerror(errnum) {
+    // No errno surface exists in this layer; the strings are the
+    // C-locale texts for the codes a guest can name from <errno.h>
+    // values it supplies itself.
+    const table = {
+      0: 'Success',
+      1: 'Operation not permitted',
+      2: 'No such file or directory',
+      12: 'Cannot allocate memory',
+      22: 'Invalid argument',
+    };
+    const text = table[errnum] ?? `Unknown error ${errnum | 0}`;
+    const bytes = textEncoder.encode(text);
+    const buf = malloc(bytes.length + 1);
+    if (buf) writeCStringBytes(buf, bytes);
+    return buf;
+  }
+  function strcoll(a, b) {
+    return strcmp(a, b);
+  }
+  function strxfrm(dest, src, n) {
+    const len = strlen(src);
+    if (dest && n > 0) {
+      const take = Math.min(len, n - 1);
+      writeBytes(dest, readBytes(src, take));
+      u8()[dest + take] = 0;
+    }
+    return len;
+  }
 
   // ---------------------------------------------------------------
   // ctype: table-driven. Flags per byte: upper/lower/digit/space/
@@ -521,6 +609,42 @@ export function createDefaultShims(options = {}) {
   const abs = (v) => Math.abs(v | 0);
   const labs = (v) => Math.abs(v | 0);
   const llabs = (v) => (v < 0n ? -v : v);
+
+  // qsort/bsearch call the guest comparator through the module's
+  // indirect function table — the same route atexit handlers
+  // take. Without a table there is nothing to call through, and
+  // the functions leave the array as it is.
+  function comparatorFn(cmpPtr) {
+    const table = options.processTable ??
+      holder?.instance?.exports?.__indirect_function_table;
+    if (!table || typeof table.get !== 'function') return null;
+    const fn = table.get(cmpPtr);
+    return typeof fn === 'function' ? fn : null;
+  }
+  function qsort(base, nmemb, size, cmpPtr) {
+    const cmp = comparatorFn(cmpPtr);
+    if (!cmp || nmemb < 2 || size <= 0) return;
+    // Sort an index permutation, comparing through the elements'
+    // real addresses, then apply the permutation in one pass.
+    const order = Array.from({ length: nmemb }, (_, i) => i);
+    order.sort((ia, ib) => cmp(base + ia * size, base + ib * size) | 0);
+    const items = order.map((i) => readBytes(base + i * size, size));
+    for (let i = 0; i < nmemb; i++) writeBytes(base + i * size, items[i]);
+  }
+  function bsearch(key, base, nmemb, size, cmpPtr) {
+    const cmp = comparatorFn(cmpPtr);
+    if (!cmp) return 0;
+    let lo = 0;
+    let hi = nmemb - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const r = cmp(key, base + mid * size) | 0;
+      if (r === 0) return base + mid * size;
+      if (r < 0) hi = mid - 1;
+      else lo = mid + 1;
+    }
+    return 0;
+  }
 
   let randState = 1;
   function srand(seed) {
@@ -915,7 +1039,7 @@ export function createDefaultShims(options = {}) {
     return emitText(formatString(fmt, va), false);
   }
   function fprintf(stream, fmt, va) {
-    return emitText(formatString(fmt, va), stream === 2);
+    return streamWriteText(stream, formatString(fmt, va));
   }
   function sprintf(dest, fmt, va) {
     const bytes = textEncoder.encode(formatString(fmt, va));
@@ -930,40 +1054,741 @@ export function createDefaultShims(options = {}) {
     }
     return bytes.length;
   }
+  // ---------------------------------------------------------------
+  // Streams and files. A FILE* in this layer is an opaque handle
+  // value, never a pointer into guest memory: 0, 1 and 2 are the
+  // standard streams (stdin reads the run's stdin bytes, stdout
+  // writes to io.out, stderr to io.err — the values stdio.h
+  // exposes as the stdin/stdout/stderr macros), and fopen hands
+  // out fresh handle values above them. An open file's bytes are
+  // held in JS and written through to the backing store (the
+  // options.fileSystem store, or a private in-memory map) on
+  // every write, so a reader that opens the file afterwards —
+  // in this run or through the store — sees the content without
+  // waiting for fclose.
+  // ---------------------------------------------------------------
+  const backing = options.fileSystem ?? null;
+  const memFiles = new Map();
+  const backingRead = backing
+    ? (p) => backing.read(p)
+    : (p) => (memFiles.has(p) ? memFiles.get(p) : null);
+  const backingWrite = backing
+    ? (p, bytes) => backing.write(p, bytes)
+    : (p, bytes) => { memFiles.set(p, bytes.slice()); };
+  const backingRemove = backing
+    ? (p) => (typeof backing.remove === 'function' ? backing.remove(p) : false)
+    : (p) => memFiles.delete(p);
+
+  function guestPath(ptr) {
+    const raw = readCString(ptr);
+    const parts = [];
+    for (const seg of raw.split('/')) {
+      if (seg === '' || seg === '.') continue;
+      if (seg === '..') parts.pop();
+      else parts.push(seg);
+    }
+    return '/' + parts.join('/');
+  }
+
+  // handle -> { path, data, pos, readable, writable, append,
+  //             eof, err, unget[] } for open files. The standard
+  // streams are not in this map; handles 0/1/2 are recognized by
+  // value in the stream helpers below.
+  const openFiles = new Map();
+  let nextHandle = 3;
+  let stdinEof = false;
+
+  function flushStream(st) {
+    backingWrite(st.path, st.data);
+  }
+
+  // One byte from a readable stream, or -1 at end of input.
+  function streamGetByte(handle) {
+    if (handle === 0) {
+      const data = stdinRead(1);
+      if (!data.length) stdinEof = true;
+      return data.length ? data[0] : -1;
+    }
+    const st = openFiles.get(handle);
+    if (!st || !st.readable) return -1;
+    if (st.unget.length) return st.unget.pop();
+    if (st.pos >= st.data.length) {
+      st.eof = true;
+      return -1;
+    }
+    return st.data[st.pos++];
+  }
+
+  function streamUnget(handle, c) {
+    if (handle === 0) {
+      pushback.push(c & 0xff);
+      stdinEof = false;
+      return;
+    }
+    const st = openFiles.get(handle);
+    if (st) {
+      st.unget.push(c & 0xff);
+      st.eof = false;
+    }
+  }
+
+  // Up to n bytes from a readable stream.
+  function streamRead(handle, n) {
+    if (handle === 0) {
+      const data = stdinRead(n);
+      if (data.length < n) stdinEof = true;
+      return data;
+    }
+    const st = openFiles.get(handle);
+    if (!st || !st.readable) return new Uint8Array(0);
+    const parts = [];
+    let got = 0;
+    while (got < n && st.unget.length) {
+      parts.push(Uint8Array.of(st.unget.pop()));
+      got++;
+    }
+    if (got < n) {
+      const take = Math.min(n - got, st.data.length - st.pos);
+      if (take > 0) {
+        parts.push(st.data.slice(st.pos, st.pos + take));
+        st.pos += take;
+        got += take;
+      }
+    }
+    if (got < n) st.eof = true;
+    const out = new Uint8Array(got);
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  }
+
+  // Write bytes to a writable stream; returns the count written.
+  function streamWrite(handle, bytes) {
+    if (handle === 1) {
+      emitOut(bytes);
+      return bytes.length;
+    }
+    if (handle === 2) {
+      emitErr(bytes);
+      return bytes.length;
+    }
+    const st = openFiles.get(handle);
+    if (!st || !st.writable) return 0;
+    if (st.append) st.pos = st.data.length;
+    const end = st.pos + bytes.length;
+    if (end > st.data.length) {
+      const grown = new Uint8Array(end);
+      grown.set(st.data);
+      st.data = grown;
+    }
+    st.data.set(bytes, st.pos);
+    st.pos = end;
+    flushStream(st);
+    return bytes.length;
+  }
+
+  function streamWriteText(handle, text) {
+    return streamWrite(handle, textEncoder.encode(text));
+  }
+
+  function fopen(pathPtr, modePtr) {
+    const path = guestPath(pathPtr);
+    const mode = readCString(modePtr);
+    const base = mode[0];
+    if (base !== 'r' && base !== 'w' && base !== 'a') return 0;
+    const plus = mode.includes('+');
+    if (base === 'r') {
+      const data = backingRead(path);
+      if (data == null) return 0;
+      const handle = nextHandle++;
+      openFiles.set(handle, {
+        path, data: data.slice(), pos: 0,
+        readable: true, writable: plus, append: false,
+        eof: false, err: false, unget: [],
+      });
+      return handle;
+    }
+    if (base === 'w') {
+      if (mode.includes('x') && backingRead(path) != null) return 0;
+      const handle = nextHandle++;
+      const st = {
+        path, data: new Uint8Array(0), pos: 0,
+        readable: plus, writable: true, append: false,
+        eof: false, err: false, unget: [],
+      };
+      openFiles.set(handle, st);
+      flushStream(st);
+      return handle;
+    }
+    // 'a'
+    const existing = backingRead(path);
+    const handle = nextHandle++;
+    openFiles.set(handle, {
+      path, data: existing ? existing.slice() : new Uint8Array(0),
+      pos: existing ? existing.length : 0,
+      readable: plus, writable: true, append: true,
+      eof: false, err: false, unget: [],
+    });
+    return handle;
+  }
+
+  function fclose(handle) {
+    const st = openFiles.get(handle);
+    if (!st) return handle >= 0 && handle <= 2 ? 0 : -1;
+    flushStream(st);
+    openFiles.delete(handle);
+    return 0;
+  }
+
+  function fflush(handle) {
+    // fflush(NULL) is stream value 0 in C — which is also this
+    // layer's stdin handle. Flushing every open file covers both
+    // readings and is a no-op for the standard streams.
+    if (handle === 0) {
+      for (const st of openFiles.values()) flushStream(st);
+      return 0;
+    }
+    const st = openFiles.get(handle);
+    if (st) flushStream(st);
+    return 0;
+  }
+
+  function fseek(handle, offset, whence) {
+    const st = openFiles.get(handle);
+    if (!st) return -1;
+    const base = whence === 0 ? 0 : whence === 1 ? st.pos : st.data.length;
+    const np = base + offset;
+    if (np < 0) {
+      st.err = true;
+      return -1;
+    }
+    st.pos = np;
+    st.eof = false;
+    st.unget.length = 0;
+    return 0;
+  }
+
+  function ftell(handle) {
+    const st = openFiles.get(handle);
+    return st ? st.pos : -1;
+  }
+
+  function rewind(handle) {
+    const st = openFiles.get(handle);
+    if (!st) return;
+    st.pos = 0;
+    st.eof = false;
+    st.err = false;
+    st.unget.length = 0;
+  }
+
+  function fgetpos(handle, posPtr) {
+    const st = openFiles.get(handle);
+    if (!st) return -1;
+    dv().setBigInt64(posPtr, BigInt(st.pos), true);
+    return 0;
+  }
+
+  function fsetpos(handle, posPtr) {
+    return fseek(handle, Number(dv().getBigInt64(posPtr, true)), 0);
+  }
+
+  function feof(handle) {
+    if (handle === 0) return stdinEof ? 1 : 0;
+    const st = openFiles.get(handle);
+    return st && st.eof ? 1 : 0;
+  }
+
+  function ferror(handle) {
+    const st = openFiles.get(handle);
+    return st && st.err ? 1 : 0;
+  }
+
+  function clearerr(handle) {
+    if (handle === 0) {
+      stdinEof = false;
+      return;
+    }
+    const st = openFiles.get(handle);
+    if (st) {
+      st.eof = false;
+      st.err = false;
+    }
+  }
+
+  function freopen(pathPtr, modePtr, handle) {
+    if (!pathPtr) return handle;
+    const st = openFiles.get(handle);
+    if (st) {
+      flushStream(st);
+      openFiles.delete(handle);
+    }
+    const fresh = fopen(pathPtr, modePtr);
+    if (!fresh) return 0;
+    const nst = openFiles.get(fresh);
+    openFiles.delete(fresh);
+    openFiles.set(handle, nst);
+    return handle;
+  }
+
+  function removeFile(pathPtr) {
+    return backingRemove(guestPath(pathPtr)) ? 0 : -1;
+  }
+
+  function renameFile(oldPtr, newPtr) {
+    const data = backingRead(guestPath(oldPtr));
+    if (data == null) return -1;
+    backingWrite(guestPath(newPtr), data);
+    backingRemove(guestPath(oldPtr));
+    return 0;
+  }
+
   function puts(ptr) {
-    return emitText(readCString(ptr) + '\n', false) >= 0 ? 0 : -1;
+    return streamWriteText(1, readCString(ptr) + '\n') >= 0 ? 0 : -1;
   }
   function putchar(c) {
-    emitOut(Uint8Array.of(c & 0xff));
+    streamWrite(1, Uint8Array.of(c & 0xff));
     return c;
   }
   function fputs(ptr, stream) {
-    emitText(readCString(ptr), stream === 2);
-    return 0;
+    const bytes = textEncoder.encode(readCString(ptr));
+    return streamWrite(stream, bytes) === bytes.length ? 0 : -1;
   }
   function putc(c, stream) {
-    (stream === 2 ? emitErr : emitOut)(Uint8Array.of(c & 0xff));
-    return c;
+    return streamWrite(stream, Uint8Array.of(c & 0xff)) === 1 ? c : -1;
   }
   function fwrite(ptr, size, nmemb, stream) {
     const total = size * nmemb;
     if (total === 0) return 0;
-    (stream === 2 ? emitErr : emitOut)(readBytes(ptr, total));
-    return nmemb;
+    const written = streamWrite(stream, readBytes(ptr, total));
+    return Math.floor(written / size);
   }
-  function fread(ptr, size, nmemb, _stream) {
+  function fread(ptr, size, nmemb, stream) {
     if (size === 0 || nmemb === 0) return 0;
-    const data = stdinRead(size * nmemb);
+    const data = streamRead(stream, size * nmemb);
     if (data.length) writeBytes(ptr, data);
     return Math.floor(data.length / size);
   }
-  function fgetc(_stream) {
-    const data = stdinRead(1);
-    return data.length ? data[0] : -1;
+  function fgetc(stream) {
+    return streamGetByte(stream);
   }
-  function ungetc(c, _stream) {
-    if (c >= 0) pushback.push(c & 0xff);
+  function ungetc(c, stream) {
+    if (c < 0) return -1;
+    streamUnget(stream, c);
     return c;
+  }
+  function fgets(s, size, stream) {
+    if (size <= 0) return 0;
+    if (size === 1) {
+      u8()[s] = 0;
+      return s;
+    }
+    const bytes = [];
+    while (bytes.length < size - 1) {
+      const c = streamGetByte(stream);
+      if (c < 0) break;
+      bytes.push(c);
+      if (c === 0x0a) break;
+    }
+    if (bytes.length === 0) return 0;
+    writeBytes(s, Uint8Array.from(bytes));
+    u8()[s + bytes.length] = 0;
+    return s;
+  }
+
+  // ---------------------------------------------------------------
+  // scanf family: the mirror of the printf formatter. The input
+  // source is stdin, an open file, or a guest string (sscanf);
+  // every conversion consumes one pointer argument from the
+  // va_list area and stores through it. Supported conversions:
+  // d i u x X o c s [ f e E g G a p n and %%, with field width,
+  // assignment suppression (*) and the hh/h/l/ll/z/t/j/L length
+  // modifiers (long is 32-bit and long double is double in this
+  // target's ABI, as in the printf formatter).
+  // ---------------------------------------------------------------
+  function scanFrom(getByte, putBack, fmtPtr, vaPtr) {
+    const fmt = readCString(fmtPtr);
+    const va = makeVa(vaPtr);
+    let assigned = 0;
+    let consumed = 0;
+    let inputEof = false;
+    const held = [];
+    const rd = () => {
+      if (held.length) {
+        consumed++;
+        return held.pop();
+      }
+      const c = getByte();
+      if (c < 0) inputEof = true;
+      else consumed++;
+      return c;
+    };
+    const un = (c) => {
+      if (c >= 0) {
+        held.push(c);
+        consumed--;
+      }
+    };
+    const pk = () => {
+      const c = rd();
+      if (c >= 0) un(c);
+      return c;
+    };
+    const isWs = (c) => c === 0x20 || (c >= 0x09 && c <= 0x0d);
+    // Returns false when input ends while skipping.
+    const skipWs = () => {
+      for (;;) {
+        const c = rd();
+        if (c < 0) return false;
+        if (!isWs(c)) {
+          un(c);
+          return true;
+        }
+      }
+    };
+    const DIGITS = '0123456789abcdefghijklmnopqrstuvwxyz';
+    function scanIntToken(conv, width) {
+      // -> { value: BigInt } | { fail: 'input' | 'match' }
+      let text = '';
+      const room = () => width < 0 || text.length < width;
+      if (room()) {
+        const c = pk();
+        if (c === 0x2b || c === 0x2d) text += String.fromCharCode(rd());
+      }
+      let radix = conv === 'x' || conv === 'X' ? 16
+        : conv === 'o' ? 8 : conv === 'i' ? 0 : 10;
+      if ((conv === 'x' || conv === 'X' || conv === 'i') && room()) {
+        const a = pk();
+        if (a === 0x30) {
+          rd();
+          text += '0';
+          const b = room() ? pk() : -1;
+          if (b === 0x78 || b === 0x58) {
+            rd();
+            const d = pk();
+            if (d >= 0 && DIGITS.indexOf(String.fromCharCode(d).toLowerCase()) < 16 &&
+                DIGITS.indexOf(String.fromCharCode(d).toLowerCase()) >= 0) {
+              text += 'x';
+              radix = 16;
+            } else {
+              un(b);
+            }
+          }
+        }
+      }
+      if (radix === 0) {
+        radix = text.includes('x') ? 16
+          : text.replace(/^[+-]/, '').startsWith('0') ? 8 : 10;
+      }
+      let digits = 0;
+      while (room()) {
+        const c = pk();
+        if (c < 0) break;
+        const d = DIGITS.indexOf(String.fromCharCode(c).toLowerCase());
+        if (d < 0 || d >= radix) break;
+        // A leading '0' already taken as a prefix is itself a
+        // digit for octal and decimal readings.
+        text += String.fromCharCode(rd());
+        digits++;
+      }
+      const digitText = text.replace(/^[+-]/, '').replace(/^0[xX]/, '');
+      if (digitText.length === 0) {
+        // Push back what was speculatively taken (sign, prefix),
+        // in reverse read order.
+        for (let i = text.length - 1; i >= 0; i--) un(text.charCodeAt(i));
+        return { fail: inputEof && text.length === 0 ? 'input' : 'match' };
+      }
+      let v = 0n;
+      const br = BigInt(radix);
+      for (const ch of digitText) {
+        v = v * br + BigInt(DIGITS.indexOf(ch.toLowerCase()));
+      }
+      if (text.startsWith('-')) v = -v;
+      return { value: v };
+    }
+    function scanFloatToken(width) {
+      let text = '';
+      const room = () => width < 0 || text.length < width;
+      if (room()) {
+        const c = pk();
+        if (c === 0x2b || c === 0x2d) text += String.fromCharCode(rd());
+      }
+      const word = (w) => {
+        // Try to extend the token by the inf/nan word w; on a
+        // mismatch this attempt's reads are rolled back.
+        const base = text;
+        let t = text;
+        for (const ch of w) {
+          if (!room()) return false;
+          const c = pk();
+          if (c < 0 || String.fromCharCode(c).toLowerCase() !== ch) {
+            for (let i = t.length - 1; i >= base.length; i--) un(t.charCodeAt(i));
+            return false;
+          }
+          t += String.fromCharCode(rd());
+        }
+        text = t;
+        return true;
+      };
+      if (word('inf')) {
+        if (!word('inity')) { /* plain "inf" stands */ }
+        return { value: text.startsWith('-') ? -Infinity : Infinity };
+      }
+      if (word('nan')) return { value: NaN };
+      let sawDigit = false;
+      let sawDot = false;
+      while (room()) {
+        const c = pk();
+        if (c < 0) break;
+        if (c >= 0x30 && c <= 0x39) {
+          text += String.fromCharCode(rd());
+          sawDigit = true;
+        } else if (c === 0x2e && !sawDot) {
+          text += String.fromCharCode(rd());
+          sawDot = true;
+        } else break;
+      }
+      if (!sawDigit) {
+        for (let i = text.length - 1; i >= 0; i--) un(text.charCodeAt(i));
+        return { fail: inputEof && text.length === 0 ? 'input' : 'match' };
+      }
+      if (room()) {
+        const c = pk();
+        if (c === 0x65 || c === 0x45) {
+          rd();
+          let exp = 'e';
+          if (room()) {
+            const s = pk();
+            if (s === 0x2b || s === 0x2d) exp += String.fromCharCode(rd());
+          }
+          let expDigits = '';
+          while (room()) {
+            const d = pk();
+            if (d < 0x30 || d > 0x39) break;
+            expDigits += String.fromCharCode(rd());
+          }
+          if (expDigits) text += exp + expDigits;
+          else {
+            // No exponent digits: the 'e' and sign are not ours.
+            const tail = exp.slice(1);
+            for (let i = tail.length - 1; i >= 0; i--) un(tail.charCodeAt(i));
+            un(c);
+          }
+        }
+      }
+      return { value: parseFloat(text) };
+    }
+    function storeInt(ptr, value, length) {
+      if (length === 'll' || length === 'j') {
+        dv().setBigInt64(ptr, value, true);
+      } else if (length === 'hh') {
+        u8()[ptr] = Number(value & 0xffn);
+      } else if (length === 'h') {
+        dv().setInt16(ptr, Number(BigInt.asIntN(16, value)), true);
+      } else {
+        dv().setInt32(ptr, Number(BigInt.asIntN(32, value)), true);
+      }
+    }
+
+    let result = null; // null: still scanning
+    let i = 0;
+    while (i < fmt.length && result === null) {
+      const fc = fmt[i];
+      if (isWs(fc.charCodeAt(0))) {
+        while (i < fmt.length && isWs(fmt.charCodeAt(i))) i++;
+        if (!skipWs()) {
+          result = assigned > 0 ? assigned : -1;
+        }
+        continue;
+      }
+      if (fc !== '%') {
+        const c = rd();
+        if (c < 0) result = assigned > 0 ? assigned : -1;
+        else if (c !== fc.charCodeAt(0)) {
+          un(c);
+          result = assigned;
+        }
+        i++;
+        continue;
+      }
+      i++;
+      if (fmt[i] === '%') {
+        const c = rd();
+        if (c < 0) result = assigned > 0 ? assigned : -1;
+        else if (c !== 0x25) {
+          un(c);
+          result = assigned;
+        }
+        i++;
+        continue;
+      }
+      let suppress = false;
+      if (fmt[i] === '*') {
+        suppress = true;
+        i++;
+      }
+      let width = -1;
+      if (i < fmt.length && fmt[i] >= '0' && fmt[i] <= '9') {
+        width = 0;
+        while (i < fmt.length && fmt[i] >= '0' && fmt[i] <= '9') {
+          width = width * 10 + (fmt.charCodeAt(i++) - 48);
+        }
+      }
+      let length = '';
+      if (fmt.startsWith('hh', i)) { length = 'hh'; i += 2; }
+      else if (fmt.startsWith('ll', i)) { length = 'll'; i += 2; }
+      else if (i < fmt.length && 'hlzjtL'.includes(fmt[i])) length = fmt[i++];
+      const conv = fmt[i++] ?? '';
+      const argPtr = suppress || conv === '%' ? 0 : va.i32();
+      const fail = (kind) => {
+        result = kind === 'input' && assigned === 0 ? -1 : assigned;
+      };
+      switch (conv) {
+        case 'd':
+        case 'i':
+        case 'u':
+        case 'x':
+        case 'X':
+        case 'o': {
+          if (!skipWs()) { fail('input'); break; }
+          const r = scanIntToken(conv === 'd' || conv === 'u' ? 'd' : conv, width);
+          if (r.fail) { fail(r.fail); break; }
+          if (!suppress) {
+            storeInt(argPtr, r.value, length);
+            assigned++;
+          }
+          break;
+        }
+        case 'f':
+        case 'e':
+        case 'E':
+        case 'g':
+        case 'G':
+        case 'a':
+        case 'A': {
+          if (!skipWs()) { fail('input'); break; }
+          const r = scanFloatToken(width);
+          if (r.fail) { fail(r.fail); break; }
+          if (!suppress) {
+            if (length === 'l' || length === 'L') {
+              dv().setFloat64(argPtr, r.value, true);
+            } else {
+              dv().setFloat32(argPtr, Math.fround(r.value), true);
+            }
+            assigned++;
+          }
+          break;
+        }
+        case 'c': {
+          const want = width < 0 ? 1 : width;
+          const bytes = [];
+          while (bytes.length < want) {
+            const c = rd();
+            if (c < 0) break;
+            bytes.push(c);
+          }
+          if (bytes.length === 0) { fail('input'); break; }
+          if (!suppress) {
+            writeBytes(argPtr, Uint8Array.from(bytes));
+            assigned++;
+          }
+          break;
+        }
+        case 's': {
+          if (!skipWs()) { fail('input'); break; }
+          const bytes = [];
+          while (width < 0 || bytes.length < width) {
+            const c = pk();
+            if (c < 0 || isWs(c)) break;
+            bytes.push(rd());
+          }
+          if (bytes.length === 0) { fail(inputEof ? 'input' : 'match'); break; }
+          if (!suppress) {
+            writeBytes(argPtr, Uint8Array.from(bytes));
+            u8()[argPtr + bytes.length] = 0;
+            assigned++;
+          }
+          break;
+        }
+        case '[': {
+          let negate = false;
+          if (fmt[i] === '^') {
+            negate = true;
+            i++;
+          }
+          const set = new Set();
+          let first = true;
+          while (i < fmt.length && (fmt[i] !== ']' || first)) {
+            first = false;
+            if (fmt[i + 1] === '-' && fmt[i + 2] !== undefined && fmt[i + 2] !== ']') {
+              const lo = fmt.charCodeAt(i);
+              const hi = fmt.charCodeAt(i + 2);
+              for (let c = lo; c <= hi; c++) set.add(c);
+              i += 3;
+            } else {
+              set.add(fmt.charCodeAt(i));
+              i++;
+            }
+          }
+          i++; // the ']'
+          const bytes = [];
+          while (width < 0 || bytes.length < width) {
+            const c = pk();
+            if (c < 0) break;
+            if (set.has(c) === negate) break;
+            bytes.push(rd());
+          }
+          if (bytes.length === 0) { fail(inputEof ? 'input' : 'match'); break; }
+          if (!suppress) {
+            writeBytes(argPtr, Uint8Array.from(bytes));
+            u8()[argPtr + bytes.length] = 0;
+            assigned++;
+          }
+          break;
+        }
+        case 'p': {
+          if (!skipWs()) { fail('input'); break; }
+          const r = scanIntToken('x', width);
+          if (r.fail) { fail(r.fail); break; }
+          if (!suppress) {
+            dv().setInt32(argPtr, Number(BigInt.asIntN(32, r.value)), true);
+            assigned++;
+          }
+          break;
+        }
+        case 'n': {
+          if (!suppress) storeInt(argPtr, BigInt(consumed), length);
+          break;
+        }
+        default:
+          result = assigned;
+          break;
+      }
+    }
+    // Hand back any lookahead char this call did not consume.
+    for (let k = 0; k < held.length; k++) putBack(held[k]);
+    return result === null ? assigned : result;
+  }
+
+  function scanf(fmt, va) {
+    return scanFrom(() => streamGetByte(0), (c) => streamUnget(0, c), fmt, va);
+  }
+  function fscanf(stream, fmt, va) {
+    return scanFrom(
+      () => streamGetByte(stream), (c) => streamUnget(stream, c), fmt, va);
+  }
+  function sscanf(str, fmt, va) {
+    let idx = 0;
+    const get = () => {
+      const c = u8()[str + idx];
+      if (c === 0) return -1;
+      idx++;
+      return c;
+    };
+    return scanFrom(get, () => {}, fmt, va);
   }
 
   // ---------------------------------------------------------------
@@ -986,6 +1811,14 @@ export function createDefaultShims(options = {}) {
     strrchr,
     strstr,
     strdup,
+    memchr,
+    strspn,
+    strcspn,
+    strpbrk,
+    strtok,
+    strerror,
+    strcoll,
+    strxfrm,
     // allocation
     malloc,
     calloc,
@@ -1010,6 +1843,27 @@ export function createDefaultShims(options = {}) {
     fgetc,
     getchar: () => fgetc(0),
     ungetc,
+    fopen,
+    fclose,
+    fflush,
+    fseek,
+    ftell,
+    rewind,
+    fgetpos,
+    fsetpos,
+    feof,
+    ferror,
+    clearerr,
+    freopen,
+    remove: removeFile,
+    rename: renameFile,
+    fgets,
+    scanf,
+    fscanf,
+    sscanf,
+    vscanf: scanf,
+    vfscanf: fscanf,
+    vsscanf: sscanf,
     // stdlib
     exit,
     abort,
@@ -1027,6 +1881,8 @@ export function createDefaultShims(options = {}) {
     abs,
     labs,
     llabs,
+    bsearch,
+    qsort,
     rand,
     srand,
     getenv: (_name) => 0,

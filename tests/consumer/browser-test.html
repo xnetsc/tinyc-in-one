@@ -35,6 +35,11 @@
        <stdatomic.h> compiles and runs against it, and an
        x86_64-linux-gnu translation unit including <stdint.h>
        cross-compiles to an ELF object against it.
+    5. wasm32-wasi stdio: a whole program including <stdio.h>,
+       <string.h>, <stdlib.h> and <ctype.h> runs against the
+       shipped sysroot — fopen/fgets/fread/fprintf over files in
+       the instance's virtual FS, which the host stages before
+       the run and reads back after it.
 -->
 <script type="module">
 import { loadTinyc, runWasmModule, TCC_OUTPUT } from './pkg/index.mjs';
@@ -171,6 +176,69 @@ try {
     sobj[0] === 0x7f && sobj[1] === 0x45 && sobj[2] === 0x4c && sobj[3] === 0x46);
   check('x86_64 sysroot product e_machine is 62 (EM_X86_64)',
     sobj[18] === 62 && sobj[19] === 0);
+
+  // Section 5: stdio in a whole wasm32 program against the
+  // shipped sysroot — <stdio.h>, <string.h>, <stdlib.h> and
+  // <ctype.h> over the process layer's real supply. The host
+  // stages a seed file in the instance VFS; the guest reads it
+  // with fopen/fgets, parses it with sscanf, writes a result
+  // file with fprintf/fputs, reads it back with fread, and the
+  // host then reads the guest's file from the same VFS. The
+  // guest's exit codes name the failing step.
+  ts.addFile('/seed.txt', 'alpha 17 beta\n');
+  const st5 = ts.createState();
+  check('stdio state compileString returns 0',
+    st5.compileString([
+      '#include <stdio.h>',
+      '#include <string.h>',
+      '#include <stdlib.h>',
+      '#include <ctype.h>',
+      'int main(void) {',
+      '  FILE *in = fopen("/seed.txt", "r");',
+      '  if (!in) return 11;',
+      '  char line[64];',
+      '  if (!fgets(line, sizeof line, in)) return 12;',
+      '  if (strcmp(line, "alpha 17 beta\\n") != 0) return 13;',
+      '  if (fseek(in, 0, SEEK_END) != 0) return 14;',
+      '  if (ftell(in) != 14) return 15;',
+      '  fclose(in);',
+      '  int n = 0;',
+      '  char word[16];',
+      '  if (sscanf(line, "%*s %d %15s", &n, word) != 2) return 16;',
+      '  if (n != 17 || strcmp(word, "beta") != 0) return 17;',
+      '  if (!isdigit(line[6]) || toupper(word[0]) != 66) return 18;',
+      '  if (atoi("17") != n || strlen(word) != 4) return 22;',
+      '  FILE *out = fopen("/result.txt", "w");',
+      '  if (!out) return 19;',
+      '  fprintf(out, "n=%d word=%s len=%lu\\n", n, word,',
+      '          (unsigned long)strlen(word));',
+      '  fputs("done\\n", out);',
+      '  fclose(out);',
+      '  FILE *back = fopen("/result.txt", "r");',
+      '  if (!back) return 20;',
+      '  char buf[64];',
+      '  size_t got = fread(buf, 1, sizeof buf - 1, back);',
+      '  buf[got] = 0;',
+      '  fclose(back);',
+      '  if (strcmp(buf, "n=17 word=beta len=4\\ndone\\n") != 0) return 21;',
+      '  printf("stdio-ok %d\\n", n);',
+      '  return 42;',
+      '}',
+    ].join('\n')) === 0);
+  let stdioText = '';
+  const rc5 = await st5.run([], {
+    io: {
+      out: (text) => { stdioText += text; },
+      err: (text) => { stdioText += text; },
+    },
+  });
+  check('stdio program returns 42', rc5 === 42);
+  check('stdio program stdout carries its printf line',
+    stdioText.includes('stdio-ok 17'));
+  check('guest-written /result.txt is readable from the instance VFS',
+    dec.decode(ts.exportFile('/result.txt')) ===
+      'n=17 word=beta len=4\ndone\n');
+  st5.delete();
 } catch (e) {
   ok = false;
   log.push('ERROR: ' + ((e && e.stack) || e));

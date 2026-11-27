@@ -1738,12 +1738,23 @@ test('export: products come out of the virtual FS as bytes and as a Blob', async
 // builtins) and dlfcn.h / pthread.h, whose own text restricts them
 // to the wasm target (the process loader and scheduler are host
 // shims there; other targets take these headers from their own
-// SDK). Every other target ships the shared freestanding set.
+// SDK). stdio.h, string.h, stdlib.h and ctype.h are in this set
+// for the same reason: their text restricts them to the wasm
+// target, and the surface they declare is the host shim layer's
+// supply — the standard streams as fixed handle values, files
+// over the process's file space, no errno surface — which only
+// the wasm32 target runs against; the other targets take these
+// headers from their own SDK. Every other target ships the
+// shared freestanding set.
 const WASM_ONLY_INCLUDE_PATHS = new Set([
   '/sysroot/include/arm_neon.h',
+  '/sysroot/include/ctype.h',
   '/sysroot/include/dlfcn.h',
   '/sysroot/include/emmintrin.h',
   '/sysroot/include/pthread.h',
+  '/sysroot/include/stdio.h',
+  '/sysroot/include/stdlib.h',
+  '/sysroot/include/string.h',
   '/sysroot/include/wasm_simd128.h',
   '/sysroot/include/xmmintrin.h',
 ]);

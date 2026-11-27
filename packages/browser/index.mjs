@@ -2973,6 +2973,23 @@ export class TinycProcess {
       io: this._byteIO, holder: this._holder, stdin: options.stdin,
       heapBase: 1024, memoryAllocator: true,
       processTable: this.table,
+      // A process attached to an instance shares the instance's
+      // virtual FS as its stdio file space: guest fopen reads and
+      // writes land in the same files the host stages and reads
+      // back. A standalone process gets the shim layer's private
+      // in-memory file space instead.
+      fileSystem: this._tinyc ? {
+        read: (p) => {
+          try {
+            return this._tinyc.fs.hasFile(p)
+              ? this._tinyc.fs.readFile(p) : null;
+          } catch {
+            return null;
+          }
+        },
+        write: (p, bytes) => { this._tinyc.fs.addFileSync(p, bytes); },
+        remove: (p) => this._tinyc.fs.removeFile(p),
+      } : undefined,
     });
     this._defaultEnv = def.env;
     this._allocatorState = def.allocatorState;

@@ -10,6 +10,10 @@
       "source": "include/arm_neon.h"
     },
     {
+      "path": "/sysroot/include/ctype.h",
+      "source": "include/ctype.h"
+    },
+    {
       "path": "/sysroot/include/dlfcn.h",
       "source": "include/dlfcn.h"
     },
@@ -62,8 +66,20 @@
       "source": "include/stdint.h"
     },
     {
+      "path": "/sysroot/include/stdio.h",
+      "source": "include/stdio.h"
+    },
+    {
+      "path": "/sysroot/include/stdlib.h",
+      "source": "include/stdlib.h"
+    },
+    {
       "path": "/sysroot/include/stdnoreturn.h",
       "source": "include/stdnoreturn.h"
+    },
+    {
+      "path": "/sysroot/include/string.h",
+      "source": "include/string.h"
     },
     {
       "path": "/sysroot/include/tccdefs.h",
