@@ -27,6 +27,41 @@
 #include "libtcc.h"
 #include "tinyc_kernel.h"
 
+/* Whether this .so is a native compiler: a mirror of TCC_IS_NATIVE
+ * (vendor-tinycc/tcc.h). tccrun.c is compiled only under
+ * TCC_IS_NATIVE, so tcc_relocate() and tcc_run() exist only in a
+ * native build; a cross-target .so has neither symbol, and a JNI
+ * entry point that called them would leave the .so unloadable
+ * (UnsatisfiedLinkError at dlopen: "cannot locate symbol").
+ *
+ * The mirror must evaluate the same way tcc.h's does: the JNI glue
+ * is compiled by the same NDK clang invocation, with the same
+ * -DTCC_TARGET_* defines, as the kernel in the same .so, so the two
+ * agree by construction. If tcc.h's predicate ever changes, this
+ * mirror must change with it; a missing guard shows up again as an
+ * unloadable .so, an over-broad one as relocate()/run() failing on
+ * a target that could run. (tcc.h itself is not included here: it is
+ * a kernel-internal header that needs the generated config.h.)
+ *
+ * A cross-target .so is a compiler for another machine: it can
+ * compile and write files, but it can never execute the compiled
+ * code in this process, so relocate()/run() have no meaning for it
+ * and fail here instead of calling a symbol that does not exist. */
+#if defined _WIN32 == defined TCC_TARGET_PE \
+    && defined __APPLE__ == defined TCC_TARGET_MACHO
+# if defined __i386__ && defined TCC_TARGET_I386
+#  define TINYC_JNI_NATIVE 1
+# elif defined __x86_64__ && defined TCC_TARGET_X86_64
+#  define TINYC_JNI_NATIVE 1
+# elif defined __arm__ && defined TCC_TARGET_ARM
+#  define TINYC_JNI_NATIVE 1
+# elif defined __aarch64__ && defined TCC_TARGET_ARM64
+#  define TINYC_JNI_NATIVE 1
+# elif defined __riscv && defined __LP64__ && defined TCC_TARGET_RISCV64
+#  define TINYC_JNI_NATIVE 1
+# endif
+#endif
+
 /* ------------------------------------------------------------------ */
 /* globals cached in JNI_OnLoad                                        */
 /* ------------------------------------------------------------------ */
@@ -554,9 +589,20 @@ JNIEXPORT jint JNICALL
 Java_com_tinyc_TinycNative_nativeRelocate(JNIEnv *env, jclass cls, jlong jstate) {
     (void)cls;
     TCCState *s = STATE(env, jstate);
+#ifdef TINYC_JNI_NATIVE
     int rc = tcc_relocate(s);
     rethrow_state_pending(env, s);
     return rc;
+#else
+    /* Cross target: this .so has no tcc_relocate (see
+     * TINYC_JNI_NATIVE above). Relocating means running the compiled
+     * code in-process, which a cross target can never do on this
+     * device. Fail the same way tcc_relocate itself fails (rc -1,
+     * which the Java side turns into TinycException). */
+    (void)env;
+    (void)s;
+    return -1;
+#endif
 }
 
 JNIEXPORT jlong JNICALL
@@ -574,6 +620,7 @@ Java_com_tinyc_TinycNative_nativeRun(JNIEnv *env, jclass cls,
                                      jlong jstate, jobjectArray jargv) {
     (void)cls;
     TCCState *s = STATE(env, jstate);
+#ifdef TINYC_JNI_NATIVE
     int argc = 0;
     char **argv = build_argv(env, jargv, &argc);
     /* tcc_run runs the compiled program in-process; its exit and crashes
@@ -582,6 +629,16 @@ Java_com_tinyc_TinycNative_nativeRun(JNIEnv *env, jclass cls,
     free_argv(argv, argc);
     rethrow_state_pending(env, s);
     return rc;
+#else
+    /* Cross target: this .so has no tcc_run (see TINYC_JNI_NATIVE
+     * above). Running the compiled program in-process is meaningless
+     * for a target that cannot execute on this device; fail the same
+     * way tcc_run itself fails (rc -1). */
+    (void)env;
+    (void)s;
+    (void)jargv;
+    return -1;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
