@@ -31,6 +31,11 @@ $TCC -nostdlib -o tests/test-scalar2.wasm tests/test-scalar2.c; stage_rc $? "com
 echo "== scalar2 assertions =="
 node tests/run-scalar2.mjs; stage_rc $? "node"
 
+echo "== compile test-genfix.c (long double precision / nested call args) =="
+$TCC -nostdlib -o tests/test-genfix.wasm tests/test-genfix.c; stage_rc $? "compile"
+echo "== genfix assertions =="
+node tests/run-genfix.mjs; stage_rc $? "node"
+
 echo "== two-state registry isolation (libtcc API, one process) =="
 gcc -o tests/wasm32-libtcc.o -c build-src/libtcc.c -DTCC_TARGET_WASM32 -DCONFIG_TCC_CROSSPREFIX='"wasm32-"' -Ibuild-src -Wall -O2; stage_rc $? "libtcc build"
 gcc -o tests/test-two-states tests/test-two-states.c tests/wasm32-libtcc.o -Ibuild-src -lm -ldl -lpthread; stage_rc $? "host build"
