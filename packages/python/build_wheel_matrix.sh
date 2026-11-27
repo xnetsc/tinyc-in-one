@@ -51,30 +51,40 @@ build_universal2() {
   # dists must be reachable (TINYC_DIST_DIRS / --dist passthrough in
   # bundle_native.py); the release aggregation job collects them
   # from the two mac jobs.
-  if ! python3 bundle_native.py --merge-darwin >/tmp/tinyc-wheel-stage.log 2>&1; then
-    echo "PENDING: hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - no staged native build for these hosts"
-    return
-  fi
-  # A wheel without both native (host == target) combinations is
-  # broken; refuse to build it.
-  if ! python3 -c "
+  if python3 bundle_native.py --merge-darwin >/tmp/tinyc-wheel-stage.log 2>&1; then
+    # A wheel without both native (host == target) combinations is
+    # broken; refuse to build it.
+    if ! python3 -c "
 import json, sys
 m = json.load(open('tinyc/packaging-manifest.json'))
 hosts = ('arm64-apple-darwin', 'x86_64-apple-darwin')
 ok = all(any(c['host'] == h and c['target'] == h
              for c in m['combinations']) for h in hosts)
 sys.exit(0 if ok else 1)"; then
-    echo "FAILED:  hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - staging lacks a native (host == target) combination"
+      echo "FAILED:  hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - staging lacks a native (host == target) combination"
+      return
+    fi
+    rm -rf build tinyc.egg-info
+    if TINYC_WHEEL_PLAT=macosx_11_0_universal2 python3 -m pip wheel . -w "$OUT" --no-deps \
+         --no-build-isolation >/tmp/tinyc-wheel-build.log 2>&1; then
+      echo "BUILT:   hosts arm64/x86_64-apple-darwin -> $OUT (tag macosx_11_0_universal2)"
+    else
+      echo "FAILED:  hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - see /tmp/tinyc-wheel-build.log"
+    fi
+    rm -rf build tinyc.egg-info
     return
   fi
-  rm -rf build tinyc.egg-info
-  if TINYC_WHEEL_PLAT=macosx_11_0_universal2 python3 -m pip wheel . -w "$OUT" --no-deps \
-       --no-build-isolation >/tmp/tinyc-wheel-build.log 2>&1; then
-    echo "BUILT:   hosts arm64/x86_64-apple-darwin -> $OUT (tag macosx_11_0_universal2)"
-  else
-    echo "FAILED:  hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - see /tmp/tinyc-wheel-build.log"
-  fi
-  rm -rf build tinyc.egg-info
+  # Merge staging failed: only one darwin dist is reachable, which
+  # is the normal case on a single-arch mac CI job (its TINYC_DIST_DIR
+  # holds just its own host). Build this host's single-arch wheel
+  # instead, with its original tag, so the job's consumer test still
+  # has a wheel; the merged universal2 wheel is built by the release
+  # aggregation job, where both darwin dists are collected.
+  case "$(uname -m)" in
+    arm64)  build_one arm64-apple-darwin macosx_11_0_arm64 ;;
+    x86_64) build_one x86_64-apple-darwin macosx_10_9_x86_64 ;;
+    *) echo "FAILED:  hosts arm64/x86_64-apple-darwin (macosx_11_0_universal2) - merge staging failed and this host ($(uname -m)) is not a darwin host" ;;
+  esac
 }
 
 build_one x86_64-linux-gnu    manylinux_2_17_x86_64
