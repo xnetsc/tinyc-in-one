@@ -111,6 +111,22 @@ export function createDefaultShims(options = {}) {
   };
 
   // ---------------------------------------------------------------
+  // Error number state for this shim set (one per run / process):
+  // the file and allocation functions below record the failure
+  // code here, and perror reports it. The sysroot has no errno
+  // variable surface — in this process model a data symbol
+  // cannot be supplied by the shim layer (the same reason
+  // stdin/stdout/stderr are macros over handle values) — so the
+  // number lives only here, and perror is its only reader.
+  // Successful calls never clear it.
+  // ---------------------------------------------------------------
+  const ERRNO = {
+    ENOENT: 2, EBADF: 9, ENOMEM: 12, EEXIST: 17, EINVAL: 22,
+  };
+  let errnoValue = 0;
+  const setErrno = (code) => { errnoValue = code; };
+
+  // ---------------------------------------------------------------
   // Allocator: first-fit free list over [heapBase, memory end).
   // Block layout: [payloadSize u32][nextOrUsed u32][payload...];
   // the payload pointer handed out is header + 8.
@@ -241,7 +257,9 @@ export function createDefaultShims(options = {}) {
 
   function malloc(size) {
     const own = moduleAllocator();
-    return own ? own.malloc(size) : rawMalloc(size);
+    const ptr = own ? own.malloc(size) : rawMalloc(size);
+    if (!ptr && size) setErrno(ERRNO.ENOMEM);
+    return ptr;
   }
 
   function free(ptr) {
@@ -272,7 +290,10 @@ export function createDefaultShims(options = {}) {
     if (own) {
       if (typeof own.realloc === 'function') return own.realloc(ptr, size);
       const np = own.malloc(size);
-      if (!np) return 0;
+      if (!np) {
+        setErrno(ERRNO.ENOMEM);
+        return 0;
+      }
       // The preserved prefix is what matters; bytes past the old
       // block's end land in the new block's uninitialized tail.
       writeBytes(np, readBytes(ptr, size));
@@ -282,7 +303,10 @@ export function createDefaultShims(options = {}) {
     const oldSize = readU32(ptr - 8);
     if (size <= oldSize) return ptr;
     const np = rawMalloc(size);
-    if (!np) return 0;
+    if (!np) {
+      setErrno(ERRNO.ENOMEM);
+      return 0;
+    }
     writeBytes(np, readBytes(ptr, oldSize));
     rawFree(ptr);
     return np;
@@ -450,19 +474,22 @@ export function createDefaultShims(options = {}) {
     }
     return token;
   }
-  function strerror(errnum) {
-    // No errno surface exists in this layer; the strings are the
-    // C-locale texts for the codes a guest can name from <errno.h>
-    // values it supplies itself.
+  function strerrorText(errnum) {
+    // The C-locale texts for the error codes this layer records
+    // (and the common codes a guest can name itself).
     const table = {
       0: 'Success',
       1: 'Operation not permitted',
       2: 'No such file or directory',
+      9: 'Bad file descriptor',
       12: 'Cannot allocate memory',
+      17: 'File exists',
       22: 'Invalid argument',
     };
-    const text = table[errnum] ?? `Unknown error ${errnum | 0}`;
-    const bytes = textEncoder.encode(text);
+    return table[errnum] ?? `Unknown error ${errnum | 0}`;
+  }
+  function strerror(errnum) {
+    const bytes = textEncoder.encode(strerrorText(errnum));
     const buf = malloc(bytes.length + 1);
     if (buf) writeCStringBytes(buf, bytes);
     return buf;
@@ -1198,11 +1225,17 @@ export function createDefaultShims(options = {}) {
     const path = guestPath(pathPtr);
     const mode = readCString(modePtr);
     const base = mode[0];
-    if (base !== 'r' && base !== 'w' && base !== 'a') return 0;
+    if (base !== 'r' && base !== 'w' && base !== 'a') {
+      setErrno(ERRNO.EINVAL);
+      return 0;
+    }
     const plus = mode.includes('+');
     if (base === 'r') {
       const data = backingRead(path);
-      if (data == null) return 0;
+      if (data == null) {
+        setErrno(ERRNO.ENOENT);
+        return 0;
+      }
       const handle = nextHandle++;
       openFiles.set(handle, {
         path, data: data.slice(), pos: 0,
@@ -1212,7 +1245,10 @@ export function createDefaultShims(options = {}) {
       return handle;
     }
     if (base === 'w') {
-      if (mode.includes('x') && backingRead(path) != null) return 0;
+      if (mode.includes('x') && backingRead(path) != null) {
+        setErrno(ERRNO.EEXIST);
+        return 0;
+      }
       const handle = nextHandle++;
       const st = {
         path, data: new Uint8Array(0), pos: 0,
@@ -1238,7 +1274,9 @@ export function createDefaultShims(options = {}) {
   function fclose(handle) {
     const st = openFiles.get(handle);
     if (!st) return handle >= 0 && handle <= 2 ? 0 : -1;
-    flushStream(st);
+    // A tmpfile stream's backing entry is unlinked at close.
+    if (st.temp) backingRemove(st.path);
+    else flushStream(st);
     openFiles.delete(handle);
     return 0;
   }
@@ -1263,6 +1301,7 @@ export function createDefaultShims(options = {}) {
     const np = base + offset;
     if (np < 0) {
       st.err = true;
+      setErrno(ERRNO.EINVAL);
       return -1;
     }
     st.pos = np;
@@ -1335,12 +1374,17 @@ export function createDefaultShims(options = {}) {
   }
 
   function removeFile(pathPtr) {
-    return backingRemove(guestPath(pathPtr)) ? 0 : -1;
+    if (backingRemove(guestPath(pathPtr))) return 0;
+    setErrno(ERRNO.ENOENT);
+    return -1;
   }
 
   function renameFile(oldPtr, newPtr) {
     const data = backingRead(guestPath(oldPtr));
-    if (data == null) return -1;
+    if (data == null) {
+      setErrno(ERRNO.ENOENT);
+      return -1;
+    }
     backingWrite(guestPath(newPtr), data);
     backingRemove(guestPath(oldPtr));
     return 0;
@@ -1397,6 +1441,84 @@ export function createDefaultShims(options = {}) {
     writeBytes(s, Uint8Array.from(bytes));
     u8()[s + bytes.length] = 0;
     return s;
+  }
+
+  // fdopen: in this layer a FILE handle value is the descriptor
+  // — the standard streams are 0/1/2 and fopen hands out the
+  // values above them — so associating a stream with a
+  // descriptor is validating the value and handing it back. The
+  // returned stream is the same stream: closing either closes
+  // both. The mode's base letter must be a valid one; the
+  // descriptor's own direction is what the stream already has.
+  function fdopen(fd, modePtr) {
+    const base = readCString(modePtr)[0];
+    if (base !== 'r' && base !== 'w' && base !== 'a') {
+      setErrno(ERRNO.EINVAL);
+      return 0;
+    }
+    if (fd >= 0 && fd <= 2) return fd;
+    if (!openFiles.has(fd)) {
+      setErrno(ERRNO.EBADF);
+      return 0;
+    }
+    return fd;
+  }
+
+  // tmpfile: a binary read/write stream over a backing entry
+  // with a generated name no other open can collide with; the
+  // entry is unlinked when the stream is closed (see fclose).
+  let tmpfileCounter = 0;
+  function tmpfile() {
+    let path;
+    do {
+      tmpfileCounter++;
+      const rand = Math.floor(Math.random() * 0x100000000).toString(36);
+      path = `/tmpfile-${tmpfileCounter.toString(36)}-${rand}`;
+    } while (backingRead(path) != null);
+    const handle = nextHandle++;
+    const st = {
+      path, data: new Uint8Array(0), pos: 0,
+      readable: true, writable: true, append: false,
+      eof: false, err: false, unget: [], temp: true,
+    };
+    openFiles.set(handle, st);
+    flushStream(st);
+    return handle;
+  }
+
+  // Buffering control. Writes in this layer go through to the
+  // backing store as they happen, so every stream is effectively
+  // unbuffered whatever mode is requested: setvbuf records the
+  // requested mode and buffer on the stream and reports success,
+  // and output is visible to other readers immediately in all
+  // modes. No mode makes output wait for a flush.
+  function setvbuf(stream, buf, mode, size) {
+    if (stream >= 0 && stream <= 2) return 0;
+    const st = openFiles.get(stream);
+    if (!st) {
+      setErrno(ERRNO.EBADF);
+      return -1;
+    }
+    st.bufMode = mode;
+    st.bufPtr = buf;
+    st.bufSize = size;
+    return 0;
+  }
+  function setbuf(stream, buf) {
+    // _IOFBF is 0 and _IONBF is 2, the values stdio.h publishes;
+    // a null buffer means no buffering, a non-null one full
+    // buffering with a BUFSIZ (1024) caller buffer.
+    return setvbuf(stream, buf, buf ? 0 : 2, buf ? 1024 : 0);
+  }
+
+  // perror: report the layer's recorded error number for the
+  // most recent failed call on the error stream, in the standard
+  // form "<s>: <message>" (or just the message for a null or
+  // empty prefix).
+  function perror(sPtr) {
+    const prefix = sPtr ? readCString(sPtr) : '';
+    const text = (prefix ? `${prefix}: ` : '') + strerrorText(errnoValue) + '\n';
+    streamWriteText(2, text);
   }
 
   // ---------------------------------------------------------------
@@ -1792,8 +1914,571 @@ export function createDefaultShims(options = {}) {
   }
 
   // ---------------------------------------------------------------
-  // math / time
+  // math: the full <math.h> surface. The header declares the
+  // C99 functions in double, float and long double forms (171
+  // functions). In this target's ABI long double is double —
+  // sizeof(long double) is 8 and the compiler emits f64
+  // signatures for the l forms — so the l forms share the double
+  // implementations under their own names. The f forms run the
+  // double implementation and round the result with
+  // Math.fround, the float rounding an f32 return carries.
+  // Where JS Math has the function it is the base; the rest are
+  // implemented here, each with its precision stated where it is
+  // defined.
   // ---------------------------------------------------------------
+  const f64view = new DataView(new ArrayBuffer(8));
+  const f64Bits = (x) => {
+    f64view.setFloat64(0, x, true);
+    return f64view.getBigUint64(0, true);
+  };
+  const bitsToF64 = (b) => {
+    f64view.setBigUint64(0, b, true);
+    return f64view.getFloat64(0, true);
+  };
+  const f32Bits = (x) => {
+    f64view.setFloat32(0, x, true);
+    return f64view.getUint32(0, true);
+  };
+  const bitsToF32 = (b) => {
+    f64view.setUint32(0, b >>> 0, true);
+    return f64view.getFloat32(0, true);
+  };
+  const F64_SIGN = 1n << 63n;
+  const F64_FRAC = (1n << 52n) - 1n;
+
+  // Split a finite double: value = (neg ? -1 : 1) * sig * 2^exp
+  // with sig a 53-bit integer (subnormals are normalized up).
+  function decomposeF64(x) {
+    const bits = f64Bits(x);
+    const neg = (bits & F64_SIGN) !== 0n;
+    const be = Number((bits >> 52n) & 0x7ffn);
+    const frac = bits & F64_FRAC;
+    if (be !== 0) return { neg, sig: frac | (1n << 52n), exp: be - 1075 };
+    if (frac === 0n) return { neg, sig: 0n, exp: 0 };
+    let sig = frac;
+    let shift = 0;
+    while ((sig & (1n << 52n)) === 0n) {
+      sig <<= 1n;
+      shift++;
+    }
+    return { neg, sig, exp: -1074 - shift };
+  }
+
+  // The double nearest to (neg ? -1 : 1) * sig * 2^exp, rounding
+  // to nearest, ties to even, with gradual underflow and overflow
+  // to infinity. Exact whenever the value is representable, so
+  // scalbn/ldexp, frexp-based results and the integer-exact
+  // remainder and fma built on it carry no rounding error of
+  // their own.
+  function composeF64(neg, sig, exp) {
+    if (sig === 0n) return neg ? -0 : 0;
+    let bits = sig.toString(2).length;
+    if (bits > 53) {
+      const drop = BigInt(bits - 53);
+      const dropped = sig & ((1n << drop) - 1n);
+      const half = 1n << (drop - 1n);
+      sig >>= drop;
+      exp += bits - 53;
+      if (dropped > half || (dropped === half && (sig & 1n) === 1n)) {
+        sig += 1n;
+        if (sig === (1n << 53n)) {
+          sig >>= 1n;
+          exp += 1;
+        }
+      }
+      bits = 53;
+    }
+    const topExp = exp + bits - 1;
+    if (topExp > 1023) return neg ? -Infinity : Infinity;
+    const sign = neg ? F64_SIGN : 0n;
+    if (topExp >= -1022) {
+      const s = sig << BigInt(53 - bits);
+      return bitsToF64(sign | (BigInt(topExp + 1023) << 52n) | (s & F64_FRAC));
+    }
+    // Subnormal grid: units of 2^-1074. A rounded result of
+    // exactly 2^52 units is the smallest normal, whose bit
+    // pattern is the integer 2^52 in the low field, so the same
+    // expression covers it.
+    const sh = exp + 1074;
+    let units;
+    if (sh >= 0) {
+      units = sig << BigInt(sh);
+    } else if (-sh > bits) {
+      // The value is below half the smallest subnormal unit
+      // (the exactly-half case is a tie to the even unit 0):
+      // it rounds to zero. This also keeps an extreme exponent
+      // (scalbn with a huge count) from building a huge BigInt.
+      units = 0n;
+    } else {
+      const drop = BigInt(-sh);
+      const dropped = sig & ((1n << drop) - 1n);
+      const half = 1n << (drop - 1n);
+      units = sig >> drop;
+      if (dropped > half || (dropped === half && (units & 1n) === 1n)) units += 1n;
+    }
+    return bitsToF64(sign | units);
+  }
+
+  // The float counterpart of composeF64 (24-bit significand).
+  function composeF32(neg, sig, exp) {
+    if (sig === 0n) return neg ? -0 : 0;
+    let bits = sig.toString(2).length;
+    if (bits > 24) {
+      const drop = BigInt(bits - 24);
+      const dropped = sig & ((1n << drop) - 1n);
+      const half = 1n << (drop - 1n);
+      sig >>= drop;
+      exp += bits - 24;
+      if (dropped > half || (dropped === half && (sig & 1n) === 1n)) {
+        sig += 1n;
+        if (sig === (1n << 24n)) {
+          sig >>= 1n;
+          exp += 1;
+        }
+      }
+      bits = 24;
+    }
+    const topExp = exp + bits - 1;
+    if (topExp > 127) return neg ? -Infinity : Infinity;
+    const sign = neg ? 0x80000000 : 0;
+    if (topExp >= -126) {
+      const s = Number(sig << BigInt(24 - bits));
+      return bitsToF32((sign | ((topExp + 127) << 23) | (s & 0x7fffff)) >>> 0);
+    }
+    const sh = exp + 149;
+    let units;
+    if (sh >= 0) {
+      units = sig << BigInt(sh);
+    } else if (-sh > bits) {
+      units = 0n;
+    } else {
+      const drop = BigInt(-sh);
+      const dropped = sig & ((1n << drop) - 1n);
+      const half = 1n << (drop - 1n);
+      units = sig >> drop;
+      if (dropped > half || (dropped === half && (units & 1n) === 1n)) units += 1n;
+    }
+    return bitsToF32((sign | Number(units)) >>> 0);
+  }
+
+  // frexp: mantissa in [0.5, 1) and the exponent, both exact.
+  function frexpCore(x) {
+    if (x === 0 || !Number.isFinite(x)) return [x, 0];
+    const d = decomposeF64(x);
+    const m = (d.neg ? -1 : 1) * Number(d.sig) * 2 ** -53;
+    return [m, d.exp + 53];
+  }
+  function frexp(x, eptr) {
+    const [m, e] = frexpCore(x);
+    dv().setInt32(eptr, e, true);
+    return m;
+  }
+  function frexpf(x, eptr) {
+    const [m, e] = frexpCore(x);
+    dv().setInt32(eptr, e, true);
+    return Math.fround(m);
+  }
+
+  // ilogb/logb: FP_ILOGB0 and FP_ILOGBNAN are the values the
+  // header publishes (INT_MIN and INT_MAX).
+  function ilogbImpl(x) {
+    if (Number.isNaN(x)) return 2147483647;
+    if (x === 0) return -2147483647 - 1;
+    if (!Number.isFinite(x)) return 2147483647;
+    return decomposeF64(x).exp + 52;
+  }
+  function logbImpl(x) {
+    if (Number.isNaN(x)) return NaN;
+    if (x === 0) return -Infinity;
+    if (!Number.isFinite(x)) return Infinity;
+    return ilogbImpl(x);
+  }
+
+  // scalbn/ldexp (and scalbln, whose long argument is 32-bit in
+  // this ABI): exact, via decompose/compose.
+  function scalbnImpl(x, n) {
+    if (x === 0 || !Number.isFinite(x) || n === 0) return x;
+    const d = decomposeF64(x);
+    return composeF64(d.neg, d.sig, d.exp + n);
+  }
+
+  // exp2: exact on the bit grid for integer exponents in range
+  // (the common case and the one a rounded pow could in
+  // principle miss); other arguments go through Math.pow.
+  function exp2Impl(x) {
+    if (Number.isInteger(x) && x >= -1074 && x <= 1023) {
+      if (x >= -1022) return bitsToF64(BigInt(x + 1023) << 52n);
+      return bitsToF64(1n << BigInt(x + 1074));
+    }
+    return Math.pow(2, x);
+  }
+
+  // pow: the C special cases JS Math.pow does not reproduce —
+  // pow(x, +-0) is 1 for every x including NaN, pow(1, y) is 1
+  // for every y including NaN, pow(-1, +-inf) is 1.
+  function powImpl(x, y) {
+    if (y === 0) return 1;
+    if (x === 1) return 1;
+    if (x === -1 && !Number.isFinite(y) && !Number.isNaN(y)) return 1;
+    return Math.pow(x, y);
+  }
+
+  const TWO_POW_52 = 4503599627370496;
+  // Round to an integer value, ties to even — the only rounding
+  // direction this layer has. Adding 2^52 puts the value on the
+  // integer grid under the hardware's round-to-nearest-even;
+  // magnitudes at or above 2^52 are already integral.
+  function rintImpl(x) {
+    if (!Number.isFinite(x) || x === 0) return x;
+    const ax = Math.abs(x);
+    if (ax >= TWO_POW_52) return x;
+    const r = (ax + TWO_POW_52) - TWO_POW_52;
+    return x < 0 ? -r : r;
+  }
+  // C round: halfway cases away from zero. Math.round alone
+  // rounds halfway cases toward +infinity, which is wrong for
+  // negative arguments, so the sign is applied outside.
+  function roundImpl(x) {
+    if (!Number.isFinite(x) || x === 0) return x;
+    const r = Math.round(Math.abs(x));
+    return x < 0 ? -r : r;
+  }
+  // lrint/lround outside long's range are unspecified in C;
+  // this layer saturates the way the wasm saturating
+  // float-to-int conversions do, with NaN converting to 0.
+  function toLongSat(x) {
+    if (Number.isNaN(x)) return 0;
+    if (x >= 2147483648) return 2147483647;
+    if (x < -2147483648) return -2147483647 - 1;
+    return x | 0;
+  }
+  function toLLongSat(x) {
+    if (Number.isNaN(x)) return 0n;
+    if (x >= 9223372036854775808) return 9223372036854775807n;
+    if (x < -9223372036854775808) return -9223372036854775808n;
+    return BigInt(x);
+  }
+
+  // modf: the split is exact — the fractional part's bits are a
+  // subset of the argument's.
+  function modfCore(x) {
+    if (Number.isNaN(x)) return [NaN, NaN];
+    if (!Number.isFinite(x)) return [x < 0 ? -0 : 0, x];
+    // Both parts of a zero argument are the signed zero itself;
+    // x - trunc(x) would turn -0 into +0.
+    if (x === 0) return [x, x];
+    const ip = Math.trunc(x);
+    return [x - ip, ip];
+  }
+  function modf(x, iptr) {
+    const [frac, ip] = modfCore(x);
+    dv().setFloat64(iptr, ip, true);
+    return frac;
+  }
+  function modff(x, iptr) {
+    const [frac, ip] = modfCore(x);
+    dv().setFloat32(iptr, Math.fround(ip), true);
+    return Math.fround(frac);
+  }
+
+  // IEEE 754 remainder, computed exactly: both operands are
+  // decomposed to integer significands over a common exponent
+  // and the quotient is rounded to nearest, ties to even, in
+  // BigInt arithmetic. The mathematical remainder of two doubles
+  // is always representable, so the result is exact. remquo
+  // additionally stores the low 32 bits of the signed quotient,
+  // the same truncation the platform libraries store.
+  function remainderCore(x, y) {
+    const dx = decomposeF64(x);
+    const dy = decomposeF64(y);
+    const e = Math.min(dx.exp, dy.exp);
+    const X = dx.sig << BigInt(dx.exp - e);
+    const Y = dy.sig << BigInt(dy.exp - e);
+    let q = X / Y;
+    const rem = X % Y;
+    const twice = rem * 2n;
+    if (twice > Y || (twice === Y && (q & 1n) === 1n)) q += 1n;
+    const rInt = X - q * Y;
+    // r = x - q*y with signed operands: on magnitudes that is
+    // (-1)^dx.neg * rInt, so the result sign is dx.neg XOR the
+    // sign of rInt (which is negative when the quotient rounded
+    // away from zero past the half point).
+    const r = composeF64(dx.neg !== (rInt < 0n), rInt < 0n ? -rInt : rInt, e);
+    return [r, dx.neg !== dy.neg ? -q : q];
+  }
+  function remainderImpl(x, y) {
+    if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+    if (!Number.isFinite(x) || y === 0) return NaN;
+    if (!Number.isFinite(y) || x === 0) return x;
+    return remainderCore(x, y)[0];
+  }
+  function remquoImpl(x, y, qptr) {
+    if (Number.isNaN(x) || Number.isNaN(y) || !Number.isFinite(x) || y === 0) return NaN;
+    if (!Number.isFinite(y) || x === 0) {
+      dv().setInt32(qptr, 0, true);
+      return x;
+    }
+    const [r, n] = remainderCore(x, y);
+    dv().setInt32(qptr, Number(BigInt.asIntN(32, n)), true);
+    return r;
+  }
+  function remquofImpl(x, y, qptr) {
+    return Math.fround(remquoImpl(x, y, qptr));
+  }
+
+  // nextafter: one step on the sign-magnitude bit grid.
+  function nextafterImpl(x, y) {
+    if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+    if (x === y) return y;
+    if (x === 0) return bitsToF64((f64Bits(y) & F64_SIGN) | 1n);
+    let b = f64Bits(x);
+    const up = y > x;
+    if ((b & F64_SIGN) === 0n) b += up ? 1n : -1n;
+    else b += up ? -1n : 1n;
+    return bitsToF64(b);
+  }
+  function nextafterfImpl(x, y) {
+    if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+    if (x === y) return Math.fround(y);
+    if (x === 0) return bitsToF32(((f32Bits(y) & 0x80000000) | 1) >>> 0);
+    let b = f32Bits(x);
+    const up = y > x;
+    if ((b & 0x80000000) === 0) b += up ? 1 : -1;
+    else b += up ? -1 : 1;
+    return bitsToF32(b >>> 0);
+  }
+
+  function copysignImpl(x, y) {
+    return bitsToF64((f64Bits(x) & ~F64_SIGN) | (f64Bits(y) & F64_SIGN));
+  }
+  function copysignfImpl(x, y) {
+    return bitsToF32(((f32Bits(x) & 0x7fffffff) | (f32Bits(y) & 0x80000000)) >>> 0);
+  }
+
+  // fmax/fmin: a NaN operand yields the other operand (the C
+  // semantics; Math.max/min would propagate the NaN). Signed
+  // zeros keep Math.max/min's ordering, +0 above -0.
+  function fmaxImpl(a, b) {
+    if (Number.isNaN(a)) return b;
+    if (Number.isNaN(b)) return a;
+    return Math.max(a, b);
+  }
+  function fminImpl(a, b) {
+    if (Number.isNaN(a)) return b;
+    if (Number.isNaN(b)) return a;
+    return Math.min(a, b);
+  }
+  function fdimImpl(a, b) {
+    if (Number.isNaN(a) || Number.isNaN(b)) return NaN;
+    return a > b ? a - b : 0;
+  }
+
+  // fma, correctly rounded: the exact product and the exact sum
+  // are formed in BigInt arithmetic over the decomposed operands
+  // and rounded once by composeF64/composeF32. The zero-product
+  // and infinite cases follow the C rules directly.
+  function fmaExact(x, y, z, decompose, compose) {
+    const dx = decompose(x);
+    const dy = decompose(y);
+    const dz = decompose(z);
+    const pSig = dx.sig * dy.sig;
+    const pExp = dx.exp + dy.exp;
+    const e = Math.min(pExp, dz.exp);
+    let total = pSig << BigInt(pExp - e);
+    if (dx.neg !== dy.neg) total = -total;
+    let zTerm = dz.sig << BigInt(dz.exp - e);
+    if (dz.neg) zTerm = -zTerm;
+    total += zTerm;
+    const neg = total < 0n;
+    return compose(neg, neg ? -total : total, e);
+  }
+  function fmaImpl(x, y, z) {
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      const p = x * y;
+      return Number.isNaN(p) ? NaN : p + z;
+    }
+    if (!Number.isFinite(z)) return z;
+    if (x === 0 || y === 0) return x * y + z;
+    if (z === 0) return x * y;
+    return fmaExact(x, y, z, decomposeF64, composeF64);
+  }
+  // Split a float (held exactly in a double) on the float grid.
+  function decomposeF32(x) {
+    const bits = f32Bits(x);
+    const neg = (bits & 0x80000000) !== 0;
+    const be = (bits >> 23) & 0xff;
+    const frac = BigInt(bits & 0x7fffff);
+    if (be !== 0) return { neg, sig: frac | (1n << 23n), exp: be - 150 };
+    if (frac === 0n) return { neg, sig: 0n, exp: 0 };
+    let sig = frac;
+    let shift = 0;
+    while ((sig & (1n << 23n)) === 0n) {
+      sig <<= 1n;
+      shift++;
+    }
+    return { neg, sig, exp: -149 - shift };
+  }
+  function fmafImpl(x, y, z) {
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      const p = x * y;
+      return Number.isNaN(p) ? NaN : Math.fround(p + z);
+    }
+    if (!Number.isFinite(z)) return Math.fround(z);
+    if (x === 0 || y === 0) return Math.fround(x * y + z);
+    if (z === 0) return Math.fround(x * y);
+    return fmaExact(x, y, z, decomposeF32, composeF32);
+  }
+
+  // erf and erfc. For |x| <= 2.5 the error function is computed
+  // from the confluent hypergeometric series
+  //   erf(x) = (2x / sqrt(pi)) * e^(-x^2) * 1F1(1; 3/2; x^2),
+  // whose terms are all of one sign, so no cancellation occurs.
+  // For larger arguments erfc comes from the continued fraction
+  // 7.1.14 of Abramowitz & Stegun,
+  //   2 e^(x^2) int_x^inf e^(-t^2) dt
+  //     = 1 / (x + (1/2) / (x + 1 / (x + (3/2) / (x + ...)))),
+  // evaluated by Lentz's method, and erf is 1 - erfc. Measured
+  // against the reference values in the math battery: erf
+  // agrees to within 3 ulp; erfc to within a few ulp on the
+  // series side of its crossover and about 13 ulp in the
+  // fraction's range.
+  const SQRT_PI = 1.772453850905516;
+  function erfSeries(ax) {
+    const z = ax * ax;
+    let term = 1;
+    let sum = 1;
+    for (let k = 0; k < 300; k++) {
+      term *= (2 * z) / (2 * k + 3);
+      sum += term;
+      if (term < sum * 1e-18) break;
+    }
+    return ((2 * ax) / SQRT_PI) * Math.exp(-z) * sum;
+  }
+  function erfcFraction(x) {
+    // Lentz's method on b0 = 0, a1 = 1, b1 = x, then
+    // a_n = (n - 1) / 2 and b_n = x for n >= 2.
+    const TINY = 1e-300;
+    let f = TINY;
+    let c = TINY;
+    let d = 0;
+    for (let n = 1; n <= 1000; n++) {
+      const a = n === 1 ? 1 : (n - 1) / 2;
+      d = x + a * d;
+      if (d === 0) d = TINY;
+      d = 1 / d;
+      c = x + a / c;
+      if (c === 0) c = TINY;
+      const delta = c * d;
+      f *= delta;
+      if (Math.abs(delta - 1) < 1e-17) break;
+    }
+    return (Math.exp(-x * x) / SQRT_PI) * f;
+  }
+  function erfImpl(x) {
+    if (Number.isNaN(x)) return NaN;
+    if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
+    const ax = Math.abs(x);
+    // erf(6) already rounds to exactly 1 in double precision;
+    // the cutoff also keeps the fraction's Lentz recurrence
+    // away from arguments large enough to overflow it.
+    if (ax >= 6) return x < 0 ? -1 : 1;
+    const r = ax <= 2.5 ? erfSeries(ax) : 1 - erfcFraction(ax);
+    return x < 0 ? -r : r;
+  }
+  function erfcImpl(x) {
+    if (Number.isNaN(x)) return NaN;
+    if (!Number.isFinite(x)) return x > 0 ? 0 : 2;
+    if (x < 0) return 2 - erfcImpl(-x);
+    // Past 27.5 the true value is below half the smallest
+    // subnormal and rounds to zero.
+    if (x >= 27.5) return 0;
+    // The complement of the erf series loses precision to
+    // cancellation as x grows (about 5000 ulp at 2.5), so the
+    // continued fraction takes over at 0.75; it stays within
+    // about 13 ulp of the exact value over its whole range,
+    // while the series path below 0.75 is within a few ulp.
+    return x < 0.75 ? 1 - erfSeries(x) : erfcFraction(x);
+  }
+
+  // The gamma functions, after Lanczos (g = 7, the nine
+  // coefficients tabulated for that parameter in Numerical
+  // Recipes and in the Lanczos approximation literature):
+  // lgamma's absolute error is a few 1e-15 over the battery
+  // grid. Negative arguments go through the reflection
+  // formula, and tgamma is exp of the log form, so its
+  // relative error grows with the log value's magnitude
+  // (about 3e-13 at the top of the range).
+  const LANCZOS = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  const HALF_LOG_2PI = 0.9189385332046727;
+  function logGammaAbs(x) {
+    // log |Gamma(x)| for x not a non-positive integer.
+    if (x !== 0 && Math.abs(x) < 1e-8) {
+      // Near the pole at 0, Gamma(x) = 1/x - gamma + O(x).
+      // The reflection path below cannot be used down here:
+      // sin(pi*x) for a subnormal-scale x keeps only a few
+      // significand bits, which the logarithm turns into a
+      // gross absolute error.
+      return -Math.log(Math.abs(x)) - 0.5772156649015329 * x;
+    }
+    if (x < 0.5) {
+      return Math.log(Math.PI) -
+        Math.log(Math.abs(Math.sin(Math.PI * x))) - logGammaAbs(1 - x);
+    }
+    const z = x - 1;
+    let a = LANCZOS[0];
+    for (let k = 1; k < LANCZOS.length; k++) a += LANCZOS[k] / (z + k);
+    const t = z + 7.5;
+    return HALF_LOG_2PI + (z + 0.5) * Math.log(t) - t + Math.log(a);
+  }
+  function lgammaImpl(x) {
+    if (Number.isNaN(x)) return NaN;
+    if (x === 0 || (Number.isInteger(x) && x < 0)) return Infinity;
+    if (!Number.isFinite(x)) return Infinity;
+    return logGammaAbs(x);
+  }
+  function tgammaImpl(x) {
+    if (Number.isNaN(x)) return NaN;
+    if (x === 0) return 1 / x;
+    if (Number.isInteger(x) && x < 0) return NaN;
+    if (!Number.isFinite(x)) return x > 0 ? Infinity : NaN;
+    if (x < 0) {
+      return Math.PI / (Math.sin(Math.PI * x) * Math.exp(logGammaAbs(1 - x)));
+    }
+    return Math.exp(logGammaAbs(x));
+  }
+
+  // nan(tagp): the payload is parsed the way strtoull with base
+  // 0 parses it — 0x hexadecimal, leading-0 octal, else decimal;
+  // an unparseable tag gives a plain quiet NaN.
+  function nanPayload(tagPtr) {
+    if (!tagPtr) return 0n;
+    const t = readCString(tagPtr).replace(/^\s+/, '');
+    try {
+      if (/^0[xX][0-9a-fA-F]+$/.test(t)) return BigInt(t);
+      if (/^0[0-7]+$/.test(t)) return BigInt(`0o${t.slice(1)}`);
+      if (/^[0-9]+$/.test(t)) return BigInt(t);
+    } catch {
+      return 0n;
+    }
+    return 0n;
+  }
+  function nanImpl(tagPtr) {
+    return bitsToF64(0x7ff8000000000000n | (nanPayload(tagPtr) & ((1n << 51n) - 1n)));
+  }
+  function nanfImpl(tagPtr) {
+    return bitsToF32(0x7fc00000 | Number(nanPayload(tagPtr) & 0x3fffffn));
+  }
+
+  // The float forms of the value-returning functions: the double
+  // implementation with the result rounded to float precision.
+  const asF32 = (fn) => (...args) => Math.fround(fn(...args));
+
   const env = {
     // memory / string
     memcpy,
@@ -1857,6 +2542,11 @@ export function createDefaultShims(options = {}) {
     freopen,
     remove: removeFile,
     rename: renameFile,
+    fdopen,
+    tmpfile,
+    setbuf,
+    setvbuf,
+    perror,
     fgets,
     scanf,
     fscanf,
@@ -1902,25 +2592,74 @@ export function createDefaultShims(options = {}) {
     isgraph,
     tolower,
     toupper,
-    // math
-    sin: Math.sin,
-    cos: Math.cos,
-    tan: Math.tan,
-    asin: Math.asin,
-    acos: Math.acos,
-    atan: Math.atan,
-    atan2: Math.atan2,
-    exp: Math.exp,
-    log: Math.log,
-    log10: Math.log10,
-    pow: Math.pow,
-    sqrt: Math.sqrt,
-    floor: Math.floor,
-    ceil: Math.ceil,
-    fabs: Math.abs,
-    round: Math.round,
-    trunc: Math.trunc,
-    fmod: (a, b) => a % b,
+    // math — the full <math.h> surface (see the implementation
+    // block above). The l forms are the double implementations:
+    // long double is double in this target's ABI.
+    sin: Math.sin, sinf: asF32(Math.sin), sinl: Math.sin,
+    cos: Math.cos, cosf: asF32(Math.cos), cosl: Math.cos,
+    tan: Math.tan, tanf: asF32(Math.tan), tanl: Math.tan,
+    asin: Math.asin, asinf: asF32(Math.asin), asinl: Math.asin,
+    acos: Math.acos, acosf: asF32(Math.acos), acosl: Math.acos,
+    atan: Math.atan, atanf: asF32(Math.atan), atanl: Math.atan,
+    atan2: Math.atan2, atan2f: asF32(Math.atan2), atan2l: Math.atan2,
+    sinh: Math.sinh, sinhf: asF32(Math.sinh), sinhl: Math.sinh,
+    cosh: Math.cosh, coshf: asF32(Math.cosh), coshl: Math.cosh,
+    tanh: Math.tanh, tanhf: asF32(Math.tanh), tanhl: Math.tanh,
+    asinh: Math.asinh, asinhf: asF32(Math.asinh), asinhl: Math.asinh,
+    acosh: Math.acosh, acoshf: asF32(Math.acosh), acoshl: Math.acosh,
+    atanh: Math.atanh, atanhf: asF32(Math.atanh), atanhl: Math.atanh,
+    exp: Math.exp, expf: asF32(Math.exp), expl: Math.exp,
+    exp2: exp2Impl, exp2f: asF32(exp2Impl), exp2l: exp2Impl,
+    expm1: Math.expm1, expm1f: asF32(Math.expm1), expm1l: Math.expm1,
+    frexp, frexpf, frexpl: frexp,
+    ilogb: ilogbImpl, ilogbf: ilogbImpl, ilogbl: ilogbImpl,
+    ldexp: scalbnImpl, ldexpf: asF32(scalbnImpl), ldexpl: scalbnImpl,
+    log: Math.log, logf: asF32(Math.log), logl: Math.log,
+    log10: Math.log10, log10f: asF32(Math.log10), log10l: Math.log10,
+    log1p: Math.log1p, log1pf: asF32(Math.log1p), log1pl: Math.log1p,
+    log2: Math.log2, log2f: asF32(Math.log2), log2l: Math.log2,
+    logb: logbImpl, logbf: logbImpl, logbl: logbImpl,
+    modf, modff, modfl: modf,
+    scalbn: scalbnImpl, scalbnf: asF32(scalbnImpl), scalbnl: scalbnImpl,
+    scalbln: scalbnImpl, scalblnf: asF32(scalbnImpl), scalblnl: scalbnImpl,
+    cbrt: Math.cbrt, cbrtf: asF32(Math.cbrt), cbrtl: Math.cbrt,
+    fabs: Math.abs, fabsf: asF32(Math.abs), fabsl: Math.abs,
+    hypot: Math.hypot, hypotf: asF32(Math.hypot), hypotl: Math.hypot,
+    pow: powImpl, powf: asF32(powImpl), powl: powImpl,
+    sqrt: Math.sqrt, sqrtf: asF32(Math.sqrt), sqrtl: Math.sqrt,
+    erf: erfImpl, erff: asF32(erfImpl), erfl: erfImpl,
+    erfc: erfcImpl, erfcf: asF32(erfcImpl), erfcl: erfcImpl,
+    lgamma: lgammaImpl, lgammaf: asF32(lgammaImpl), lgammal: lgammaImpl,
+    tgamma: tgammaImpl, tgammaf: asF32(tgammaImpl), tgammal: tgammaImpl,
+    ceil: Math.ceil, ceilf: asF32(Math.ceil), ceill: Math.ceil,
+    floor: Math.floor, floorf: asF32(Math.floor), floorl: Math.floor,
+    nearbyint: rintImpl, nearbyintf: asF32(rintImpl), nearbyintl: rintImpl,
+    rint: rintImpl, rintf: asF32(rintImpl), rintl: rintImpl,
+    lrint: (x) => toLongSat(rintImpl(x)),
+    lrintf: (x) => toLongSat(rintImpl(x)),
+    lrintl: (x) => toLongSat(rintImpl(x)),
+    llrint: (x) => toLLongSat(rintImpl(x)),
+    llrintf: (x) => toLLongSat(rintImpl(x)),
+    llrintl: (x) => toLLongSat(rintImpl(x)),
+    round: roundImpl, roundf: asF32(roundImpl), roundl: roundImpl,
+    lround: (x) => toLongSat(roundImpl(x)),
+    lroundf: (x) => toLongSat(roundImpl(x)),
+    lroundl: (x) => toLongSat(roundImpl(x)),
+    llround: (x) => toLLongSat(roundImpl(x)),
+    llroundf: (x) => toLLongSat(roundImpl(x)),
+    llroundl: (x) => toLLongSat(roundImpl(x)),
+    trunc: Math.trunc, truncf: asF32(Math.trunc), truncl: Math.trunc,
+    fmod: (a, b) => a % b, fmodf: asF32((a, b) => a % b), fmodl: (a, b) => a % b,
+    remainder: remainderImpl, remainderf: asF32(remainderImpl), remainderl: remainderImpl,
+    remquo: remquoImpl, remquof: remquofImpl, remquol: remquoImpl,
+    copysign: copysignImpl, copysignf: copysignfImpl, copysignl: copysignImpl,
+    nan: nanImpl, nanf: nanfImpl, nanl: nanImpl,
+    nextafter: nextafterImpl, nextafterf: nextafterfImpl, nextafterl: nextafterImpl,
+    nexttoward: nextafterImpl, nexttowardf: nextafterfImpl, nexttowardl: nextafterImpl,
+    fdim: fdimImpl, fdimf: asF32(fdimImpl), fdiml: fdimImpl,
+    fmax: fmaxImpl, fmaxf: asF32(fmaxImpl), fmaxl: fmaxImpl,
+    fmin: fminImpl, fminf: asF32(fminImpl), fminl: fminImpl,
+    fma: fmaImpl, fmaf: fmafImpl, fmal: fmaImpl,
     // time
     time: (tloc) => {
       const sec = Math.floor(Date.now() / 1000);

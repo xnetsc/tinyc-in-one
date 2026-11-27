@@ -17,7 +17,10 @@
  * processor — system(NULL) returns 0 (none available) and any
  * command returns -1.  long is 32-bit and long double is
  * double in this target's ABI, so the strto* surface ends at
- * the forms below. */
+ * the forms below.  The div family (div, ldiv, lldiv) is not
+ * declared: those functions return a struct by value, and the
+ * compiler's wasm backend rejects struct-return signatures at
+ * compile time, so no caller of them could be built. */
 
 #include <stddef.h>
 

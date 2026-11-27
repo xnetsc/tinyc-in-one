@@ -23,9 +23,14 @@
  * back — and for a standalone run it is a private in-memory
  * space that lives for the run.  Paths are taken relative to
  * the file space's root.  Writes go through to the file space
- * as they happen; there is no buffering layer, so setbuf and
- * setvbuf do not exist here.  The scanf family is provided;
- * perror is not (the layer has no errno surface). */
+ * as they happen, so every stream is effectively unbuffered:
+ * setbuf and setvbuf record the requested mode and report
+ * success, and output is visible to other readers immediately
+ * in all modes.  The scanf family is provided.  Failed calls
+ * record an error number in the layer, which perror reports;
+ * there is no errno variable (a data symbol cannot be supplied
+ * by the layer — the same reason the standard streams are
+ * macros above). */
 
 #include <stddef.h>
 #include <stdarg.h>
@@ -43,10 +48,17 @@ typedef long long fpos_t;
 #define SEEK_CUR	1
 #define SEEK_END	2
 
-/* No buffering layer exists (see the header comment); the
-   value only sizes caller-provided arrays. */
+/* Streams are write-through (see the header comment); BUFSIZ
+   sizes caller-provided arrays. */
 #define BUFSIZ		1024
 #define FILENAME_MAX	4096
+
+/* Buffering modes for setvbuf.  All modes behave the same in
+   this layer (writes go through immediately); the values are
+   the conventional ones. */
+#define _IOFBF		0
+#define _IOLBF		1
+#define _IONBF		2
 
 #define stdin	((FILE *)0)
 #define stdout	((FILE *)1)
@@ -59,6 +71,16 @@ int fclose(FILE *stream);
 int fflush(FILE *stream);
 int remove(const char *path);
 int rename(const char *oldpath, const char *newpath);
+/* A FILE handle value is the descriptor in this layer, so
+   fdopen validates the descriptor value and returns the same
+   stream.  tmpfile's backing entry is unlinked at fclose. */
+FILE *fdopen(int fd, const char *mode);
+FILE *tmpfile(void);
+
+/* Buffering control and error reporting */
+int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+void setbuf(FILE *stream, char *buf);
+void perror(const char *s);
 
 /* Direct input and output */
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);

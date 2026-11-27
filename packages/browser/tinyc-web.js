@@ -1168,6 +1168,17 @@ var TinycWeb = (() => {
       u8()[ptr + bytes.length] = 0;
       return bytes.length;
     };
+    const ERRNO = {
+      ENOENT: 2,
+      EBADF: 9,
+      ENOMEM: 12,
+      EEXIST: 17,
+      EINVAL: 22
+    };
+    let errnoValue = 0;
+    const setErrno = (code) => {
+      errnoValue = code;
+    };
     const memoryAllocator = options.memoryAllocator === true;
     const HDR_HEAP_TOP = 512, HDR_FREE_HEAD = 516, HDR_ALLOC_LOCK = 520;
     const allocState = memoryAllocator ? {
@@ -1284,7 +1295,9 @@ var TinycWeb = (() => {
     }
     function malloc(size) {
       const own = moduleAllocator();
-      return own ? own.malloc(size) : rawMalloc(size);
+      const ptr = own ? own.malloc(size) : rawMalloc(size);
+      if (!ptr && size) setErrno(ERRNO.ENOMEM);
+      return ptr;
     }
     function free(ptr) {
       const own = moduleAllocator();
@@ -1312,7 +1325,10 @@ var TinycWeb = (() => {
       if (own) {
         if (typeof own.realloc === "function") return own.realloc(ptr, size);
         const np2 = own.malloc(size);
-        if (!np2) return 0;
+        if (!np2) {
+          setErrno(ERRNO.ENOMEM);
+          return 0;
+        }
         writeBytes(np2, readBytes(ptr, size));
         if (typeof own.free === "function") own.free(ptr);
         return np2;
@@ -1320,7 +1336,10 @@ var TinycWeb = (() => {
       const oldSize = readU32(ptr - 8);
       if (size <= oldSize) return ptr;
       const np = rawMalloc(size);
-      if (!np) return 0;
+      if (!np) {
+        setErrno(ERRNO.ENOMEM);
+        return 0;
+      }
       writeBytes(np, readBytes(ptr, oldSize));
       rawFree(ptr);
       return np;
@@ -1484,16 +1503,20 @@ var TinycWeb = (() => {
       }
       return token;
     }
-    function strerror(errnum) {
+    function strerrorText(errnum) {
       const table = {
         0: "Success",
         1: "Operation not permitted",
         2: "No such file or directory",
+        9: "Bad file descriptor",
         12: "Cannot allocate memory",
+        17: "File exists",
         22: "Invalid argument"
       };
-      const text = table[errnum] ?? `Unknown error ${errnum | 0}`;
-      const bytes = textEncoder.encode(text);
+      return table[errnum] ?? `Unknown error ${errnum | 0}`;
+    }
+    function strerror(errnum) {
+      const bytes = textEncoder.encode(strerrorText(errnum));
       const buf = malloc(bytes.length + 1);
       if (buf) writeCStringBytes(buf, bytes);
       return buf;
@@ -2138,11 +2161,17 @@ var TinycWeb = (() => {
       const path = guestPath(pathPtr);
       const mode = readCString(modePtr);
       const base = mode[0];
-      if (base !== "r" && base !== "w" && base !== "a") return 0;
+      if (base !== "r" && base !== "w" && base !== "a") {
+        setErrno(ERRNO.EINVAL);
+        return 0;
+      }
       const plus = mode.includes("+");
       if (base === "r") {
         const data = backingRead(path);
-        if (data == null) return 0;
+        if (data == null) {
+          setErrno(ERRNO.ENOENT);
+          return 0;
+        }
         const handle2 = nextHandle++;
         openFiles.set(handle2, {
           path,
@@ -2158,7 +2187,10 @@ var TinycWeb = (() => {
         return handle2;
       }
       if (base === "w") {
-        if (mode.includes("x") && backingRead(path) != null) return 0;
+        if (mode.includes("x") && backingRead(path) != null) {
+          setErrno(ERRNO.EEXIST);
+          return 0;
+        }
         const handle2 = nextHandle++;
         const st = {
           path,
@@ -2193,7 +2225,8 @@ var TinycWeb = (() => {
     function fclose(handle) {
       const st = openFiles.get(handle);
       if (!st) return handle >= 0 && handle <= 2 ? 0 : -1;
-      flushStream(st);
+      if (st.temp) backingRemove(st.path);
+      else flushStream(st);
       openFiles.delete(handle);
       return 0;
     }
@@ -2213,6 +2246,7 @@ var TinycWeb = (() => {
       const np = base + offset;
       if (np < 0) {
         st.err = true;
+        setErrno(ERRNO.EINVAL);
         return -1;
       }
       st.pos = np;
@@ -2276,11 +2310,16 @@ var TinycWeb = (() => {
       return handle;
     }
     function removeFile(pathPtr) {
-      return backingRemove(guestPath(pathPtr)) ? 0 : -1;
+      if (backingRemove(guestPath(pathPtr))) return 0;
+      setErrno(ERRNO.ENOENT);
+      return -1;
     }
     function renameFile(oldPtr, newPtr) {
       const data = backingRead(guestPath(oldPtr));
-      if (data == null) return -1;
+      if (data == null) {
+        setErrno(ERRNO.ENOENT);
+        return -1;
+      }
       backingWrite(guestPath(newPtr), data);
       backingRemove(guestPath(oldPtr));
       return 0;
@@ -2336,6 +2375,64 @@ var TinycWeb = (() => {
       writeBytes(s, Uint8Array.from(bytes));
       u8()[s + bytes.length] = 0;
       return s;
+    }
+    function fdopen(fd, modePtr) {
+      const base = readCString(modePtr)[0];
+      if (base !== "r" && base !== "w" && base !== "a") {
+        setErrno(ERRNO.EINVAL);
+        return 0;
+      }
+      if (fd >= 0 && fd <= 2) return fd;
+      if (!openFiles.has(fd)) {
+        setErrno(ERRNO.EBADF);
+        return 0;
+      }
+      return fd;
+    }
+    let tmpfileCounter = 0;
+    function tmpfile() {
+      let path;
+      do {
+        tmpfileCounter++;
+        const rand2 = Math.floor(Math.random() * 4294967296).toString(36);
+        path = `/tmpfile-${tmpfileCounter.toString(36)}-${rand2}`;
+      } while (backingRead(path) != null);
+      const handle = nextHandle++;
+      const st = {
+        path,
+        data: new Uint8Array(0),
+        pos: 0,
+        readable: true,
+        writable: true,
+        append: false,
+        eof: false,
+        err: false,
+        unget: [],
+        temp: true
+      };
+      openFiles.set(handle, st);
+      flushStream(st);
+      return handle;
+    }
+    function setvbuf(stream, buf, mode, size) {
+      if (stream >= 0 && stream <= 2) return 0;
+      const st = openFiles.get(stream);
+      if (!st) {
+        setErrno(ERRNO.EBADF);
+        return -1;
+      }
+      st.bufMode = mode;
+      st.bufPtr = buf;
+      st.bufSize = size;
+      return 0;
+    }
+    function setbuf(stream, buf) {
+      return setvbuf(stream, buf, buf ? 0 : 2, buf ? 1024 : 0);
+    }
+    function perror(sPtr) {
+      const prefix = sPtr ? readCString(sPtr) : "";
+      const text = (prefix ? `${prefix}: ` : "") + strerrorText(errnoValue) + "\n";
+      streamWriteText(2, text);
     }
     function scanFrom(getByte, putBack, fmtPtr, vaPtr) {
       const fmt = readCString(fmtPtr);
@@ -2743,6 +2840,438 @@ var TinycWeb = (() => {
       return scanFrom(get, () => {
       }, fmt, va);
     }
+    const f64view = new DataView(new ArrayBuffer(8));
+    const f64Bits = (x) => {
+      f64view.setFloat64(0, x, true);
+      return f64view.getBigUint64(0, true);
+    };
+    const bitsToF64 = (b) => {
+      f64view.setBigUint64(0, b, true);
+      return f64view.getFloat64(0, true);
+    };
+    const f32Bits = (x) => {
+      f64view.setFloat32(0, x, true);
+      return f64view.getUint32(0, true);
+    };
+    const bitsToF32 = (b) => {
+      f64view.setUint32(0, b >>> 0, true);
+      return f64view.getFloat32(0, true);
+    };
+    const F64_SIGN = 1n << 63n;
+    const F64_FRAC = (1n << 52n) - 1n;
+    function decomposeF64(x) {
+      const bits = f64Bits(x);
+      const neg = (bits & F64_SIGN) !== 0n;
+      const be = Number(bits >> 52n & 0x7ffn);
+      const frac = bits & F64_FRAC;
+      if (be !== 0) return { neg, sig: frac | 1n << 52n, exp: be - 1075 };
+      if (frac === 0n) return { neg, sig: 0n, exp: 0 };
+      let sig = frac;
+      let shift = 0;
+      while ((sig & 1n << 52n) === 0n) {
+        sig <<= 1n;
+        shift++;
+      }
+      return { neg, sig, exp: -1074 - shift };
+    }
+    function composeF64(neg, sig, exp) {
+      if (sig === 0n) return neg ? -0 : 0;
+      let bits = sig.toString(2).length;
+      if (bits > 53) {
+        const drop = BigInt(bits - 53);
+        const dropped = sig & (1n << drop) - 1n;
+        const half = 1n << drop - 1n;
+        sig >>= drop;
+        exp += bits - 53;
+        if (dropped > half || dropped === half && (sig & 1n) === 1n) {
+          sig += 1n;
+          if (sig === 1n << 53n) {
+            sig >>= 1n;
+            exp += 1;
+          }
+        }
+        bits = 53;
+      }
+      const topExp = exp + bits - 1;
+      if (topExp > 1023) return neg ? -Infinity : Infinity;
+      const sign = neg ? F64_SIGN : 0n;
+      if (topExp >= -1022) {
+        const s = sig << BigInt(53 - bits);
+        return bitsToF64(sign | BigInt(topExp + 1023) << 52n | s & F64_FRAC);
+      }
+      const sh = exp + 1074;
+      let units;
+      if (sh >= 0) {
+        units = sig << BigInt(sh);
+      } else if (-sh > bits) {
+        units = 0n;
+      } else {
+        const drop = BigInt(-sh);
+        const dropped = sig & (1n << drop) - 1n;
+        const half = 1n << drop - 1n;
+        units = sig >> drop;
+        if (dropped > half || dropped === half && (units & 1n) === 1n) units += 1n;
+      }
+      return bitsToF64(sign | units);
+    }
+    function composeF32(neg, sig, exp) {
+      if (sig === 0n) return neg ? -0 : 0;
+      let bits = sig.toString(2).length;
+      if (bits > 24) {
+        const drop = BigInt(bits - 24);
+        const dropped = sig & (1n << drop) - 1n;
+        const half = 1n << drop - 1n;
+        sig >>= drop;
+        exp += bits - 24;
+        if (dropped > half || dropped === half && (sig & 1n) === 1n) {
+          sig += 1n;
+          if (sig === 1n << 24n) {
+            sig >>= 1n;
+            exp += 1;
+          }
+        }
+        bits = 24;
+      }
+      const topExp = exp + bits - 1;
+      if (topExp > 127) return neg ? -Infinity : Infinity;
+      const sign = neg ? 2147483648 : 0;
+      if (topExp >= -126) {
+        const s = Number(sig << BigInt(24 - bits));
+        return bitsToF32((sign | topExp + 127 << 23 | s & 8388607) >>> 0);
+      }
+      const sh = exp + 149;
+      let units;
+      if (sh >= 0) {
+        units = sig << BigInt(sh);
+      } else if (-sh > bits) {
+        units = 0n;
+      } else {
+        const drop = BigInt(-sh);
+        const dropped = sig & (1n << drop) - 1n;
+        const half = 1n << drop - 1n;
+        units = sig >> drop;
+        if (dropped > half || dropped === half && (units & 1n) === 1n) units += 1n;
+      }
+      return bitsToF32((sign | Number(units)) >>> 0);
+    }
+    function frexpCore(x) {
+      if (x === 0 || !Number.isFinite(x)) return [x, 0];
+      const d = decomposeF64(x);
+      const m = (d.neg ? -1 : 1) * Number(d.sig) * 2 ** -53;
+      return [m, d.exp + 53];
+    }
+    function frexp(x, eptr) {
+      const [m, e] = frexpCore(x);
+      dv().setInt32(eptr, e, true);
+      return m;
+    }
+    function frexpf(x, eptr) {
+      const [m, e] = frexpCore(x);
+      dv().setInt32(eptr, e, true);
+      return Math.fround(m);
+    }
+    function ilogbImpl(x) {
+      if (Number.isNaN(x)) return 2147483647;
+      if (x === 0) return -2147483647 - 1;
+      if (!Number.isFinite(x)) return 2147483647;
+      return decomposeF64(x).exp + 52;
+    }
+    function logbImpl(x) {
+      if (Number.isNaN(x)) return NaN;
+      if (x === 0) return -Infinity;
+      if (!Number.isFinite(x)) return Infinity;
+      return ilogbImpl(x);
+    }
+    function scalbnImpl(x, n) {
+      if (x === 0 || !Number.isFinite(x) || n === 0) return x;
+      const d = decomposeF64(x);
+      return composeF64(d.neg, d.sig, d.exp + n);
+    }
+    function exp2Impl(x) {
+      if (Number.isInteger(x) && x >= -1074 && x <= 1023) {
+        if (x >= -1022) return bitsToF64(BigInt(x + 1023) << 52n);
+        return bitsToF64(1n << BigInt(x + 1074));
+      }
+      return Math.pow(2, x);
+    }
+    function powImpl(x, y) {
+      if (y === 0) return 1;
+      if (x === 1) return 1;
+      if (x === -1 && !Number.isFinite(y) && !Number.isNaN(y)) return 1;
+      return Math.pow(x, y);
+    }
+    const TWO_POW_52 = 4503599627370496;
+    function rintImpl(x) {
+      if (!Number.isFinite(x) || x === 0) return x;
+      const ax = Math.abs(x);
+      if (ax >= TWO_POW_52) return x;
+      const r = ax + TWO_POW_52 - TWO_POW_52;
+      return x < 0 ? -r : r;
+    }
+    function roundImpl(x) {
+      if (!Number.isFinite(x) || x === 0) return x;
+      const r = Math.round(Math.abs(x));
+      return x < 0 ? -r : r;
+    }
+    function toLongSat(x) {
+      if (Number.isNaN(x)) return 0;
+      if (x >= 2147483648) return 2147483647;
+      if (x < -2147483648) return -2147483647 - 1;
+      return x | 0;
+    }
+    function toLLongSat(x) {
+      if (Number.isNaN(x)) return 0n;
+      if (x >= 9223372036854776e3) return 9223372036854775807n;
+      if (x < -9223372036854776e3) return -9223372036854775808n;
+      return BigInt(x);
+    }
+    function modfCore(x) {
+      if (Number.isNaN(x)) return [NaN, NaN];
+      if (!Number.isFinite(x)) return [x < 0 ? -0 : 0, x];
+      if (x === 0) return [x, x];
+      const ip = Math.trunc(x);
+      return [x - ip, ip];
+    }
+    function modf(x, iptr) {
+      const [frac, ip] = modfCore(x);
+      dv().setFloat64(iptr, ip, true);
+      return frac;
+    }
+    function modff(x, iptr) {
+      const [frac, ip] = modfCore(x);
+      dv().setFloat32(iptr, Math.fround(ip), true);
+      return Math.fround(frac);
+    }
+    function remainderCore(x, y) {
+      const dx = decomposeF64(x);
+      const dy = decomposeF64(y);
+      const e = Math.min(dx.exp, dy.exp);
+      const X = dx.sig << BigInt(dx.exp - e);
+      const Y = dy.sig << BigInt(dy.exp - e);
+      let q = X / Y;
+      const rem = X % Y;
+      const twice = rem * 2n;
+      if (twice > Y || twice === Y && (q & 1n) === 1n) q += 1n;
+      const rInt = X - q * Y;
+      const r = composeF64(dx.neg !== rInt < 0n, rInt < 0n ? -rInt : rInt, e);
+      return [r, dx.neg !== dy.neg ? -q : q];
+    }
+    function remainderImpl(x, y) {
+      if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+      if (!Number.isFinite(x) || y === 0) return NaN;
+      if (!Number.isFinite(y) || x === 0) return x;
+      return remainderCore(x, y)[0];
+    }
+    function remquoImpl(x, y, qptr) {
+      if (Number.isNaN(x) || Number.isNaN(y) || !Number.isFinite(x) || y === 0) return NaN;
+      if (!Number.isFinite(y) || x === 0) {
+        dv().setInt32(qptr, 0, true);
+        return x;
+      }
+      const [r, n] = remainderCore(x, y);
+      dv().setInt32(qptr, Number(BigInt.asIntN(32, n)), true);
+      return r;
+    }
+    function remquofImpl(x, y, qptr) {
+      return Math.fround(remquoImpl(x, y, qptr));
+    }
+    function nextafterImpl(x, y) {
+      if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+      if (x === y) return y;
+      if (x === 0) return bitsToF64(f64Bits(y) & F64_SIGN | 1n);
+      let b = f64Bits(x);
+      const up = y > x;
+      if ((b & F64_SIGN) === 0n) b += up ? 1n : -1n;
+      else b += up ? -1n : 1n;
+      return bitsToF64(b);
+    }
+    function nextafterfImpl(x, y) {
+      if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+      if (x === y) return Math.fround(y);
+      if (x === 0) return bitsToF32((f32Bits(y) & 2147483648 | 1) >>> 0);
+      let b = f32Bits(x);
+      const up = y > x;
+      if ((b & 2147483648) === 0) b += up ? 1 : -1;
+      else b += up ? -1 : 1;
+      return bitsToF32(b >>> 0);
+    }
+    function copysignImpl(x, y) {
+      return bitsToF64(f64Bits(x) & ~F64_SIGN | f64Bits(y) & F64_SIGN);
+    }
+    function copysignfImpl(x, y) {
+      return bitsToF32((f32Bits(x) & 2147483647 | f32Bits(y) & 2147483648) >>> 0);
+    }
+    function fmaxImpl(a, b) {
+      if (Number.isNaN(a)) return b;
+      if (Number.isNaN(b)) return a;
+      return Math.max(a, b);
+    }
+    function fminImpl(a, b) {
+      if (Number.isNaN(a)) return b;
+      if (Number.isNaN(b)) return a;
+      return Math.min(a, b);
+    }
+    function fdimImpl(a, b) {
+      if (Number.isNaN(a) || Number.isNaN(b)) return NaN;
+      return a > b ? a - b : 0;
+    }
+    function fmaExact(x, y, z, decompose, compose) {
+      const dx = decompose(x);
+      const dy = decompose(y);
+      const dz = decompose(z);
+      const pSig = dx.sig * dy.sig;
+      const pExp = dx.exp + dy.exp;
+      const e = Math.min(pExp, dz.exp);
+      let total = pSig << BigInt(pExp - e);
+      if (dx.neg !== dy.neg) total = -total;
+      let zTerm = dz.sig << BigInt(dz.exp - e);
+      if (dz.neg) zTerm = -zTerm;
+      total += zTerm;
+      const neg = total < 0n;
+      return compose(neg, neg ? -total : total, e);
+    }
+    function fmaImpl(x, y, z) {
+      if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        const p = x * y;
+        return Number.isNaN(p) ? NaN : p + z;
+      }
+      if (!Number.isFinite(z)) return z;
+      if (x === 0 || y === 0) return x * y + z;
+      if (z === 0) return x * y;
+      return fmaExact(x, y, z, decomposeF64, composeF64);
+    }
+    function decomposeF32(x) {
+      const bits = f32Bits(x);
+      const neg = (bits & 2147483648) !== 0;
+      const be = bits >> 23 & 255;
+      const frac = BigInt(bits & 8388607);
+      if (be !== 0) return { neg, sig: frac | 1n << 23n, exp: be - 150 };
+      if (frac === 0n) return { neg, sig: 0n, exp: 0 };
+      let sig = frac;
+      let shift = 0;
+      while ((sig & 1n << 23n) === 0n) {
+        sig <<= 1n;
+        shift++;
+      }
+      return { neg, sig, exp: -149 - shift };
+    }
+    function fmafImpl(x, y, z) {
+      if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        const p = x * y;
+        return Number.isNaN(p) ? NaN : Math.fround(p + z);
+      }
+      if (!Number.isFinite(z)) return Math.fround(z);
+      if (x === 0 || y === 0) return Math.fround(x * y + z);
+      if (z === 0) return Math.fround(x * y);
+      return fmaExact(x, y, z, decomposeF32, composeF32);
+    }
+    const SQRT_PI = 1.772453850905516;
+    function erfSeries(ax) {
+      const z = ax * ax;
+      let term = 1;
+      let sum = 1;
+      for (let k = 0; k < 300; k++) {
+        term *= 2 * z / (2 * k + 3);
+        sum += term;
+        if (term < sum * 1e-18) break;
+      }
+      return 2 * ax / SQRT_PI * Math.exp(-z) * sum;
+    }
+    function erfcFraction(x) {
+      const TINY = 1e-300;
+      let f = TINY;
+      let c = TINY;
+      let d = 0;
+      for (let n = 1; n <= 1e3; n++) {
+        const a = n === 1 ? 1 : (n - 1) / 2;
+        d = x + a * d;
+        if (d === 0) d = TINY;
+        d = 1 / d;
+        c = x + a / c;
+        if (c === 0) c = TINY;
+        const delta = c * d;
+        f *= delta;
+        if (Math.abs(delta - 1) < 1e-17) break;
+      }
+      return Math.exp(-x * x) / SQRT_PI * f;
+    }
+    function erfImpl(x) {
+      if (Number.isNaN(x)) return NaN;
+      if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
+      const ax = Math.abs(x);
+      if (ax >= 6) return x < 0 ? -1 : 1;
+      const r = ax <= 2.5 ? erfSeries(ax) : 1 - erfcFraction(ax);
+      return x < 0 ? -r : r;
+    }
+    function erfcImpl(x) {
+      if (Number.isNaN(x)) return NaN;
+      if (!Number.isFinite(x)) return x > 0 ? 0 : 2;
+      if (x < 0) return 2 - erfcImpl(-x);
+      if (x >= 27.5) return 0;
+      return x < 0.75 ? 1 - erfSeries(x) : erfcFraction(x);
+    }
+    const LANCZOS = [
+      0.9999999999998099,
+      676.5203681218851,
+      -1259.1392167224028,
+      771.3234287776531,
+      -176.6150291621406,
+      12.507343278686905,
+      -0.13857109526572012,
+      9984369578019572e-21,
+      15056327351493116e-23
+    ];
+    const HALF_LOG_2PI = 0.9189385332046727;
+    function logGammaAbs(x) {
+      if (x !== 0 && Math.abs(x) < 1e-8) {
+        return -Math.log(Math.abs(x)) - 0.5772156649015329 * x;
+      }
+      if (x < 0.5) {
+        return Math.log(Math.PI) - Math.log(Math.abs(Math.sin(Math.PI * x))) - logGammaAbs(1 - x);
+      }
+      const z = x - 1;
+      let a = LANCZOS[0];
+      for (let k = 1; k < LANCZOS.length; k++) a += LANCZOS[k] / (z + k);
+      const t = z + 7.5;
+      return HALF_LOG_2PI + (z + 0.5) * Math.log(t) - t + Math.log(a);
+    }
+    function lgammaImpl(x) {
+      if (Number.isNaN(x)) return NaN;
+      if (x === 0 || Number.isInteger(x) && x < 0) return Infinity;
+      if (!Number.isFinite(x)) return Infinity;
+      return logGammaAbs(x);
+    }
+    function tgammaImpl(x) {
+      if (Number.isNaN(x)) return NaN;
+      if (x === 0) return 1 / x;
+      if (Number.isInteger(x) && x < 0) return NaN;
+      if (!Number.isFinite(x)) return x > 0 ? Infinity : NaN;
+      if (x < 0) {
+        return Math.PI / (Math.sin(Math.PI * x) * Math.exp(logGammaAbs(1 - x)));
+      }
+      return Math.exp(logGammaAbs(x));
+    }
+    function nanPayload(tagPtr) {
+      if (!tagPtr) return 0n;
+      const t = readCString(tagPtr).replace(/^\s+/, "");
+      try {
+        if (/^0[xX][0-9a-fA-F]+$/.test(t)) return BigInt(t);
+        if (/^0[0-7]+$/.test(t)) return BigInt(`0o${t.slice(1)}`);
+        if (/^[0-9]+$/.test(t)) return BigInt(t);
+      } catch {
+        return 0n;
+      }
+      return 0n;
+    }
+    function nanImpl(tagPtr) {
+      return bitsToF64(0x7ff8000000000000n | nanPayload(tagPtr) & (1n << 51n) - 1n);
+    }
+    function nanfImpl(tagPtr) {
+      return bitsToF32(2143289344 | Number(nanPayload(tagPtr) & 0x3fffffn));
+    }
+    const asF32 = (fn) => (...args) => Math.fround(fn(...args));
     const env = {
       // memory / string
       memcpy,
@@ -2806,6 +3335,11 @@ var TinycWeb = (() => {
       freopen,
       remove: removeFile,
       rename: renameFile,
+      fdopen,
+      tmpfile,
+      setbuf,
+      setvbuf,
+      perror,
       fgets,
       scanf,
       fscanf,
@@ -2851,25 +3385,180 @@ var TinycWeb = (() => {
       isgraph,
       tolower,
       toupper,
-      // math
+      // math — the full <math.h> surface (see the implementation
+      // block above). The l forms are the double implementations:
+      // long double is double in this target's ABI.
       sin: Math.sin,
+      sinf: asF32(Math.sin),
+      sinl: Math.sin,
       cos: Math.cos,
+      cosf: asF32(Math.cos),
+      cosl: Math.cos,
       tan: Math.tan,
+      tanf: asF32(Math.tan),
+      tanl: Math.tan,
       asin: Math.asin,
+      asinf: asF32(Math.asin),
+      asinl: Math.asin,
       acos: Math.acos,
+      acosf: asF32(Math.acos),
+      acosl: Math.acos,
       atan: Math.atan,
+      atanf: asF32(Math.atan),
+      atanl: Math.atan,
       atan2: Math.atan2,
+      atan2f: asF32(Math.atan2),
+      atan2l: Math.atan2,
+      sinh: Math.sinh,
+      sinhf: asF32(Math.sinh),
+      sinhl: Math.sinh,
+      cosh: Math.cosh,
+      coshf: asF32(Math.cosh),
+      coshl: Math.cosh,
+      tanh: Math.tanh,
+      tanhf: asF32(Math.tanh),
+      tanhl: Math.tanh,
+      asinh: Math.asinh,
+      asinhf: asF32(Math.asinh),
+      asinhl: Math.asinh,
+      acosh: Math.acosh,
+      acoshf: asF32(Math.acosh),
+      acoshl: Math.acosh,
+      atanh: Math.atanh,
+      atanhf: asF32(Math.atanh),
+      atanhl: Math.atanh,
       exp: Math.exp,
+      expf: asF32(Math.exp),
+      expl: Math.exp,
+      exp2: exp2Impl,
+      exp2f: asF32(exp2Impl),
+      exp2l: exp2Impl,
+      expm1: Math.expm1,
+      expm1f: asF32(Math.expm1),
+      expm1l: Math.expm1,
+      frexp,
+      frexpf,
+      frexpl: frexp,
+      ilogb: ilogbImpl,
+      ilogbf: ilogbImpl,
+      ilogbl: ilogbImpl,
+      ldexp: scalbnImpl,
+      ldexpf: asF32(scalbnImpl),
+      ldexpl: scalbnImpl,
       log: Math.log,
+      logf: asF32(Math.log),
+      logl: Math.log,
       log10: Math.log10,
-      pow: Math.pow,
-      sqrt: Math.sqrt,
-      floor: Math.floor,
-      ceil: Math.ceil,
+      log10f: asF32(Math.log10),
+      log10l: Math.log10,
+      log1p: Math.log1p,
+      log1pf: asF32(Math.log1p),
+      log1pl: Math.log1p,
+      log2: Math.log2,
+      log2f: asF32(Math.log2),
+      log2l: Math.log2,
+      logb: logbImpl,
+      logbf: logbImpl,
+      logbl: logbImpl,
+      modf,
+      modff,
+      modfl: modf,
+      scalbn: scalbnImpl,
+      scalbnf: asF32(scalbnImpl),
+      scalbnl: scalbnImpl,
+      scalbln: scalbnImpl,
+      scalblnf: asF32(scalbnImpl),
+      scalblnl: scalbnImpl,
+      cbrt: Math.cbrt,
+      cbrtf: asF32(Math.cbrt),
+      cbrtl: Math.cbrt,
       fabs: Math.abs,
-      round: Math.round,
+      fabsf: asF32(Math.abs),
+      fabsl: Math.abs,
+      hypot: Math.hypot,
+      hypotf: asF32(Math.hypot),
+      hypotl: Math.hypot,
+      pow: powImpl,
+      powf: asF32(powImpl),
+      powl: powImpl,
+      sqrt: Math.sqrt,
+      sqrtf: asF32(Math.sqrt),
+      sqrtl: Math.sqrt,
+      erf: erfImpl,
+      erff: asF32(erfImpl),
+      erfl: erfImpl,
+      erfc: erfcImpl,
+      erfcf: asF32(erfcImpl),
+      erfcl: erfcImpl,
+      lgamma: lgammaImpl,
+      lgammaf: asF32(lgammaImpl),
+      lgammal: lgammaImpl,
+      tgamma: tgammaImpl,
+      tgammaf: asF32(tgammaImpl),
+      tgammal: tgammaImpl,
+      ceil: Math.ceil,
+      ceilf: asF32(Math.ceil),
+      ceill: Math.ceil,
+      floor: Math.floor,
+      floorf: asF32(Math.floor),
+      floorl: Math.floor,
+      nearbyint: rintImpl,
+      nearbyintf: asF32(rintImpl),
+      nearbyintl: rintImpl,
+      rint: rintImpl,
+      rintf: asF32(rintImpl),
+      rintl: rintImpl,
+      lrint: (x) => toLongSat(rintImpl(x)),
+      lrintf: (x) => toLongSat(rintImpl(x)),
+      lrintl: (x) => toLongSat(rintImpl(x)),
+      llrint: (x) => toLLongSat(rintImpl(x)),
+      llrintf: (x) => toLLongSat(rintImpl(x)),
+      llrintl: (x) => toLLongSat(rintImpl(x)),
+      round: roundImpl,
+      roundf: asF32(roundImpl),
+      roundl: roundImpl,
+      lround: (x) => toLongSat(roundImpl(x)),
+      lroundf: (x) => toLongSat(roundImpl(x)),
+      lroundl: (x) => toLongSat(roundImpl(x)),
+      llround: (x) => toLLongSat(roundImpl(x)),
+      llroundf: (x) => toLLongSat(roundImpl(x)),
+      llroundl: (x) => toLLongSat(roundImpl(x)),
       trunc: Math.trunc,
+      truncf: asF32(Math.trunc),
+      truncl: Math.trunc,
       fmod: (a, b) => a % b,
+      fmodf: asF32((a, b) => a % b),
+      fmodl: (a, b) => a % b,
+      remainder: remainderImpl,
+      remainderf: asF32(remainderImpl),
+      remainderl: remainderImpl,
+      remquo: remquoImpl,
+      remquof: remquofImpl,
+      remquol: remquoImpl,
+      copysign: copysignImpl,
+      copysignf: copysignfImpl,
+      copysignl: copysignImpl,
+      nan: nanImpl,
+      nanf: nanfImpl,
+      nanl: nanImpl,
+      nextafter: nextafterImpl,
+      nextafterf: nextafterfImpl,
+      nextafterl: nextafterImpl,
+      nexttoward: nextafterImpl,
+      nexttowardf: nextafterfImpl,
+      nexttowardl: nextafterImpl,
+      fdim: fdimImpl,
+      fdimf: asF32(fdimImpl),
+      fdiml: fdimImpl,
+      fmax: fmaxImpl,
+      fmaxf: asF32(fmaxImpl),
+      fmaxl: fmaxImpl,
+      fmin: fminImpl,
+      fminf: asF32(fminImpl),
+      fminl: fminImpl,
+      fma: fmaImpl,
+      fmaf: fmafImpl,
+      fmal: fmaImpl,
       // time
       time: (tloc) => {
         const sec = Math.floor(Date.now() / 1e3);
