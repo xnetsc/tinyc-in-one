@@ -133,6 +133,9 @@ export async function runSuite(env) {
   await runCase('plain_dylink_threaded', standard('plain_dylink', {
     plain: [42, 0, 0, 0],
   }));
+  await runCase('dlopen_twice', standard('dlopen_twice', {
+    dlopen_twice: [42, 1, 0, 0],
+  }));
   await runCase('plain_dylink_unthreaded', async () => {
     let text = '';
     const proc = env.createProcess({

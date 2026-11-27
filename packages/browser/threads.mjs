@@ -1198,6 +1198,9 @@ export function startThreadWorker(boot, helpers, port) {
     holder: null,
     records: new Map(),      // canonical -> replica record
     byHandle: new Map(),     // handle -> replica record
+    byName: new Map(),       // unit file name -> replica record
+                             // (first loaded wins, as on the
+                             // coordinator: see _registerModuleName)
     got: new Map(),          // 'kind:name' -> { global, definer, offset }
     symbols: new Map(),      // name -> { wrec, entry }
     slotDesc: new Map(),     // slot -> descriptor
@@ -1657,6 +1660,12 @@ function rtAddReplica(rt, m) {
   wrec.instance = instance;
   rt.records.set(wrec.canonical, wrec);
   rt.byHandle.set(wrec.handle, wrec);
+  // Register by unit file name, first loaded wins (the
+  // coordinator's _registerModuleName rule): a dlopen by name
+  // finds a replica wherever the coordinator placed it — the
+  // worker never resolves a name to a path itself.
+  const base = wrec.canonical.slice(wrec.canonical.lastIndexOf('/') + 1);
+  if (!rt.byName.has(base)) rt.byName.set(base, wrec);
   for (const [name, e] of wrec.exports) {
     if (!rt.symbols.has(name)) rt.symbols.set(name, { wrec, entry: e });
   }
@@ -2577,6 +2586,22 @@ function createRealPthreadShims(rt) {
 
 // -- the worker's dlfcn (§5.4 from the requesting side) --
 
+/** A replica already loaded into this worker, by library name:
+ *  the same name forms the coordinator resolves (as spelled,
+ *  then with the '.tinyc.js' extension, then with the 'lib'
+ *  prefix), matched against the file names of loaded units.
+ *  This is a lookup among loaded replicas only — never a
+ *  resolution against the filesystem: where a name lives is
+ *  the coordinator's decision, and a replica may sit at any
+ *  canonical the search_dirs order produced. */
+function rtModuleByName(rt, name) {
+  for (const form of rt.helpers.libraryNameForms(name)) {
+    const wrec = rt.byName.get(form);
+    if (wrec) return wrec;
+  }
+  return null;
+}
+
 function createWorkerDlfcn(rt) {
   const ctx = () => rt.shimCtx;
   function setDlerror(message) { rt.dlerror = message; }
@@ -2595,8 +2620,13 @@ function createWorkerDlfcn(rt) {
         return main ? main.handle : 0;
       }
       const path = ctx().readCString(pathPtr);
-      const canonical = rt.helpers.canonicalModulePath(path, '/sysroot');
-      const existing = rt.records.get(canonical);
+      // Already loaded: find the replica by name, not by a
+      // canonical derived here — the coordinator may have
+      // placed it anywhere its search_dirs order produced
+      // (a name is not a path, and this worker never resolves
+      // one). A path spelling finds nothing by name and falls
+      // through to the coordinator, which fails it by name.
+      const existing = rtModuleByName(rt, path);
       if (existing) return existing.handle;
       // Ask the coordinator to lay the module out; this call
       // waits in the §5.3 loop, servicing the very task it
@@ -2613,7 +2643,17 @@ function createWorkerDlfcn(rt) {
         if (task && task.seq > prevSeq && task.requester === rt.my.id) {
           if (task.failed) { setDlerror(task.error); return 0; }
           if (rt.readI32(cb + CB_LOAD_DONE) >= task.seq) {
-            const wrec = rt.records.get(canonical);
+            // The load task's header carries the requested
+            // module's handle: take the replica by handle, not
+            // by a canonical derived here — the coordinator
+            // placed it, and its path is whatever the search
+            // order produced. The by-name fallback covers a
+            // load whose delta was empty (the module was
+            // already loaded when the coordinator laid it out,
+            // so the task carries handle 0): the replica is
+            // registered by name either way.
+            const wrec = rt.byHandle.get(task.handle)
+              ?? rtModuleByName(rt, path);
             if (wrec) return wrec.handle;
             setDlerror(`tinyc: dlopen: "${path}" did not load`);
             return 0;

@@ -2648,7 +2648,7 @@ const DEFAULT_SEARCH_DIRS = ['$ORIGIN', 'lib', '.'];
  *  'side', 'side.tinyc.js', 'libside.tinyc.js'; 'libside'
  *  gives 'libside', 'libside.tinyc.js' and stops there; a
  *  full 'libside.tinyc.js' gives only itself. */
-function libraryNameForms(name) {
+export function libraryNameForms(name) {
   const forms = [name];
   const withExt = name.endsWith('.tinyc.js') ? name : `${name}.tinyc.js`;
   if (withExt !== name) forms.push(withExt);

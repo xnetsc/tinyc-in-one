@@ -56,6 +56,7 @@ var TinycWeb = (() => {
     getLoadedTargets: () => getLoadedTargets,
     isRunnableTarget: () => isRunnableTarget,
     libraryFromBytes: () => libraryFromBytes,
+    libraryNameForms: () => libraryNameForms,
     loadSysrootManifest: () => loadSysrootManifest,
     loadTinyc: () => loadTinyc,
     loadTinycWithNative: () => loadTinycWithNative,
