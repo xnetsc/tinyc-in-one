@@ -160,12 +160,26 @@ JSON
 # found, so the produced program is an ordinary dynamic ELF whose
 # DT_NEEDED names the system libraries.
 #
-# gnu_defs <system-lib-dir> fills GNU_DEFS for one linux-gnu build.
+# gnu_defs <system-lib-dir> [path-sep] fills GNU_DEFS for one linux-gnu build.
+# The separator between the baked search paths must be the PATHSEP of
+# the OS the dual-form file RUNS on, not of the build host: libtcc
+# splits these strings on PATHSEP (tcc.h), which is ':' on Unix but
+# ';' on Windows. Baking ':' paths into a Windows PE makes the whole
+# string one nonexistent path, so the library search finds neither
+# libc nor libtcc1.a and the link silently produces an empty file
+# (the output stage skips the write once nb_errors is set, while
+# tcc_main still exits 0). The default ':' is for the Linux/macOS
+# builds; the Windows host dispatch passes ';'. The system library
+# directory is a Linux build-host path: it only resolves on a Unix
+# host, so it is appended only for the ':' form.
 gnu_defs() {
+    local sep=${2:-:}
+    local libpaths="{B}/libc${sep}{B}"
+    [ "$sep" = ":" ] && libpaths="${libpaths}${sep}$1"
     GNU_DEFS=(
-        '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include-libc:{B}/include"'
+        "-DCONFIG_TCC_SYSINCLUDEPATHS=\"{B}/include-libc${sep}{B}/include\""
         '-DCONFIG_TCC_CRTPREFIX="{B}/libc"'
-        "-DCONFIG_TCC_LIBPATHS=\"{B}/libc:{B}:$1\""
+        "-DCONFIG_TCC_LIBPATHS=\"${libpaths}\""
     )
 }
 
@@ -978,19 +992,19 @@ if [ "${1:-}" = "host-win" ]; then
                 build_host_mingw
                 ;;
             x86_64-linux-gnu)
-                gnu_defs "/usr/x86_64-linux-gnu/lib"
+                gnu_defs "/usr/x86_64-linux-gnu/lib" ";"
                 build_host_mingw_for "$H" x86_64 "-DTCC_TARGET_X86_64" "$ISA_X86_64" \
                     '-DCONFIG_SYSROOT="/usr/x86_64-linux-gnu"' \
                     "${GNU_DEFS[@]}"
                 ;;
             aarch64-linux-gnu)
-                gnu_defs "/usr/aarch64-linux-gnu/lib"
+                gnu_defs "/usr/aarch64-linux-gnu/lib" ";"
                 build_host_mingw_for "$H" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64" \
                     '-DCONFIG_SYSROOT="/usr/aarch64-linux-gnu"' \
                     "${GNU_DEFS[@]}"
                 ;;
             riscv64-linux-gnu)
-                gnu_defs "/usr/riscv64-linux-gnu/lib"
+                gnu_defs "/usr/riscv64-linux-gnu/lib" ";"
                 build_host_mingw_for "$H" riscv64 "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
                     '-DCONFIG_SYSROOT="/usr/riscv64-linux-gnu"' \
                     "${GNU_DEFS[@]}"
@@ -998,28 +1012,28 @@ if [ "${1:-}" = "host-win" ]; then
             aarch64-linux-android)
                 build_host_mingw_for "$H" arm64 "-DTCC_TARGET_ARM64 -DTARGETOS_ANDROID=1" "$ISA_ARM64" \
                     '-DCONFIG_TCC_CRTPREFIX="{B}/libc"' \
-                    '-DCONFIG_TCC_LIBPATHS="{B}/libc:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/aarch64-linux-android"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/libc;{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include;{B}/include-libc;{B}/include-libc/aarch64-linux-android"' \
                     '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
                 ;;
             x86_64-linux-android)
                 build_host_mingw_for "$H" x86_64 "-DTCC_TARGET_X86_64 -DTARGETOS_ANDROID=1" "$ISA_X86_64" \
                     '-DCONFIG_TCC_CRTPREFIX="{B}/libc"' \
-                    '-DCONFIG_TCC_LIBPATHS="{B}/libc:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/x86_64-linux-android"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/libc;{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include;{B}/include-libc;{B}/include-libc/x86_64-linux-android"' \
                     '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
                 ;;
             arm64-apple-darwin)
                 build_host_mingw_for "$H" arm64-osx "-DTCC_TARGET_ARM64 -DTCC_TARGET_MACHO" "$ISA_ARM64" \
                     '-DCONFIG_TCC_CRTPREFIX="{B}/lib"' \
-                    '-DCONFIG_TCC_LIBPATHS="{B}/lib:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc"'
+                    '-DCONFIG_TCC_LIBPATHS="{B}/lib;{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include;{B}/include-libc"'
                 ;;
             x86_64-apple-darwin)
                 build_host_mingw_for "$H" x86_64-osx "-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO" "$ISA_X86_64" \
                     '-DCONFIG_TCC_CRTPREFIX="{B}/lib"' \
-                    '-DCONFIG_TCC_LIBPATHS="{B}/lib:{B}"' \
-                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc"'
+                    '-DCONFIG_TCC_LIBPATHS="{B}/lib;{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include;{B}/include-libc"'
                 ;;
             wasm32-wasi)
                 build_host_mingw_for "$H" "" "-DTCC_TARGET_WASM32" "WebAssembly MVP with SIMD128 (v128); no threads/atomics target variant" \

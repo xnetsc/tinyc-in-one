@@ -233,6 +233,25 @@ build_mac_target() {
             || fail "config.h guard edit did not take ($TRIPLE)"
     fi
 
+    # Non-native triples only: run the native make here, while
+    # config.h still points at the host SDK. The cross rules need
+    # the files it generates (tccdefs_.h, libtcc.a), but the native
+    # make compiles the host's own libtcc1.a against the host's
+    # headers: once the repoint below points config.h at the
+    # target's sysroot, the target's glibc/bionic headers do not
+    # compile under the host compiler's predefined macros
+    # (__APPLE__, host arch), so a native make after the repoint
+    # fails. The native triple keeps its own make + make install
+    # below, which needs the repointed paths; win32 and wasm32
+    # have no repoint, so the move is a no-op for them.
+    if [ "$TRIPLE" != "$HOST_TRIPLE" ]; then
+        if [ -f "$SRC_COPY/config.mak" ]; then
+            (cd "$SRC_COPY" && make -j4) || fail "make ($TRIPLE)"
+        else
+            fail "no config.mak, skipping make ($TRIPLE)"
+        fi
+    fi
+
     step "stage target sysroot ($TRIPLE)"
     # Stage first: the repoint below points config.h at the staged
     # include-libc, and the libtcc1.a build needs stdio.h from there.
@@ -313,10 +332,10 @@ build_mac_target() {
 
     step "target runtime library ($TRIPLE)"
     # Native triple: the original recipe (native make + make install).
-    # Every other triple: a native make first (the cross rules need
-    # its generated files, as in build_one/build_darwin), then the
-    # cross make for libtcc1.a. wasm32 has no libtcc1.a: the native
-    # make alone generates what the dual-form compile needs.
+    # Every other triple: the native make already ran right after
+    # configure (see the comment there); only the cross make for
+    # libtcc1.a runs here. wasm32 has no libtcc1.a: the native make
+    # alone generates what the dual-form compile needs.
     if [ "$TRIPLE" = "$HOST_TRIPLE" ]; then
         if [ -f "$SRC_COPY/config.mak" ]; then
             (cd "$SRC_COPY" && make -j4) || fail "make ($TRIPLE)"
@@ -335,11 +354,9 @@ build_mac_target() {
             fail "dist/lib/tcc/libtcc1.a missing ($TRIPLE)"
         fi
     else
-        if [ -f "$SRC_COPY/config.mak" ]; then
-            (cd "$SRC_COPY" && make -j4) || fail "make ($TRIPLE)"
-        else
-            fail "no config.mak, skipping make ($TRIPLE)"
-        fi
+        # The native make already ran, right after configure and
+        # before the config.h repoint (see the comment there): the
+        # cross make below only needs its generated files.
         case $TRIPLE in
             wasm32-wasi) : ;;
             *)

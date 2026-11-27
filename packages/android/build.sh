@@ -309,6 +309,10 @@ open(p, 'w').write(t.replace(old, '|| TCC_TARGET_C67 || TCC_TARGET_WASM32)', 1))
         [ -x "$cc" ] || cc=${cc%$API-clang}-clang
         local soname="libtinyc-${triple//-/_}.so"
         echo "building $soname for $abi ($cc)"
+        # The output directory is not tracked by git (it holds only
+        # build products), so it may not exist on a fresh checkout:
+        # create it here, before the link writes into it.
+        mkdir -p "src/main/jniLibs/$abi"
         # Device-side search paths: {B} is the extracted toolchain
         # directory the Java layer registers at runtime; its lib/
         # holds libtcc1.a and runmain.o (staged below), and the
