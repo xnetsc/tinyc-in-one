@@ -61,6 +61,34 @@
     },
     {
       "host": "x86_64-linux-gnu",
+      "target": "arm64-apple-darwin",
+      "binary": "natives/x86_64-linux-gnu/toolchain/arm64-apple-darwin/tinyc",
+      "sysroot": "sysroot/arm64-apple-darwin",
+      "isa": "ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE",
+      "status": "included",
+      "libPath": "sysroot/arm64-apple-darwin/lib/tcc",
+      "libtcc1": "sysroot/arm64-apple-darwin/lib/tcc/libtcc1.a",
+      "outputs": {
+        "exe": {
+          "format": "Mach-O executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "Mach-O object",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "Mach-O dylib",
+          "ext": ".dylib"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
       "target": "riscv64-linux-gnu",
       "binary": "natives/x86_64-linux-gnu/toolchain/riscv64-linux-gnu/tinyc",
       "sysroot": "sysroot/riscv64-linux-gnu",
@@ -80,6 +108,48 @@
         "shared": {
           "format": "ELF shared object",
           "ext": ".so"
+        },
+        "ar": {
+          "format": "ar archive",
+          "ext": ".a"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "wasm32-wasi",
+      "binary": "natives/x86_64-linux-gnu/toolchain/wasm32-wasi/tinyc",
+      "sysroot": "sysroot/wasm32-wasi",
+      "isa": "WebAssembly MVP with SIMD128 (v128); no threads/atomics target variant",
+      "status": "included",
+      "outputs": {
+        "module": {
+          "format": "WebAssembly",
+          "ext": ".wasm"
+        }
+      }
+    },
+    {
+      "host": "x86_64-linux-gnu",
+      "target": "x86_64-apple-darwin",
+      "binary": "natives/x86_64-linux-gnu/toolchain/x86_64-apple-darwin/tinyc",
+      "sysroot": "sysroot/x86_64-apple-darwin",
+      "isa": "x86-64 baseline; scalar floating point via SSE2 (xmm registers); no AVX code generation",
+      "status": "included",
+      "libPath": "sysroot/x86_64-apple-darwin/lib/tcc",
+      "libtcc1": "sysroot/x86_64-apple-darwin/lib/tcc/libtcc1.a",
+      "outputs": {
+        "exe": {
+          "format": "Mach-O executable",
+          "ext": ""
+        },
+        "obj": {
+          "format": "Mach-O object",
+          "ext": ".o"
+        },
+        "shared": {
+          "format": "Mach-O dylib",
+          "ext": ".dylib"
         },
         "ar": {
           "format": "ar archive",

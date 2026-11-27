@@ -25,11 +25,13 @@
 # package is needed on the machine running the compiler. The same
 # rule picks the compiler for the host variants below.
 #
-# macOS hosts (arm64-apple-darwin, x86_64-apple-darwin) are recognized
-# build entries: their dual-form kernel (PIE executable with an
-# embedded dylib segment, see the design doc) is built on a macOS
-# host. On any other host the build reports them as not built and
-# produces no artifact.
+# The Darwin targets (arm64-apple-darwin, x86_64-apple-darwin) are
+# built here like the other cross targets: the dual-form file runs
+# on this (Linux) host and targets Mach-O (see build_darwin). The
+# Darwin HOST variant - a dual-form file that itself runs on macOS
+# (Mach-O executable with an embedded dylib segment, see the design
+# doc) - is a different artifact, built only on a macOS host
+# (mac-test-bundle/build-mac.sh).
 #
 # Host variants (the dual-form file compiled to RUN on another host,
 # target == host) are built with the "host" subcommand:
@@ -68,7 +70,7 @@ ROOT=$PWD
 # script supports); drives the native/cross choice described above.
 HOST_ARCH=$(uname -m)
 
-ALL="x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32 aarch64-linux-android x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin"
+ALL="x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32 aarch64-linux-android x86_64-linux-android arm64-apple-darwin x86_64-apple-darwin wasm32-wasi"
 if [ $# -gt 0 ]; then TRIPLES="$*"; else TRIPLES="$ALL"; fi
 
 ANDROID_API=${TINYC_ANDROID_API:-30}
@@ -95,6 +97,21 @@ print_outputs() {
     "obj": {"format": "COFF object", "ext": ".o"},
     "shared": {"format": "PE DLL", "ext": ".dll"},
     "ar": {"format": "ar archive", "ext": ".a"}
+  },
+JSON
+            ;;
+        macho) cat <<'JSON'
+  "outputs": {
+    "exe": {"format": "Mach-O executable", "ext": ""},
+    "obj": {"format": "Mach-O object", "ext": ".o"},
+    "shared": {"format": "Mach-O dylib", "ext": ".dylib"},
+    "ar": {"format": "ar archive", "ext": ".a"}
+  },
+JSON
+            ;;
+        wasm) cat <<'JSON'
+  "outputs": {
+    "module": {"format": "WebAssembly", "ext": ".wasm"}
   },
 JSON
             ;;
@@ -308,6 +325,154 @@ $(print_outputs $FAMILY)
   "dual_file": "bin/tinyc",
   "toolchain_include": "include",
   "libtcc1": "$LIBTCC1_REL"$EXTRA_JSON
+}
+EOF
+    echo "built: $DIST"
+    file "$DIST/bin/tinyc" | sed 's/^/  /'
+}
+
+# build_darwin <triple> <cross-name> <target-def> <isa>
+# Darwin targets built on a Linux host: the dual-form file is a
+# Linux ELF like every other dist binary this script produces (it
+# runs on the build host); only its target is Mach-O. libtcc1.a
+# comes from the upstream cross target (make cross-<arch>-osx);
+# its objects are ELF by upstream design (tcc.h's ELF_OBJ_ONLY:
+# Mach-O builds write ELF .o files and the Mach-O writer consumes
+# them at link time), the same form the macOS bundle build ships.
+# The sysroot is the bundled Darwin set, staged by
+# mac-test-bundle/darwin-dist.py exactly as for the macOS bundle
+# build: the self-written headers in include-libc/, the .tbd link
+# stubs in lib/ (Mach-O needs no crt objects). The baked search
+# paths are the package paths, as in darwin-dist.py's config.h
+# rewrite for the bundle build.
+build_darwin() {
+    local TRIPLE=$1 CT=$2 TDEF=$3 ISA=$4
+    local DIST=$ROOT/build/dist/$TRIPLE
+    local SRC=$ROOT/build/work/$TRIPLE/src
+
+    echo "===== $TRIPLE ====="
+    rm -rf "$ROOT/build/work/$TRIPLE" "$DIST"
+    mkdir -p "$SRC" "$DIST/bin" "$DIST/include" "$DIST/lib/tcc/include"
+
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C vendor-tinycc . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+
+    (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
+    # native build first: the cross rules need its generated files
+    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+    (cd "$SRC" && make "cross-$CT" >/dev/null)
+    cp "$SRC/$CT-libtcc1.a" "$DIST/lib/tcc/libtcc1.a"
+    cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/include/"
+    cp "$SRC/libtcc.h" "$DIST/include/"
+    python3 "$ROOT/mac-test-bundle/darwin-dist.py" stage \
+        "$ROOT/vendor-darwin" "$DIST" >/dev/null
+
+    gcc -O2 -fPIC -pie -Wl,--export-dynamic \
+        -o "$DIST/bin/tinyc" "$SRC/tcc.c" "$ROOT/core/tcc_io.c" \
+        -I"$SRC" -I"$ROOT/core" $TDEF -DTCC_TARGET_MACHO \
+        '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include-libc:{B}/include"' \
+        '-DCONFIG_TCC_LIBPATHS="{B}/lib:{B}"' \
+        '-DCONFIG_TCC_CRTPREFIX="{B}/lib"' \
+        -ldl -lm -lpthread
+    python3 "$ROOT/tools/clear_pie_flag.py" "$DIST/bin/tinyc"
+    ln -sf tinyc "$DIST/bin/tcc"
+    cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
+
+    cat > "$DIST/manifest.json" <<EOF
+{
+  "name": "tinyc",
+  "version": "$VER",
+  "target": "$TRIPLE",
+  "isa": "$ISA",
+$(print_outputs macho)
+  "dual_file": "bin/tinyc",
+  "toolchain_include": "include",
+  "libtcc1": "lib/tcc/libtcc1.a",
+  "libc": "Darwin libc headers bundled (vendor-darwin, self-written); programs link the system libSystem.B.dylib dynamically",
+  "libc_headers": "lib/tcc/include-libc",
+  "libc_lib": "lib/tcc/lib"
+}
+EOF
+    echo "built: $DIST"
+    file "$DIST/bin/tinyc" | sed 's/^/  /'
+}
+
+# build_wasm32
+# The wasm32-wasi target: the dual-form file runs on this (Linux)
+# host and targets WebAssembly, using the project's wasm backend
+# (wasm-backend/): the source copy takes the project patches and
+# then the backend sources + backend patches (the two sets apply
+# cleanly in that order), and configure's config.h guard is
+# extended with TCC_TARGET_WASM32, the same edit
+# wasm-backend/build.sh makes. The target has no libtcc1.a: in
+# the backend's model the runtime helpers are host-provided
+# imports, so the sysroot carries headers only - the
+# wasm-backend/include set (the C library declarations and the
+# SIMD compatibility headers) plus TCC's builtin headers, the
+# same header set the browser package's wasm32 sysroot ships.
+build_wasm32() {
+    local TRIPLE=wasm32-wasi
+    local DIST=$ROOT/build/dist/$TRIPLE
+    local SRC=$ROOT/build/work/$TRIPLE/src
+
+    echo "===== $TRIPLE ====="
+    rm -rf "$ROOT/build/work/$TRIPLE" "$DIST"
+    mkdir -p "$SRC" "$DIST/bin" "$DIST/include" "$DIST/lib/tcc/include"
+
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C vendor-tinycc . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+    cp "$ROOT/wasm-backend/src/wasm-gen.c" \
+       "$ROOT/wasm-backend/src/wasm-link.c" \
+       "$ROOT/wasm-backend/src/wasm-int.h" "$SRC/"
+    python3 "$ROOT/wasm-backend/patches/apply-patches.py" "$SRC" >/dev/null
+
+    (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
+    grep -q 'TCC_TARGET_C67)' "$SRC/config.h"
+    sed -i 's/|| TCC_TARGET_C67)/|| TCC_TARGET_C67 || TCC_TARGET_WASM32)/' \
+        "$SRC/config.h"
+    grep -q 'TCC_TARGET_WASM32' "$SRC/config.h"
+    # native build: generates the files the dual-form compile
+    # needs (config.h consumers, tccdefs_.h); no cross rule is
+    # used - the target runtime is not an archive (see above).
+    (cd "$SRC" && make -j"$(nproc)" >/dev/null)
+
+    cp "$ROOT"/wasm-backend/include/*.h "$DIST/lib/tcc/include/"
+    cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/include/"
+    cp "$SRC/libtcc.h" "$DIST/include/"
+
+    gcc -O2 -fPIC -pie -Wl,--export-dynamic \
+        -o "$DIST/bin/tinyc" "$SRC/tcc.c" "$ROOT/core/tcc_io.c" \
+        -I"$SRC" -I"$ROOT/core" -DTCC_TARGET_WASM32 \
+        '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include"' \
+        '-DCONFIG_TCC_LIBPATHS="{B}"' \
+        '-DCONFIG_TCC_CRTPREFIX="{B}"' \
+        -ldl -lm -lpthread
+    python3 "$ROOT/tools/clear_pie_flag.py" "$DIST/bin/tinyc"
+    ln -sf tinyc "$DIST/bin/tcc"
+    cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
+
+    cat > "$DIST/manifest.json" <<EOF
+{
+  "name": "tinyc",
+  "version": "$VER",
+  "target": "$TRIPLE",
+  "isa": "WebAssembly MVP with SIMD128 (v128); no threads/atomics target variant",
+$(print_outputs wasm)
+  "dual_file": "bin/tinyc",
+  "toolchain_include": "include",
+  "libc": "no target libc archive: in the wasm backend's model the runtime helpers are host-provided imports; the sysroot carries the bundled headers only (wasm-backend/include and TCC's builtin headers)"
 }
 EOF
     echo "built: $DIST"
@@ -616,9 +781,14 @@ for TRIPLE in $TRIPLES; do
                 '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/x86_64-linux-android"' \
                 '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
             ;;
-        arm64-apple-darwin|x86_64-apple-darwin)
-            echo "===== $TRIPLE ====="
-            echo "not built: the macOS dual-form kernel is built on a macOS host; this machine produces no artifact for it"
+        arm64-apple-darwin)
+            build_darwin "$TRIPLE" arm64-osx "-DTCC_TARGET_ARM64" "$ISA_ARM64"
+            ;;
+        x86_64-apple-darwin)
+            build_darwin "$TRIPLE" x86_64-osx "-DTCC_TARGET_X86_64" "$ISA_X86_64"
+            ;;
+        wasm32-wasi)
+            build_wasm32
             ;;
         *)
             echo "unknown triple: $TRIPLE" >&2
