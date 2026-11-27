@@ -266,6 +266,15 @@ jobs:
           "$EMSDK_NODE" --experimental-vm-modules --test test-web-bundle.mjs \
             >> "$GITHUB_WORKSPACE/test-outputs/browser-unit-tests.log" 2>&1
 
+      # The stage_layout suite (packaging/test_stage_layout.py)
+      # covers Mach-O cputype matching and multi-host staging
+      # against the real dist built above; it must run in CI,
+      # not only locally.
+      - name: Stage layout - unit tests
+        run: |
+          python3 packaging/test_stage_layout.py \
+            > test-outputs/stage-layout-tests.log 2>&1
+
       # The §11 thread suite (packages/browser/test-threads) was
       # local-only until run 45779099647, so CI never judged it.
       # It runs here, after the wasm-backend regression built
