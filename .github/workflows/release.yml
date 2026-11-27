@@ -970,19 +970,23 @@ jobs:
       # The per-host artifacts collected above are replaced by the
       # merged ones in release-files/. Dist order follows the
       # stage_layout rule: cross dists first, host-variant dists
-      # after.
+      # after. The aarch64 cross tar carries only the
+      # aarch64-linux-gnu target; the other eight aarch64-runnable
+      # targets come from the linux-arm64 job's full dist, extracted
+      # alongside it below.
       - name: Assemble the merged packages (fat jar, merged npm subpackage, universal2 wheel)
         run: |
-          mkdir -p merged-dists/linux merged-dists/linux-aarch64 \
+          mkdir -p merged-dists/linux merged-dists/linux-aarch64 merged-dists/linux-arm64 \
             merged-dists/win-mingw/x86_64-w64-mingw32 merged-dists/win \
             merged-dists/mac-arm64 merged-dists/mac-x86_64
           tar -xzf release-files/tinyc-x86_64-linux-gnu.tar.gz -C merged-dists/linux
           tar -xzf release-files/tinyc-aarch64-linux-gnu-cross.tar.gz -C merged-dists/linux-aarch64
+          tar -xzf release-files/tinyc-aarch64-linux-gnu.tar.gz -C merged-dists/linux-arm64
           unzip -q release-files/tinyc-x86_64-w64-mingw32-cross.zip -d merged-dists/win-mingw/x86_64-w64-mingw32
           unzip -q release-files/tinyc-x86_64-w64-mingw32.zip -d merged-dists/win
           tar -xzf release-files/tinyc-arm64-apple-darwin.tar.gz -C merged-dists/mac-arm64
           tar -xzf release-files/tinyc-x86_64-apple-darwin.tar.gz -C merged-dists/mac-x86_64
-          export TINYC_DIST_DIRS="$PWD/merged-dists/linux $PWD/merged-dists/linux-aarch64 $PWD/merged-dists/win-mingw $PWD/merged-dists/win $PWD/merged-dists/mac-arm64 $PWD/merged-dists/mac-x86_64"
+          export TINYC_DIST_DIRS="$PWD/merged-dists/linux $PWD/merged-dists/linux-aarch64 $PWD/merged-dists/linux-arm64 $PWD/merged-dists/win-mingw $PWD/merged-dists/win $PWD/merged-dists/mac-arm64 $PWD/merged-dists/mac-x86_64"
           # Java fat jar: all 5 hosts staged once, one jar out;
           # the build itself fails if a host is missing, and the
           # manifest must carry 5 hosts x 9 targets = 45 combos.
