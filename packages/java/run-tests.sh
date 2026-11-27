@@ -84,8 +84,12 @@ PYEOF
 }
 
 echo "=== mode C: host simulation via TINYC_HOST_TRIPLE ==="
+# 清单只读一次进变量：manifest_combos | grep -q 有同一竞态——grep
+# 在首个匹配后退出，写管道的 python 得 BrokenPipeError，在
+# pipefail 下整条管道失败，C1/C2 会误判组合在位与否。
+COMBOS=$(manifest_combos)
 echo "--- C1: x86_64-linux-gnu host simulation"
-if manifest_combos | grep -qx "x86_64-linux-gnu x86_64-linux-gnu"; then
+if grep -qx "x86_64-linux-gnu x86_64-linux-gnu" <<<"$COMBOS"; then
   echo "    (combination present in this package: resolves and runs the full suite)"
   TINYC_HOST_TRIPLE=x86_64-linux-gnu $JAVA -cp "$CP" tinyc.TinyCTest >/dev/null
 else
@@ -103,12 +107,14 @@ fi
 echo "C1 OK"
 
 echo "--- C2: combination absent from the package names host and available combinations"
-# 缺席宿主取包内不存在者：默认 x86_64-w64-mingw32；若本包宿主正是它
-# （Windows 上构建的 jar），改用 aarch64-linux-gnu。
-ABSENT_HOST=x86_64-w64-mingw32
-if manifest_combos | grep -q "^$ABSENT_HOST "; then
-  ABSENT_HOST=aarch64-linux-gnu
-fi
+# 缺席宿主取包内不存在者：按候选顺序取第一个不在清单里的。fat jar
+# 含全部 5 个宿主，mingw32 与 aarch64 都在位；riscv64-linux-gnu 不是
+# 发布宿主（只作编译目标），恒为缺席，作兜底候选。
+ABSENT_HOST=
+for cand in x86_64-w64-mingw32 aarch64-linux-gnu riscv64-linux-gnu; do
+  if ! grep -q "^$cand " <<<"$COMBOS"; then ABSENT_HOST=$cand; break; fi
+done
+[ -n "$ABSENT_HOST" ] || { echo "C2 FAILED: no absent host candidate" >&2; exit 1; }
 set +e
 OUT=$(TINYC_HOST_TRIPLE=$ABSENT_HOST $JAVA -cp "$CP" tinyc.HostProbe 2>&1)
 RC=$?
@@ -120,7 +126,7 @@ grep -q "no native build for host $ABSENT_HOST" <<<"$OUT" \
 while read -r combo_host combo_target; do
   grep -q "$combo_host x $combo_target" <<<"$OUT" \
     || { echo "C2 FAILED: available list missing $combo_host x $combo_target"; echo "$OUT"; exit 1; }
-done < <(manifest_combos)
+done <<<"$COMBOS"
 echo "C2 OK"
 
 echo "--- C3: 32-bit host is rejected"

@@ -3,8 +3,37 @@
 # Jar 内是统一布局：natives/<host>/toolchain/<target>/tinyc +
 # sysroot/<target>/ + packaging-manifest.json，运行时按宿主 triple
 # 解析组合、解压到缓存。需要 JDK 22+（Panama FFM）。
+#
+# 两种形态：
+#   build.sh            单宿主 jar：只 staging 构建宿主（各宿主 CI job
+#                       用的形态；每个 job 产自己的 jar，跑自己的测试）。
+#   build.sh --fat      fat jar：一次 staging 全部 5 个宿主（x86_64 /
+#                       aarch64 Linux、x86_64 Windows、arm64 / x86_64
+#                       macOS），sysroot 每目标只存一份；须用
+#                       --dist（可重复）或 TINYC_DIST_DIRS（空格分隔）
+#                       给齐 5 个宿主的 dist（release 汇聚 job 从各 job
+#                       的 dist tarball 解出它们后调用；TINYC_DIST_DIR
+#                       单值仍受支持）。fat 形态要求 5 个宿主各有
+#                       host == target 的原生组合在位，否则报错退出
+#                       （本地试跑可用 TINYC_FAT_ALLOW_PARTIAL=1 放宽）。
+#                       各宿主二进制的导出表核对仍由各宿主自己的 CI job
+#                       负责（它们在单宿主形态下跑本脚本）；fat 组装只
+#                       核对清单与文件在位。
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# ---- 参数：--fat 与 --dist（可重复） ----
+FAT=0
+DIST_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fat) FAT=1; shift ;;
+    --dist) [ $# -ge 2 ] || { echo "error: --dist needs a directory" >&2; exit 1; }
+      DIST_ARGS+=("$2"); shift 2 ;;
+    *) echo "error: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+[ -n "${TINYC_FAT_JAR:-}" ] && FAT=1
 
 ROOT=$(cd ../.. && pwd)
 BUILD=build
@@ -73,7 +102,62 @@ rm -rf "$BUILD"
 mkdir -p "$JARROOT" "$DIST"
 
 # ---- 统一布局 staging：natives/ + sysroot/ + packaging-manifest.json ----
-python3 "$ROOT/packaging/stage_layout.py" --root "$JARROOT" --host "$HOST_TRIPLE"
+# 5 个发布宿主（与 packaging/stage_layout.py 的 PLANNED_HOSTS 一致）。
+ALL_HOSTS="x86_64-linux-gnu aarch64-linux-gnu x86_64-w64-mingw32 arm64-apple-darwin x86_64-apple-darwin"
+if [ "$FAT" = 1 ]; then
+  # fat 形态的 dist 来源（按顺序，后者补前者）：--dist 参数、
+  # TINYC_DIST_DIRS（空格分隔）、TINYC_DIST_DIR（单值），最后是
+  # 本机构建的 build/dist 与 build/dist-host（存在才用）。
+  FAT_DISTS=("${DIST_ARGS[@]}")
+  # shellcheck disable=SC2206
+  [ -n "${TINYC_DIST_DIRS:-}" ] && FAT_DISTS+=(${TINYC_DIST_DIRS})
+  [ -n "${TINYC_DIST_DIR:-}" ] && FAT_DISTS+=("$TINYC_DIST_DIR")
+  [ -d "$ROOT/build/dist" ] && FAT_DISTS+=("$ROOT/build/dist")
+  [ -d "$ROOT/build/dist-host" ] && FAT_DISTS+=("$ROOT/build/dist-host")
+  # 去重（保序），stage_layout 按顺序取第一个可用的 dist。
+  FAT_DISTS=($(printf '%s\n' "${FAT_DISTS[@]}" | awk '!seen[$0]++'))
+  [ "${#FAT_DISTS[@]}" -gt 0 ] || { echo "error: fat jar needs at least one dist directory (--dist or TINYC_DIST_DIRS)" >&2; exit 1; }
+  STAGE_HOSTS=()
+  STAGE_DISTS=()
+  for h in $ALL_HOSTS; do STAGE_HOSTS+=(--host "$h"); done
+  for d in "${FAT_DISTS[@]}"; do STAGE_DISTS+=(--dist "$d"); done
+  python3 "$ROOT/packaging/stage_layout.py" --root "$JARROOT" \
+    "${STAGE_HOSTS[@]}" "${STAGE_DISTS[@]}"
+  # fat 清单核对：5 个宿主必须都在位、每宿主有 host == target 的
+  # 原生组合（没有它该宿主连一个可跑的二进制都没有）；sysroot 每
+  # 目标只存一份（stage_layout 的结构保证，此处只核数）。
+  TINYC_FAT_ALLOW_PARTIAL="${TINYC_FAT_ALLOW_PARTIAL:-}" python3 - "$JARROOT/packaging-manifest.json" <<'PYEOF'
+import json, os, sys
+mf_path = sys.argv[1]
+mf = json.load(open(mf_path))
+hosts = mf.get("hosts", [])
+combos = mf.get("combinations", [])
+want = ["x86_64-linux-gnu", "aarch64-linux-gnu", "x86_64-w64-mingw32",
+        "arm64-apple-darwin", "x86_64-apple-darwin"]
+missing = [h for h in want if h not in hosts]
+no_native = [h for h in want
+             if not any(c["host"] == h and c["target"] == h for c in combos)]
+targets = sorted({c["target"] for c in combos})
+root = os.path.dirname(mf_path)
+sysroots = sorted(d for d in os.listdir(os.path.join(root, "sysroot"))
+                  if os.path.isdir(os.path.join(root, "sysroot", d)))
+print(f"fat jar: hosts staged {sorted(hosts)} ({len(combos)} combinations, "
+      f"targets {targets}, sysroots {sysroots})")
+if missing or no_native:
+    print(f"ERROR: fat jar is missing hosts {missing} / "
+          f"hosts without a native combination {no_native}", file=sys.stderr)
+    if os.environ.get("TINYC_FAT_ALLOW_PARTIAL") != "1":
+        sys.exit(1)
+    print("WARNING: partial fat jar allowed by TINYC_FAT_ALLOW_PARTIAL=1",
+          file=sys.stderr)
+if sysroots != targets:
+    print(f"ERROR: sysroot set {sysroots} != target set {targets}",
+          file=sys.stderr)
+    sys.exit(1)
+PYEOF
+else
+  python3 "$ROOT/packaging/stage_layout.py" --root "$JARROOT" --host "$HOST_TRIPLE"
+fi
 
 # staged 的二进制名与 stage_layout 一致（取 dist 清单 dual_file 的基名）：
 # PE 宿主是 tinyc.exe，其余宿主是 tinyc。
@@ -123,9 +207,12 @@ for _ in range(ncmds):
     off += cmdsize
 sys.exit(f"no __TINYC,__dylib section in {src}")
 PYEOF
-  nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?tcc_new$' \
+  # 注意：不用 grep -q（它在首个匹配后就退出，nm 写已关闭的管道会
+  # 得 SIGPIPE；在 set -o pipefail 下管道返回 nm 的 141 而非 grep 的
+  # 0，检查会随机失败——实测 30 次里 17 次。去掉 -q 让 grep 读完。
+  nm -gU "$CHECK_BIN" | grep -E ' [Tt] _?tcc_new$' >/dev/null \
     || { echo "ERROR: tcc_new not exported by the dylib embedded in $STAGED_BIN" >&2; exit 1; }
-  if nm -gU "$CHECK_BIN" | grep -qE ' [Tt] _?(tinyc_main|main)$'; then
+  if nm -gU "$CHECK_BIN" | grep -E ' [Tt] _?(tinyc_main|main)$' >/dev/null; then
     echo "native: main entry exported"
   else
     echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
@@ -145,9 +232,10 @@ elif [ "$HOST_TRIPLE" = "x86_64-w64-mingw32" ]; then
     echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2
   fi
 else
-  nm -D "$STAGED_BIN" | grep -q ' T tcc_new' \
+  # 不用 grep -q：见 Darwin 分支的注释（SIGPIPE + pipefail 的竞态）。
+  nm -D "$STAGED_BIN" | grep ' T tcc_new' >/dev/null \
     || { echo "ERROR: tcc_new not exported by $STAGED_BIN" >&2; exit 1; }
-  if nm -D "$STAGED_BIN" | grep -qE ' T (tinyc_main|main)$'; then
+  if nm -D "$STAGED_BIN" | grep -E ' T (tinyc_main|main)$' >/dev/null; then
     echo "native: main entry exported"
   else
     echo "WARNING: no main/tinyc_main exported, runCli will be unavailable" >&2

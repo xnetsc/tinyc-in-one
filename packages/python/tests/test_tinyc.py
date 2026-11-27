@@ -342,6 +342,39 @@ class HostSimulationTests(unittest.TestCase):
         self.assertIn(b"32-bit hosts are not supported", r.stdout)
         self.assertIn(b"i386-linux-gnu", r.stdout)
 
+    def test_both_darwin_hosts_resolve_from_one_merged_tree(self):
+        # The universal2 wheel stages both macOS hosts into one
+        # tinyc/ tree: each simulated darwin host must resolve its
+        # native combination from the same root. Only applies when
+        # the current staging carries both darwin combinations
+        # (the universal2 staging); single-host stagings skip.
+        import json
+        root = os.path.dirname(os.path.abspath(tinyc.__file__))
+        with open(os.path.join(root, "packaging-manifest.json")) as f:
+            combos = {(c["host"], c["target"])
+                      for c in json.load(f)["combinations"]}
+        hosts = ("arm64-apple-darwin", "x86_64-apple-darwin")
+        if not all((h, h) in combos for h in hosts):
+            self.skipTest("current staging lacks both darwin combinations")
+        roots = set()
+        for h in hosts:
+            r = self.run_child(
+                {"TINYC_HOST_TRIPLE": h},
+                "import tinyc\n"
+                "r = tinyc.resolve_native()\n"
+                "print('RESOLVED', r['host'], r['target'], "
+                "r['root'], r['binary_path'])\n")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(
+                f"RESOLVED {h} {h} ".encode(), r.stdout)
+            self.assertIn(
+                f"natives/{h}/toolchain/{h}/tinyc".encode(), r.stdout)
+            line = [l for l in r.stdout.decode().splitlines()
+                    if l.startswith("RESOLVED")][0]
+            roots.add(line.split()[3])
+        self.assertEqual(len(roots), 1,
+                         "both darwin hosts must resolve from one tree")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

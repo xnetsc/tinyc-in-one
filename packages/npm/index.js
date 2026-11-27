@@ -40,7 +40,8 @@ class TinyCError extends Error {}
  * cross target, defaulting to the host), look the (host, target)
  * combination up in packaging-manifest.json, and locate the variant
  * under natives/. Roots are searched in order: $TINYC_DIST, the
- * platform subpackage @xnetx/tinyc-native-<host> (optional dependency),
+ * platform subpackage @xnetx/tinyc-native-<host> (optional dependency;
+ * on macOS the two hosts share @xnetx/tinyc-native-apple-darwin),
  * then this package itself (single-package mode). Hosts and targets
  * are 64-bit only: a 32-bit host throws instead of falling back to
  * some other platform's files.
@@ -85,11 +86,24 @@ function targetTriple() {
   return target;
 }
 
+/* Platform subpackage name for a host triple. The two macOS hosts
+ * share one subpackage, @xnetx/tinyc-native-apple-darwin (os darwin,
+ * cpu arm64+x64 - npm picks it for either arch); every other host
+ * has its own @xnetx/tinyc-native-<host-triple>. The old per-arch
+ * darwin subpackages (@xnetx/tinyc-native-arm64-apple-darwin and
+ * @xnetx/tinyc-native-x86_64-apple-darwin) are no longer published. */
+function subpackageName(host) {
+  if (host === 'arm64-apple-darwin' || host === 'x86_64-apple-darwin') {
+    return '@xnetx/tinyc-native-apple-darwin';
+  }
+  return `@xnetx/tinyc-native-${host}`;
+}
+
 function packageRoots() {
   const roots = [];
   if (process.env.TINYC_DIST) roots.push(process.env.TINYC_DIST);
   try {
-    const pkgJson = require.resolve(`@xnetx/tinyc-native-${hostTriple()}/package.json`);
+    const pkgJson = require.resolve(`${subpackageName(hostTriple())}/package.json`);
     roots.push(path.dirname(pkgJson));
   } catch { /* subpackage not installed: single-package mode */ }
   roots.push(__dirname);
@@ -135,7 +149,7 @@ function resolveNative() {
   if (!sawManifest) {
     throw new TinyCError(
       'tinyc: packaging-manifest.json not found; the native distribution is missing ' +
-      `(a registry install needs the platform subpackage @xnetx/tinyc-native-${host} ` +
+      `(a registry install needs the platform subpackage ${subpackageName(host)} ` +
       'installed alongside - it is an optional dependency, so do not disable optional ' +
       'dependencies; in a repository checkout, run bundle_native.js)');
   }

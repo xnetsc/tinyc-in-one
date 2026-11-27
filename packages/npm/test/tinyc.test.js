@@ -219,6 +219,44 @@ test('host: 32-bit host triple is rejected, no fallback', () => {
   assert.match(r.stdout, /ERR tinyc: 32-bit hosts are not supported \(host triple: i386-linux-gnu\)/);
 });
 
+test('host: both darwin hosts resolve through the single merged subpackage', () => {
+  // The merged subpackage tinyc-native-apple-darwin serves both
+  // macOS hosts: each simulated darwin host must resolve its native
+  // combination from the same subpackage root. The stand-in root is
+  // built here (manifest + placeholder binaries) and pointed at with
+  // TINYC_DIST; resolveNative only reads the manifest, so no real
+  // Mach-O binary is needed to prove the routing.
+  const d = tmpdir();
+  const sub = path.join(d, 'tinyc-native-apple-darwin');
+  for (const h of ['arm64-apple-darwin', 'x86_64-apple-darwin']) {
+    const binDir = path.join(sub, 'natives', h, 'toolchain', h);
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'tinyc'), '');
+    const sys = path.join(sub, 'sysroot', h);
+    fs.mkdirSync(path.join(sys, 'lib', 'tcc'), { recursive: true });
+  }
+  const combos = ['arm64-apple-darwin', 'x86_64-apple-darwin'].map((h) => ({
+    host: h, target: h,
+    binary: `natives/${h}/toolchain/${h}/tinyc`,
+    sysroot: `sysroot/${h}`,
+    libPath: `sysroot/${h}/lib/tcc`,
+    outputs: ['exe', 'obj', 'dll'],
+  }));
+  fs.writeFileSync(path.join(sub, 'packaging-manifest.json'), JSON.stringify({
+    hosts: ['arm64-apple-darwin', 'x86_64-apple-darwin'],
+    combinations: combos,
+    pending: [],
+  }, null, 2));
+  for (const h of ['arm64-apple-darwin', 'x86_64-apple-darwin']) {
+    const r = runChild(
+      { TINYC_HOST_TRIPLE: h, TINYC_DIST: sub }, RESOLVE_OR_ERR);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(
+      `RESOLVED ${h} x ${h} .*tinyc-native-apple-darwin` +
+      `/natives/${h}/toolchain/${h}/tinyc`));
+  }
+});
+
 test('target: TINYC_TARGET_TRIPLE selects the cross variant and compiles for it', (t) => {
   // Pick a cross target the package actually contains for its own
   // host (the set of staged targets follows the kernel matrix build).

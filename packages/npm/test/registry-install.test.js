@@ -12,8 +12,8 @@
  *
  * Simulated locally and offline: the main package is packed from a
  * staging-free copy; npm overrides redirect the current host's
- * subpackage to the locally bundled one, the other four subpackages
- * to stubs carrying their hosts' os/cpu (npm must skip those), and
+ * subpackage to the locally bundled one, the other three subpackages
+ * to stubs carrying their os/cpu (npm must skip those), and
  * koffi to the in-repo copy. The consumer project declares only the
  * main package, so the subpackage can only have arrived through
  * optionalDependencies.
@@ -30,15 +30,27 @@ const PKG_ROOT = path.join(__dirname, '..');
 const HOST = tcc.hostTriple();
 const SUB_PREFIX = '@xnetx/tinyc-native-';
 
-/* The npm host matrix (design doc 12.2/12.3): five hosts, one
- * subpackage each, told apart only by the subpackage os/cpu. */
-const HOST_OS_CPU = {
+/* The npm host matrix (design doc 12.2/12.3): five hosts, four
+ * subpackages, told apart only by the subpackage os/cpu. The two
+ * darwin hosts share one subpackage, @xnetx/tinyc-native-apple-darwin
+ * (os darwin, cpu arm64+x64); the old per-arch darwin subpackages
+ * are no longer published. */
+const HOST_SUBPACKAGE = {
+  'x86_64-linux-gnu': 'x86_64-linux-gnu',
+  'aarch64-linux-gnu': 'aarch64-linux-gnu',
+  'x86_64-w64-mingw32': 'x86_64-w64-mingw32',
+  'arm64-apple-darwin': 'apple-darwin',
+  'x86_64-apple-darwin': 'apple-darwin',
+};
+const SUBPACKAGE_OS_CPU = {
   'x86_64-linux-gnu': { os: ['linux'], cpu: ['x64'] },
   'aarch64-linux-gnu': { os: ['linux'], cpu: ['arm64'] },
   'x86_64-w64-mingw32': { os: ['win32'], cpu: ['x64'] },
-  'arm64-apple-darwin': { os: ['darwin'], cpu: ['arm64'] },
-  'x86_64-apple-darwin': { os: ['darwin'], cpu: ['x64'] },
+  'apple-darwin': { os: ['darwin'], cpu: ['arm64', 'x64'] },
 };
+/* Suffix of the subpackage serving this host (e.g. 'apple-darwin'
+ * on either macOS arch). */
+const HOST_SUB = HOST_SUBPACKAGE[HOST];
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts });
@@ -56,17 +68,19 @@ test('registry form: main package alone installs, its host subpackage auto-resol
   { timeout: 180000 }, () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8'));
 
-    // The declaration itself is part of the contract: every host in
-    // the matrix is an optional dependency, nothing more, nothing less.
+    // The declaration itself is part of the contract: every
+    // subpackage in the matrix is an optional dependency, nothing
+    // more, nothing less (four subpackages for five hosts: the two
+    // darwin hosts share one).
     const declared = Object.keys(pkg.optionalDependencies || {})
       .map((n) => n.replace(SUB_PREFIX, '')).sort();
-    assert.deepStrictEqual(declared, Object.keys(HOST_OS_CPU).sort(),
-      'optionalDependencies must declare exactly the five platform subpackages');
+    assert.deepStrictEqual(declared, Object.keys(SUBPACKAGE_OS_CPU).sort(),
+      'optionalDependencies must declare exactly the four platform subpackages');
     for (const v of Object.values(pkg.optionalDependencies)) {
       assert.strictEqual(v, pkg.version, 'subpackage versions track the main package version');
     }
 
-    const subDir = path.join(PKG_ROOT, 'native-packages', '@xnetx', `tinyc-native-${HOST}`);
+    const subDir = path.join(PKG_ROOT, 'native-packages', '@xnetx', `tinyc-native-${HOST_SUB}`);
     assert.ok(fs.existsSync(path.join(subDir, 'packaging-manifest.json')),
       `locally bundled subpackage missing for host ${HOST}; run node bundle_native.js first`);
     const koffiDir = path.join(PKG_ROOT, 'node_modules', 'koffi');
@@ -89,18 +103,19 @@ test('registry form: main package alone installs, its host subpackage auto-resol
 
       const subTgz = pack(subDir, tmp);
 
-      // Stubs for the other four hosts: name, version and that host's
-      // os/cpu, nothing else - npm must skip every one of them here.
+      // Stubs for the other three subpackages: name, version and
+      // that subpackage's os/cpu, nothing else - npm must skip every
+      // one of them here.
       const overrides = { koffi: `file:${koffiDir}` };
-      overrides[`${SUB_PREFIX}${HOST}`] = `file:${subTgz}`;
-      for (const [h, oc] of Object.entries(HOST_OS_CPU)) {
-        if (h === HOST) continue;
-        const stub = path.join(tmp, `stub-${h}`);
+      overrides[`${SUB_PREFIX}${HOST_SUB}`] = `file:${subTgz}`;
+      for (const [s, oc] of Object.entries(SUBPACKAGE_OS_CPU)) {
+        if (s === HOST_SUB) continue;
+        const stub = path.join(tmp, `stub-${s}`);
         fs.mkdirSync(stub);
         fs.writeFileSync(path.join(stub, 'package.json'), JSON.stringify({
-          name: `${SUB_PREFIX}${h}`, version: pkg.version, os: oc.os, cpu: oc.cpu,
+          name: `${SUB_PREFIX}${s}`, version: pkg.version, os: oc.os, cpu: oc.cpu,
         }));
-        overrides[`${SUB_PREFIX}${h}`] = `file:${stub}`;
+        overrides[`${SUB_PREFIX}${s}`] = `file:${stub}`;
       }
 
       const consumer = path.join(tmp, 'consumer');
@@ -117,7 +132,7 @@ test('registry form: main package alone installs, its host subpackage auto-resol
       // the staging-free registry form.
       const installedSubs = fs.readdirSync(path.join(consumer, 'node_modules', '@xnetx'))
         .filter((s) => s.startsWith('tinyc-native-'));
-      assert.deepStrictEqual(installedSubs, [`tinyc-native-${HOST}`],
+      assert.deepStrictEqual(installedSubs, [`tinyc-native-${HOST_SUB}`],
         'npm must install exactly the subpackage for this host');
       const installedMain = path.join(consumer, 'node_modules', '@xnetx', 'tinyc');
       assert.ok(!fs.existsSync(path.join(installedMain, 'packaging-manifest.json')));
@@ -133,7 +148,7 @@ test('registry form: main package alone installs, its host subpackage auto-resol
         const fs = require('fs'), os = require('os'), path = require('path');
         const { execFileSync } = require('child_process');
         const tinyc = require('@xnetx/tinyc');
-        const seg = '@xnetx' + path.sep + 'tinyc-native-${HOST}';
+        const seg = '@xnetx' + path.sep + 'tinyc-native-${HOST_SUB}';
         assert.ok(tinyc.distDir().includes(seg),
           'resolution must go through the subpackage, got ' + tinyc.distDir());
         const [vc, vout] = tinyc.runCliCapture(['--version']);

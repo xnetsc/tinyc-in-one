@@ -19,8 +19,7 @@
   ],
   "optionalDependencies": {
     "@xnetx/tinyc-native-aarch64-linux-gnu": "0.5.3",
-    "@xnetx/tinyc-native-arm64-apple-darwin": "0.5.3",
-    "@xnetx/tinyc-native-x86_64-apple-darwin": "0.5.3",
+    "@xnetx/tinyc-native-apple-darwin": "0.5.3",
     "@xnetx/tinyc-native-x86_64-linux-gnu": "0.5.3",
     "@xnetx/tinyc-native-x86_64-w64-mingw32": "0.5.3"
   },
