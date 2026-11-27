@@ -62,10 +62,15 @@ public final class Tinyc implements AutoCloseable {
 
     /**
      * 创建会话并绑定 AAR 内置的 toolchain / sysroot（见 TinycAssets）。
+     * 先加载该目标的 .so（一个进程只能加载一个目标，见
+     * {@link TinycNative#ensureLoaded(String)}），再建会话。
      * sysroot 的系统头与库路径在第一次编译动作前才注册到原生层，
      * 保证此前 addIncludePath 等用户路径排在 sysroot 之前（规格 5.2）。
      */
     public static Tinyc create(TinycAssets.Paths paths) {
+        if (paths != null) {
+            TinycNative.ensureLoaded(paths.triple);
+        }
         Tinyc t = create();
         t.useBundledPaths(paths);
         return t;
@@ -82,18 +87,29 @@ public final class Tinyc implements AutoCloseable {
     private void applySysrootIfNeeded() {
         if (bundledPaths != null && !sysrootApplied) {
             sysrootApplied = true;
-            TinycNative.nativeAddSysincludePath(state,
-                    new File(bundledPaths.sysrootDir, "include").getAbsolutePath());
+            File sysinclude = new File(bundledPaths.sysrootDir, "include");
+            if (sysinclude.isDirectory()) {
+                TinycNative.nativeAddSysincludePath(state, sysinclude.getAbsolutePath());
+            }
             // The bionic tree keeps the machine-specific headers
             // (asm/, machine/) under include/<triple>/, and the
             // top-level headers reach them as <asm/...>; without
             // this second path even #include <string.h> fails
             // (sys/types.h -> linux/types.h -> asm/types.h).
-            TinycNative.nativeAddSysincludePath(state,
-                    new File(new File(bundledPaths.sysrootDir, "include"),
-                            bundledPaths.triple).getAbsolutePath());
-            TinycNative.nativeAddLibraryPath(state,
-                    new File(bundledPaths.sysrootDir, "lib").getAbsolutePath());
+            // Only the android targets have that subdir; the other
+            // targets keep their headers flat under include/.
+            File tripleInclude = new File(sysinclude, bundledPaths.triple);
+            if (tripleInclude.isDirectory()) {
+                TinycNative.nativeAddSysincludePath(state, tripleInclude.getAbsolutePath());
+            }
+            // Only the targets with a sysroot lib dir (linux-gnu,
+            // android, win32) register a library path: darwin links
+            // the .tbd stubs from the toolchain's lib/, and wasm32
+            // needs no libc at all.
+            File syslib = new File(bundledPaths.sysrootDir, "lib");
+            if (syslib.isDirectory()) {
+                TinycNative.nativeAddLibraryPath(state, syslib.getAbsolutePath());
+            }
         }
     }
 

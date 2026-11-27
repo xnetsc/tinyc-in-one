@@ -11,6 +11,18 @@ android {
         minSdk 24
         targetSdk 35
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        // Clear the app data between tests (orchestrator runs each
+        // test in its own process).
+        testInstrumentationRunnerArguments clearPackageData: 'true'
+    }
+
+    // AndroidX Test Orchestrator: each test method runs in its own
+    // instrumentation process. Required by TinycCrossTargetTest:
+    // the JNI layer loads exactly one target's .so per process, so
+    // the seven cross-target tests must not share a process with
+    // each other or with the android-target tests.
+    testOptions {
+        execution 'ANDROIDX_TEST_ORCHESTRATOR'
     }
 }
 
@@ -21,4 +33,5 @@ dependencies {
     androidTestImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestUtil 'androidx.test:orchestrator:1.5.1'
 }

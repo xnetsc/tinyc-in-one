@@ -21,11 +21,51 @@ import java.io.OutputStream;
  * TinycAssets.Paths paths = TinycAssets.init(context);
  * try (Tinyc t = Tinyc.create(paths)) { ... }
  * }</pre>
+ *
+ * <p>默认按设备 ABI 选目标（当前设备能运行的那个 android
+ * triple）。要为别的目标编译，传目标 triple：</p>
+ * <pre>{@code
+ * TinycAssets.Paths paths = TinycAssets.init(context, "riscv64-linux-gnu");
+ * }</pre>
+ * <p>一个进程只能加载一个目标的 .so（JNI 方法按名解析，先生效者胜）：
+ * 首次加载后换目标会抛 IllegalStateException，见
+ * {@link TinycNative#ensureLoaded(String)}。</p>
  */
 public final class TinycAssets {
 
     /** assets 解压版本号。assets 内容变化时改这个值，旧目录不覆盖、并行保留。 */
-    public static final String ASSETS_VERSION = "2";
+    public static final String ASSETS_VERSION = "3";
+
+    /** AAR 内置的全部编译目标 triple（2 ABI x 9 目标共 18 份 .so）。 */
+    public static final String[] TARGET_TRIPLES = {
+        "x86_64-linux-gnu",
+        "aarch64-linux-gnu",
+        "riscv64-linux-gnu",
+        "x86_64-w64-mingw32",
+        "aarch64-linux-android",
+        "x86_64-linux-android",
+        "arm64-apple-darwin",
+        "x86_64-apple-darwin",
+        "wasm32-wasi",
+    };
+
+    /** 该 triple 是否为 AAR 内置的编译目标。 */
+    public static boolean isSupportedTarget(String triple) {
+        if (triple == null) {
+            return false;
+        }
+        for (String t : TARGET_TRIPLES) {
+            if (t.equals(triple)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 该目标的 .so 文件名：triple 里的 '-' 换成 '_'，以便 loadLibrary。 */
+    public static String soNameForTriple(String triple) {
+        return "libtinyc-" + triple.replace('-', '_') + ".so";
+    }
 
     private static final String ROOT_DIR_NAME = "tinyc";
 
@@ -78,7 +118,22 @@ public final class TinycAssets {
      * {@link Tinyc#runCli(String...)} 填 argv[0]，返回路径集合。
      */
     public static Paths init(Context context) throws IOException {
-        String triple = tripleForCurrentAbi();
+        return init(context, tripleForCurrentAbi());
+    }
+
+    /**
+     * 按目标初始化：把给定 triple 的 toolchain 与 sysroot 从 assets 解压到
+     * filesDir，加载该目标的 .so（见 {@link TinycNative#ensureLoaded(String)}），
+     * 记录双形态文件路径供 {@link Tinyc#runCli(String...)} 填 argv[0]。
+     * triple 不在 {@link #TARGET_TRIPLES} 里时抛 IllegalArgumentException。
+     * 一个进程只能选一个目标：首次加载后换目标抛 IllegalStateException。
+     */
+    public static Paths init(Context context, String targetTriple) throws IOException {
+        if (!isSupportedTarget(targetTriple)) {
+            throw new IllegalArgumentException(
+                    "unsupported target triple: " + targetTriple);
+        }
+        String triple = targetTriple;
         File base = new File(context.getFilesDir(), ROOT_DIR_NAME);
         File root = new File(new File(base, ASSETS_VERSION), triple);
         File toolchainDir = new File(root, "toolchain");
@@ -97,8 +152,9 @@ public final class TinycAssets {
 
         String nativeDir = context.getApplicationInfo().nativeLibraryDir;
         if (nativeDir != null) {
-            Tinyc.setKernelPath(new File(nativeDir, "libtinyc.so").getAbsolutePath());
+            Tinyc.setKernelPath(new File(nativeDir, soNameForTriple(triple)).getAbsolutePath());
         }
+        TinycNative.ensureLoaded(triple);
         return new Paths(root, triple, toolchainDir, sysrootDir);
     }
 

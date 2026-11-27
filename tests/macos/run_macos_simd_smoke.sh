@@ -3,7 +3,7 @@
 # natively, outputs diffed against the system clang).
 #
 # The compiler under test is the shipped macOS kernel,
-# mac-test-bundle/dist/bin/tinyc, built by the bundle step of
+# mac-test-bundle/dist/<native-triple>/bin/tinyc, built by the bundle step of
 # the macOS job from the repo's vendor tree.  Probes compile
 # against the dist's own lib/tcc/include - the header set the
 # packages ship.
@@ -27,7 +27,14 @@
 set -u
 cd "$(dirname "$0")"
 ROOT=../..
-DIST=$ROOT/mac-test-bundle/dist
+# build-mac.sh now lands one dist per target at
+# mac-test-bundle/dist/<triple>/; the smoke tests the native
+# triple's dist by default, TINYC_MAC_DIST overrides it.
+case $(uname -m) in
+    arm64) NATIVE_TRIPLE=arm64-apple-darwin ;;
+    x86_64) NATIVE_TRIPLE=x86_64-apple-darwin ;;
+esac
+DIST=${TINYC_MAC_DIST:-$ROOT/mac-test-bundle/dist/$NATIVE_TRIPLE}
 TCC=$DIST/bin/tinyc
 TCCLIB=$DIST/lib/tcc
 WORK=$(mktemp -d)

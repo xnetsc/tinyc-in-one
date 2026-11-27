@@ -8,7 +8,19 @@
 
 cd "$(dirname "$0")" || exit 99
 BUNDLE=$PWD
-DIST=$BUNDLE/dist
+# build-mac.sh now lands one dist per target at dist/<triple>/.
+# The suite tests the native triple's dist by default (the one
+# that runs and -runs on this Mac); TINYC_MAC_DIST points it at
+# another triple's dist, and TINYC_MAC_DYLIB at that triple's
+# reference dylib. -run and the dlopen checks only make sense for
+# the native triple, so the CI runs the suite against the native
+# dist.
+case $(uname -m) in
+    arm64) NATIVE_TRIPLE=arm64-apple-darwin ;;
+    x86_64) NATIVE_TRIPLE=x86_64-apple-darwin ;;
+esac
+DIST=${TINYC_MAC_DIST:-$BUNDLE/dist/$NATIVE_TRIPLE}
+DYLIB_REF=${TINYC_MAC_DYLIB:-$BUNDLE/build/$NATIVE_TRIPLE/libtinyc.dylib}
 DUAL=$DIST/bin/tinyc
 TCCLIB=$DIST/lib/tcc
 WORK=$BUNDLE/build/test-work
@@ -73,7 +85,7 @@ if [ -x "$BUNDLE/build/extract_dylib" ] && [ -x "$DUAL" ]; then
                 ok "extracted file is a Mach-O dylib";;
             *) bad "extracted file is not a dylib: $(file "$DYLIB_CACHE")";;
         esac
-        if cmp -s "$DYLIB_CACHE" "$BUNDLE/build/libtinyc.dylib"; then
+        if cmp -s "$DYLIB_CACHE" "$DYLIB_REF"; then
             ok "embedded segment is byte-identical to the built dylib"
         else
             bad "embedded segment differs from the built dylib"

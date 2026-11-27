@@ -13,10 +13,12 @@
 /packages/java/dist/
 /packages/android/local.properties
 # Staged by packages/android/build.sh native-libs (NDK build outputs).
-/packages/android/src/main/jniLibs/*/libtinyc.so
+/packages/android/src/main/jniLibs/*/libtinyc*.so
 /packages/android/src/main/assets/toolchain/*/include/*.h
 /packages/android/src/main/assets/toolchain/*/lib/*.a
 /packages/android/src/main/assets/toolchain/*/lib/*.o
+/packages/android/src/main/assets/toolchain/*/lib/*.tbd
+/packages/android/src/main/assets/toolchain/*/win32/**
 # Staged by packages/android/build.sh native-libs from the
 # top-level build's android dists (bionic sysroot).
 /packages/android/src/main/assets/sysroot/*/include/**

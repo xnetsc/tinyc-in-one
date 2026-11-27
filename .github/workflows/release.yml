@@ -304,7 +304,12 @@ jobs:
         run: |
           cd packages/android
           bash build.sh native-libs > ../../test-outputs/android-native-libs.log 2>&1
-          file src/main/jniLibs/arm64-v8a/libtinyc.so src/main/jniLibs/x86_64/libtinyc.so
+          # The AAR carries one libtinyc-<target>.so per (device ABI,
+          # compile target): 2 ABIs x 9 targets = 18 files. Check the
+          # count, not just the names.
+          count=$(find src/main/jniLibs -name 'libtinyc-*.so' | wc -l)
+          file src/main/jniLibs/*/*.so
+          [ "$count" -eq 18 ] || { echo "expected 18 libtinyc .so files, got $count"; exit 1; }
           JAVA_HOME=$JAVA_HOME_17 bash build.sh > ../../test-outputs/android-aar.log 2>&1
           ls -la build/outputs/aar/
 
@@ -528,16 +533,21 @@ jobs:
           install: make python file mingw-w64-x86_64-gcc
 
       # The MinGW recipe is the same one verified by cross-building on
-      # Linux (build.sh host x86_64-w64-mingw32); here the C compiler
-      # is the runner's native MinGW gcc.
+      # Linux (build.sh host-win); here the C compiler is the
+      # runner's native MinGW gcc.
       - name: Build the Windows dual-form EXE (native MinGW)
         shell: msys2 {0}
         run: |
           mkdir -p test-outputs
           export PATH=/mingw64/bin:$PATH
           export TINYC_MINGW_CC=gcc
-          bash build.sh host x86_64-w64-mingw32 > test-outputs/build-host.log 2>&1
-          file build/dist-host/x86_64-w64-mingw32/bin/tinyc.exe
+          bash build.sh host-win > test-outputs/build-host.log 2>&1
+          for t in x86_64-linux-gnu aarch64-linux-gnu riscv64-linux-gnu \
+                   x86_64-linux-android aarch64-linux-android \
+                   x86_64-w64-mingw32 \
+                   arm64-apple-darwin x86_64-apple-darwin wasm32-wasi; do
+            file build/dist-host/$t/bin/tinyc.exe
+          done
 
       # Body-level smoke first: the EXE as a plain CLI. If this
       # passes and the LoadLibrary diagnostic below fails, the fault
@@ -571,6 +581,17 @@ jobs:
           cp tinyc_init.markers "$(dirname "$LOG")/" 2>/dev/null || true
           echo "win_host_test exit code: $RC" >> "$LOG"
           exit $RC
+
+      # Cross-target evidence for the Windows host build: each of
+      # the 8 non-native dists compiles a hello for its own target
+      # and the output format magic is checked per family (ELF
+      # e_machine for the linux/android targets, Mach-O magic for
+      # the darwin targets, the wasm magic for wasm32).
+      - name: Cross-target compile smoke (PE host, 8 targets)
+        shell: msys2 {0}
+        run: |
+          export PATH=/mingw64/bin:$PATH
+          bash tests/windows/run_windows_cross_smoke.sh > test-outputs/win-cross-smoke.log 2>&1
 
       # SIMD execution evidence on this platform: the script
       # compiles the x86-64-v3 smoke probes (cases extracted
@@ -673,7 +694,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Compress-Archive -Path build/dist-host/x86_64-w64-mingw32/* `
+          # The whole dist-host tree (all 9 per-triple dists), so the
+          # zip gains a <triple>/ top-level segment; the release job
+          # adjusts its extraction by that one segment.
+          Compress-Archive -Path build/dist-host/* `
             -DestinationPath release-assets/tinyc-x86_64-w64-mingw32.zip
           Copy-Item packages/npm/xnetx-tinyc-[0-9]*.tgz release-assets/tinyc-npm-x86_64-w64-mingw32.tgz
           Copy-Item packages/npm/native-packages/@xnetx/tinyc-native-x86_64-w64-mingw32/*.tgz release-assets/
@@ -732,7 +756,7 @@ jobs:
         run: |
           mkdir -p test-outputs
           bash mac-test-bundle/build-mac.sh > test-outputs/mac-build.log 2>&1
-          test -x mac-test-bundle/dist/bin/tinyc
+          test -x mac-test-bundle/dist/${{ matrix.triple }}/bin/tinyc
 
       # The bundle's full suite is the regression gate: any FAIL
       # line fails the job. The suite's expectations encode the
@@ -742,6 +766,8 @@ jobs:
       # behavior deviated from the recorded facts in either
       # direction.
       - name: Run the macOS bundle test suite (regression)
+        env:
+          TINYC_MAC_DIST: ${{ github.workspace }}/mac-test-bundle/dist/${{ matrix.triple }}
         run: |
           bash mac-test-bundle/run-tests.sh > test-outputs/mac-tests.log 2>&1 || true
           cat test-outputs/mac-build.log test-outputs/mac-tests.log > test-outputs/result.log
@@ -756,6 +782,8 @@ jobs:
       # reference. A failure fails the job; the log lands in
       # test-outputs with the rest.
       - name: SDK-free battery (bundled Darwin headers)
+        env:
+          TINYC_MAC_DIST: ${{ github.workspace }}/mac-test-bundle/dist/${{ matrix.triple }}
         run: |
           bash tests/macos/run_macos_sdkfree.sh > test-outputs/mac-sdkfree.log 2>&1
 
@@ -765,51 +793,27 @@ jobs:
       # NEON probe files on arm64, the x86-64-v3 smoke source
       # on x86_64.
       - name: SIMD native smoke (Mach-O)
+        env:
+          TINYC_MAC_DIST: ${{ github.workspace }}/mac-test-bundle/dist/${{ matrix.triple }}
         run: |
           bash tests/macos/run_macos_simd_smoke.sh > test-outputs/mac-simd-smoke.log 2>&1
 
+      # Stage all 9 per-triple dists (build-mac.sh now builds every
+      # target and writes each dist's own manifest.json). The
+      # npm/python/java steps below read TINYC_DIST_DIR=stage-dist
+      # and only use the host triple's subdir, so the extra 8
+      # subdirs are invisible to them; the cross dists reach the
+      # release job through the whole-dist tarball.
       - name: Stage the packaging dist from the bundle build
         run: |
-          TRIPLE=${{ matrix.triple }}
-          SD=$PWD/stage-dist/$TRIPLE
-          mkdir -p "$SD/bin" "$SD/lib/tcc" "$SD/include"
-          cp mac-test-bundle/dist/bin/tinyc "$SD/bin/tinyc"
-          cp mac-test-bundle/dist/lib/tcc/libtcc1.a "$SD/lib/tcc/"
-          # The libtcc support objects (runmain.o for -run, the
-          # bcheck/backtrace objects) sit next to libtcc1.a in the
-          # bundle dist, as in the Linux layout; stage them too.
-          cp mac-test-bundle/dist/lib/tcc/*.o "$SD/lib/tcc/"
-          cp -r mac-test-bundle/dist/lib/tcc/include "$SD/lib/tcc/include"
-          # The bundled Darwin headers and the .tbd link stubs are
-          # part of the bundle dist too (darwin-dist.py staged
-          # them); the packages below are built from stage-dist,
-          # so stage them here as well.
-          cp -r mac-test-bundle/dist/lib/tcc/include-libc "$SD/lib/tcc/include-libc"
-          mkdir -p "$SD/lib/tcc/lib"
-          cp mac-test-bundle/dist/lib/tcc/lib/*.tbd "$SD/lib/tcc/lib/"
-          cp mac-test-bundle/dist/include/libtcc.h "$SD/include/"
-          cp core/tinyc_io.h "$SD/include/"
-          python3 - "$SD/manifest.json" "$TRIPLE" '${{ matrix.isa }}' <<'EOF'
-          import json, sys
-          path, triple, isa = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
-          outputs = {
-              "exe":    {"format": "Mach-O executable", "ext": ""},
-              "obj":    {"format": "Mach-O object", "ext": ".o"},
-              "shared": {"format": "Mach-O dylib", "ext": ".dylib"},
-              "ar":     {"format": "ar archive", "ext": ".a"},
-          }
-          manifest = {
-              "name": "tinyc", "version": "0.9.28rc", "target": triple,
-              "isa": isa, "outputs": outputs, "dual_file": "bin/tinyc",
-              "toolchain_include": "include",
-              "libtcc1": "lib/tcc/libtcc1.a",
-              "libc": "Darwin libc headers bundled (vendor-darwin, self-written); programs link the system libSystem.B.dylib dynamically",
-              "libc_headers": "lib/tcc/include-libc",
-              "libc_lib": "lib/tcc/lib",
-          }
-          with open(path, "w") as f:
-              json.dump(manifest, f, indent=2)
-          EOF
+          rm -rf stage-dist && mkdir -p stage-dist
+          for d in mac-test-bundle/dist/*/; do
+            triple=$(basename "$d")
+            cp -r "$d" "stage-dist/$triple"
+            test -f "stage-dist/$triple/manifest.json" || {
+              echo "missing manifest.json for $triple"; exit 1; }
+          done
+          ls stage-dist/
 
       - name: npm package - bundle, pack, consumer test on the tarballs
         env:
@@ -941,6 +945,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
       - name: Install Python build tooling
         run: pip install setuptools wheel
       - name: Download all job artifacts
@@ -954,6 +962,54 @@ jobs:
             -exec cp {} release-files/ \;
           (cd all-artifacts && zip -qr "$GITHUB_WORKSPACE/release-files/test-outputs.zip" \
             . -i '*test-outputs*/*')
+          ls -la release-files/
+
+      # The three package merges are assembled here, from every
+      # host's dist: the Java fat jar (one jar for all 5 hosts),
+      # the merged darwin npm subpackage, and the universal2 wheel.
+      # The per-host artifacts collected above are replaced by the
+      # merged ones in release-files/. Dist order follows the
+      # stage_layout rule: cross dists first, host-variant dists
+      # after.
+      - name: Assemble the merged packages (fat jar, merged npm subpackage, universal2 wheel)
+        run: |
+          mkdir -p merged-dists/linux merged-dists/linux-aarch64 \
+            merged-dists/win-mingw/x86_64-w64-mingw32 merged-dists/win \
+            merged-dists/mac-arm64 merged-dists/mac-x86_64
+          tar -xzf release-files/tinyc-x86_64-linux-gnu.tar.gz -C merged-dists/linux
+          tar -xzf release-files/tinyc-aarch64-linux-gnu-cross.tar.gz -C merged-dists/linux-aarch64
+          unzip -q release-files/tinyc-x86_64-w64-mingw32-cross.zip -d merged-dists/win-mingw/x86_64-w64-mingw32
+          unzip -q release-files/tinyc-x86_64-w64-mingw32.zip -d merged-dists/win
+          tar -xzf release-files/tinyc-arm64-apple-darwin.tar.gz -C merged-dists/mac-arm64
+          tar -xzf release-files/tinyc-x86_64-apple-darwin.tar.gz -C merged-dists/mac-x86_64
+          export TINYC_DIST_DIRS="$PWD/merged-dists/linux $PWD/merged-dists/linux-aarch64 $PWD/merged-dists/win-mingw $PWD/merged-dists/win $PWD/merged-dists/mac-arm64 $PWD/merged-dists/mac-x86_64"
+          # Java fat jar: all 5 hosts staged once, one jar out;
+          # the build itself fails if a host is missing, and the
+          # manifest must carry 5 hosts x 9 targets = 45 combos.
+          bash packages/java/build.sh --fat
+          bash packages/java/run-tests.sh
+          unzip -p packages/java/dist/tinyc.jar packaging-manifest.json | python3 -c "
+          import json, sys
+          m = json.load(sys.stdin)
+          hosts = sorted({c['host'] for c in m['combinations']})
+          n = len(m['combinations'])
+          print(f'fat jar: hosts {hosts}, {n} combinations')
+          assert hosts == ['aarch64-linux-gnu', 'arm64-apple-darwin', 'x86_64-apple-darwin', 'x86_64-linux-gnu', 'x86_64-w64-mingw32'], hosts
+          assert n == 45, f'expected 45 combinations, got {n}'
+          "
+          rm -f release-files/tinyc-*.jar
+          cp packages/java/dist/tinyc.jar release-files/tinyc.jar
+          # Merged darwin npm subpackage.
+          (cd packages/npm && node bundle_native.js --merge-darwin)
+          (cd packages/npm/native-packages/@xnetx/tinyc-native-apple-darwin && npm pack --silent)
+          rm -f release-files/xnetx-tinyc-native-arm64-apple-darwin-*.tgz release-files/xnetx-tinyc-native-x86_64-apple-darwin-*.tgz
+          cp packages/npm/native-packages/@xnetx/tinyc-native-apple-darwin/*.tgz release-files/
+          # Universal2 wheel: the matrix script builds it when both
+          # darwin dists are reachable; the two single-arch mac
+          # wheels are replaced by it.
+          bash packages/python/build_wheel_matrix.sh
+          rm -f release-files/*macosx_11_0_arm64*.whl release-files/*macosx_10_9_x86_64*.whl
+          cp packages/python/dist-wheels/*macosx_11_0_universal2*.whl release-files/
           ls -la release-files/
 
       # The tinyc_web wheel (the Pyodide package) is built here,
@@ -984,7 +1040,9 @@ jobs:
           for t in arm64-apple-darwin x86_64-apple-darwin; do
             mkdir -p "wheel-build/libtcc1/$t" "wheel-build/dist-$t"
             tar -xzf "release-files/tinyc-$t.tar.gz" -C "wheel-build/dist-$t"
-            cp "wheel-build/dist-$t/lib/tcc/libtcc1.a" "wheel-build/libtcc1/$t/"
+            # The mac tarball now carries the whole per-triple dist
+            # tree, so libtcc1.a sits one <triple>/ segment deeper.
+            cp "wheel-build/dist-$t/$t/lib/tcc/libtcc1.a" "wheel-build/libtcc1/$t/"
           done
           mkdir -p wheel-build/libtcc1/wasm32-wasi
           cp all-artifacts/pyodide-wheel-inputs/wasm32-wasi/libtcc1.a \
@@ -1037,8 +1095,8 @@ jobs:
           unzip -q release-files/tinyc-web.zip -d darwin-envelopes/web
           node packages/browser/build-sysroot-envelopes.mjs \
             --target arm64-apple-darwin --target x86_64-apple-darwin \
-            --lib arm64-apple-darwin="$PWD/darwin-envelopes/dist-arm64/lib/tcc/libtcc1.a" \
-            --lib x86_64-apple-darwin="$PWD/darwin-envelopes/dist-x86_64/lib/tcc/libtcc1.a" \
+            --lib arm64-apple-darwin="$PWD/darwin-envelopes/dist-arm64/arm64-apple-darwin/lib/tcc/libtcc1.a" \
+            --lib x86_64-apple-darwin="$PWD/darwin-envelopes/dist-x86_64/x86_64-apple-darwin/lib/tcc/libtcc1.a" \
             --require-libs
           cp packages/browser/sysroot/sysroot-arm64-apple-darwin.tinyc.js \
              packages/browser/sysroot/sysroot-x86_64-apple-darwin.tinyc.js \
@@ -1077,9 +1135,11 @@ jobs:
           tar -xzf release-files/tinyc-x86_64-linux-gnu.tar.gz \
             -C catalog-build/native
           for t in arm64-apple-darwin x86_64-apple-darwin; do
-            mkdir -p "catalog-build/native/$t"
+            # The mac tarball carries the whole per-triple dist
+            # tree, so extracting into catalog-build/native lands
+            # the <triple>/ subdir at the right level.
             tar -xzf "release-files/tinyc-$t.tar.gz" \
-              -C "catalog-build/native/$t"
+              -C catalog-build/native
           done
           VER=$(python3 -c "import json; print(json.load(open('packages/npm/package.json'))['version'])")
           python3 tools/gen_header_catalog.py \

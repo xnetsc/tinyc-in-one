@@ -20,8 +20,8 @@ android {
         minSdk 24
         targetSdk 35
 
-        // The native kernel is a prebuilt dual-form file placed in
-        // src/main/jniLibs/<abi>/libtinyc.so by the kernel build
+        // The native kernel is a set of prebuilt dual-form files placed in
+        // src/main/jniLibs/<abi>/libtinyc-<target>.so by the kernel build
         // (see src/main/jni/CMakeLists.txt for how it is produced).
         // No externalNativeBuild here on purpose: the JNI glue in
         // src/main/jni/ is compiled INTO that file, not into a

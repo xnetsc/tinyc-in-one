@@ -17,7 +17,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * 设备侧测试：需要真机或模拟器（./gradlew connectedAndroidTest），
- * 且 jniLibs 里要有真实的 libtinyc.so。本机（CI 无设备）不运行。
+ * 且 jniLibs 里要有真实的 libtinyc-&lt;target&gt;.so。本机（CI 无设备）不运行。
  */
 @RunWith(AndroidJUnit4.class)
 public class TinycInstrumentedTest {

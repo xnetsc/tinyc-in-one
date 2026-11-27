@@ -13,8 +13,8 @@
 #      includes an SDK-only header with the packaged tinyc -
 #      must fail; if it compiles, SDK headers are leaking into
 #      the packaged compiler's search paths and the run is void.
-#   3. Packaged: the packaged tinyc (mac-test-bundle/dist) with
-#      its baked-in package paths compiles and runs the battery
+#   3. Packaged: the packaged tinyc (mac-test-bundle/dist/<native
+#      triple>) with its baked-in package paths compiles and runs the battery
 #      (functional sections) and the probe (ABI values).  The
 #      probe output must diff empty against the reference, INFO
 #      lines (deliberately oversized setjmp buffers) excluded.
@@ -38,7 +38,14 @@
 cd "$(dirname "$0")" || exit 99
 HERE=$PWD
 ROOT=$(cd "$HERE/../.." && pwd)
-DIST="$ROOT/mac-test-bundle/dist"
+# build-mac.sh now lands one dist per target at
+# mac-test-bundle/dist/<triple>/; the battery tests the native
+# triple's dist by default, TINYC_MAC_DIST overrides it.
+case $(uname -m) in
+    arm64) NATIVE_TRIPLE=arm64-apple-darwin ;;
+    x86_64) NATIVE_TRIPLE=x86_64-apple-darwin ;;
+esac
+DIST="${TINYC_MAC_DIST:-$ROOT/mac-test-bundle/dist/$NATIVE_TRIPLE}"
 TINYC="$DIST/bin/tinyc"
 WORK=$(mktemp -d /tmp/tinyc-sdkfree.XXXXXX)
 FAILS=0

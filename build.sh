@@ -48,6 +48,23 @@
 # with the same internal layout as build/dist plus a manifest that
 # records host, target (== host) and how the build was produced.
 #
+# A Windows host that targets every triple (not just its own) is
+# built with the "host-win" subcommand:
+#
+#   ./build.sh host-win [target-triple ...]
+#
+# One PE dual-form compiler per target, all with host
+# x86_64-w64-mingw32: the native win32 triple reuses build_host_mingw,
+# every other triple uses build_host_mingw_for with the target defines
+# and baked search paths of the Linux dist for that target family.
+# The dists land in build/dist-host/<triple>/ with the same internal
+# layout as build/dist/<triple>/, plus bin/ companions so the .exe
+# also works when run directly. The MinGW C compiler is
+# TINYC_MINGW_CC (default x86_64-w64-mingw32-gcc); the cross make
+# that produces libtcc1.a and tccdefs_.h runs with the machine's own
+# compiler (configure's ambient CC), so the cross compiler it builds
+# is a binary that runs on the build machine.
+#
 # Each triple lands in build/dist/<triple>/ with the layout:
 #   bin/tinyc            dual-form file (executable + dlopen-able)
 #   include/             libtcc.h, tinyc_io.h
@@ -666,6 +683,237 @@ EOF
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }
 
+# build_host_mingw_for <triple> <cross-name> <target-def> <isa> [extra -D flags...]
+# A Windows-host dual-form PE compiler for one target triple: the
+# dual-form file is a PE .exe, so it runs on Windows, but the
+# compiler inside targets $TRIPLE. Same recipe as build_host_mingw
+# (the native win32 variant, which stays the single source for
+# x86_64-w64-mingw32), with the target defines and baked search
+# paths of the Linux dist for that target family:
+#   linux-gnu  gnu_defs (cross form) + CONFIG_SYSROOT
+#   android    the four CONFIG_TCC_* paths of the main dispatch
+#   darwin     the three CONFIG_TCC_* paths of build_darwin
+#   wasm32     the three CONFIG_TCC_* paths of build_wasm32
+# Only the C compiler is Windows-specific: MinGW gcc, native on the
+# Windows runner or the x86_64-w64-mingw32 cross compiler on Linux
+# (TINYC_MINGW_CC). The PE file is statically linked; the .exe
+# needs no DLL beyond the system ones. The cross make that produces
+# libtcc1.a and tccdefs_.h runs with the machine's own compiler
+# (configure's ambient CC), so the cross compiler it builds is a
+# binary that runs on the build machine - the MinGW compiler is
+# used only for the PE unity compile. One deliberate divergence
+# from build_host_mingw: the .def export list is filtered to the
+# symbols the compiled objects actually define, because a cross
+# compiler does not define the -run support (see the note at the
+# PE compile step below).
+#
+# The dist lands in build/dist-host/<triple>/ with the same
+# internal layout as build/dist/<triple>/ (bin/tinyc.exe,
+# include/, lib/tcc/...), plus bin/ companions (bin/lib,
+# bin/include, and the family's include-libc/libc/lib trees) so
+# the .exe also works when run directly: the baked paths are
+# package-relative ({B}/...), and {B} is the directory holding
+# the .exe.
+#
+# One cross-target link-time condition, identical on every host:
+# linking a hosted executable for a linux-gnu target needs the
+# target's runtime libc (libc.so.6) findable through the baked
+# lib paths - on Linux that is the cross sysroot's lib directory,
+# which Windows does not have. On the Windows host, the three
+# linux-gnu targets compile to object and link freestanding
+# programs; linking a hosted linux-gnu executable needs a sysroot
+# that supplies libc.so.6. The darwin targets link against the
+# bundled .tbd stubs, the android targets against the bundled
+# bionic stubs, wasm32 needs no libc, and the win32 target links
+# against msvcrt.dll - those six link fully on Windows.
+build_host_mingw_for() {
+    local TRIPLE=$1 CT=$2 TDEF=$3 ISA=$4
+    shift 4
+    local DEFS=("$@")
+    local CC=${TINYC_MINGW_CC:-x86_64-w64-mingw32-gcc}
+    local DIST=$ROOT/build/dist-host/$TRIPLE
+    local SRC=$ROOT/build/work-host/$TRIPLE/src
+    local XTCC LIBTCC1_LINE COMP
+
+    echo "===== host-win $TRIPLE (C compiler: $CC) ====="
+    rm -rf "$ROOT/build/work-host/$TRIPLE" "$DIST"
+    mkdir -p "$SRC" "$DIST/bin" "$DIST/include" \
+        "$DIST/lib/tcc/include" "$DIST/lib/tcc/lib"
+
+    # Fresh source tree, same preparation as build_host_mingw.
+    tar cf - --exclude=.git --exclude='*.o' --exclude='./tcc' \
+        --exclude='./libtcc.a' --exclude='./libtcc1.a' \
+        --exclude='./*-libtcc1.a' --exclude='./*-tcc' \
+        --exclude='./c2str.exe' --exclude='./config.h' \
+        --exclude='./config.mak' --exclude='./tccdefs_.h' \
+        -C vendor-tinycc . | tar xf - --no-same-owner -C "$SRC"
+    cp "$ROOT/core/tinyc_io.h" "$ROOT/core/tcc_io.c" "$SRC/"
+    python3 "$ROOT/patches/apply_patches.py" "$SRC" >/dev/null
+
+    (cd "$SRC" && ./configure --prefix="$DIST" >/dev/null)
+    # Windows builds resolve the tcc dir from the exe location at
+    # runtime, so config.h must not define CONFIG_TCCDIR. A configure
+    # run on a Linux host bakes one in (the --prefix path); strip it.
+    # A configure run on a Windows host defines none (upstream marks
+    # the tcc dir auto-resolved there). Either way the end state is
+    # asserted, not the edit.
+    python3 - "$SRC/config.h" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+t = open(p).read()
+t2 = re.sub(r'#ifndef CONFIG_TCCDIR\n#define CONFIG_TCCDIR "[^"]*"\n#endif\n', '', t)
+assert '#define CONFIG_TCCDIR' not in t2, "CONFIG_TCCDIR still defined in config.h"
+open(p, 'w').write(t2)
+PYEOF
+
+    # Target runtime library and entry object, and the target's
+    # sysroot. wasm32 has no libtcc1.a: its helpers are host
+    # imports, so there is nothing to build or stage.
+    case $TRIPLE in
+        wasm32-wasi)
+            cp "$ROOT/wasm-backend/src/wasm-gen.c" \
+               "$ROOT/wasm-backend/src/wasm-link.c" \
+               "$ROOT/wasm-backend/src/wasm-int.h" "$SRC/"
+            python3 "$ROOT/wasm-backend/patches/apply-patches.py" "$SRC" >/dev/null
+            grep -q 'TCC_TARGET_C67)' "$SRC/config.h"
+            sed -i 's/|| TCC_TARGET_C67)/|| TCC_TARGET_C67 || TCC_TARGET_WASM32)/' \
+                "$SRC/config.h"
+            grep -q 'TCC_TARGET_WASM32' "$SRC/config.h"
+            # Only the generated header the dual-form compile needs:
+            # a native make is not an option on this host (on a
+            # Windows-configured tree it dies linking libtcc.dll).
+            (cd "$SRC" && make tccdefs_.h >/dev/null)
+            cp "$ROOT"/wasm-backend/include/*.h "$DIST/lib/tcc/include/"
+            ;;
+        *-linux-gnu)
+            add_glibc_to_dist "$DIST" "$TRIPLE"
+            ;;
+        *-linux-android)
+            add_android_to_dist "$DIST" "$TRIPLE"
+            ;;
+        *-apple-darwin)
+            python3 "$ROOT/mac-test-bundle/darwin-dist.py" stage \
+                "$ROOT/vendor-darwin" "$DIST"
+            ;;
+    esac
+    case $TRIPLE in
+        wasm32-wasi) : ;;
+        *)
+            # Only the cross target is built. A full make is not an
+            # option: on a Windows-configured tree it also links
+            # libtcc.dll from $(LIBTCC_OBJ), which includes tcc_io.o,
+            # whose tinyc_main_io references tinyc_main - a symbol
+            # that lives in tcc.c, outside libtcc. ELF shared
+            # libraries tolerate the undefined symbol (the final
+            # dual-form link resolves it); PE DLLs do not, so the
+            # full make dies on a Windows host. No libtcc.dll is
+            # ever shipped: the dual-form exe is the product.
+            (cd "$SRC" && make "cross-$CT" >/dev/null)
+            # runmain.o is the support object tcc_run loads for its
+            # entry shim. lib/Makefile builds it only in a native
+            # lib build, so the cross target above does not produce
+            # it. Build it here with the cross compiler, with the
+            # flags of lib/Makefile's own rule for it (the include
+            # dirs), and ship it next to libtcc1.a.
+            XTCC="$SRC/$CT-tcc"
+            [ -x "$XTCC" ] || XTCC="$SRC/$CT-tcc.exe"
+            "$XTCC" -B"$SRC" -I"$SRC/include" -I"$SRC" \
+                -c "$SRC/lib/runmain.c" -o "$SRC/runmain.o"
+            cp "$SRC/$CT-libtcc1.a" "$DIST/lib/tcc/lib/libtcc1.a"
+            cp "$SRC/runmain.o" "$DIST/lib/tcc/lib/"
+            ;;
+    esac
+
+    # TCC builtin headers and libtcc.h.
+    cp "$SRC"/include/*.h "$SRC/tcclib.h" "$DIST/lib/tcc/include/"
+    cp "$SRC/libtcc.h" "$DIST/include/"
+    cp "$ROOT/core/tinyc_io.h" "$DIST/include/"
+
+    # The dual-form PE compiler itself. The export list is derived
+    # from libtcc.h, but a cross compiler does not define the -run
+    # support: tccrun.c is compiled only for a native compiler (the
+    # target's code cannot run on the host CPU), so tcc_run (except
+    # the wasm32 stub), tcc_relocate, _tcc_setjmp and
+    # tcc_set_backtrace_func are undefined here. The ELF cross dists
+    # ship the same way - their dual-form files simply lack those
+    # symbols - but a PE link fails on an undefined export, so the
+    # .def is filtered to the symbols the compiled objects actually
+    # define. (The native win32 recipe needs no filter: every
+    # exported name is defined there.)
+    python3 "$ROOT/tools/gen_windows_def.py" "$SRC/libtcc.h" "$SRC/tinyc.def"
+    "$CC" -O2 -c "$SRC/tcc.c" -I"$SRC" -I"$ROOT/core" \
+        $TDEF "${DEFS[@]}" -o "$SRC/tcc.o"
+    "$CC" -O2 -c "$SRC/tcc_io.c" -I"$SRC" -I"$ROOT/core" \
+        $TDEF "${DEFS[@]}" -o "$SRC/tcc_io.o"
+    "$CC" -O2 -c "$ROOT/core/tinyc_win.c" -I"$SRC" -I"$ROOT/core" \
+        $TDEF "${DEFS[@]}" -o "$SRC/tinyc_win.o"
+    NM=${TINYC_MINGW_NM:-${CC%gcc}nm}
+    "$NM" --defined-only "$SRC/tcc.o" "$SRC/tcc_io.o" "$SRC/tinyc_win.o" \
+        | python3 -c 'import sys; print("\n".join(sorted({l.split()[-1] for l in sys.stdin if len(l.split()) >= 3})))' \
+        > "$SRC/defined.txt"
+    python3 - "$SRC/tinyc.def" "$SRC/defined.txt" <<'PYEOF'
+import sys
+defp, definedp = sys.argv[1], sys.argv[2]
+defined = set(open(definedp).read().split())
+out, dropped = ["EXPORTS"], []
+for line in open(defp):
+    name = line.strip()
+    if not name or name == "EXPORTS":
+        continue
+    if name in defined:
+        out.append("    " + name)
+    else:
+        dropped.append(name)
+open(defp, "w").write("\n".join(out) + "\n")
+if dropped:
+    print("gen_windows_def: dropped %d undefined exports for this target: %s"
+          % (len(dropped), ", ".join(dropped)), file=sys.stderr)
+PYEOF
+    "$CC" -O2 -static -Wl,-e,tinyc_win_entry \
+        -o "$DIST/bin/tinyc.exe" "$SRC/tcc.o" "$SRC/tcc_io.o" "$SRC/tinyc_win.o" \
+        "$SRC/tinyc.def" -lm
+    ln -sf tinyc.exe "$DIST/bin/tcc.exe"
+
+    # Companions next to the exe, in the places libtcc actually
+    # searches with CONFIG_TCCDIR undefined: the runtime tccdir {B}
+    # is the exe's own directory, and the baked paths are
+    # package-relative ({B}/...), so the family's include/lib trees
+    # are mirrored under bin/. libtcc1.a and runmain.o are looked up
+    # at {B}/lib.
+    mkdir -p "$DIST/bin/include"
+    cp "$DIST/lib/tcc/include/"*.h "$DIST/bin/include/"
+    for COMP in include-libc libc lib; do
+        if [ -d "$DIST/lib/tcc/$COMP" ]; then
+            cp -r "$DIST/lib/tcc/$COMP" "$DIST/bin/"
+        fi
+    done
+
+    # Manifest. wasm32 carries the no-libc note of build_wasm32
+    # instead of a libtcc1 path.
+    if [ "$TRIPLE" != "wasm32-wasi" ]; then
+        LIBTCC1_LINE="  \"libtcc1\": \"lib/tcc/lib/libtcc1.a\","
+    else
+        LIBTCC1_LINE="  \"libc\": \"no target libc archive: in the wasm backend's model the runtime helpers are host-provided imports; the sysroot carries the bundled headers only (wasm-backend/include and TCC's builtin headers)\","
+    fi
+    cat > "$DIST/manifest.json" <<EOF
+{
+  "name": "tinyc",
+  "version": "$VER",
+  "host": "x86_64-w64-mingw32",
+  "target": "$TRIPLE",
+  "isa": "$ISA",
+$(print_outputs pe)
+  "dual_file": "bin/tinyc.exe",
+  "toolchain_include": "include",
+$LIBTCC1_LINE
+  "built_on": "MinGW cross C compiler $CC",
+  "verification": "PE format and export table checked with objdump; per-target compile smoke is exercised on the Windows CI runner (see HOST-CROSS-BUILDS.md)"
+}
+EOF
+    echo "built: $DIST"
+    file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
+}
+
 # build_host_for <triple> <cross-name> <target-def> <isa>
 # A Linux host variant is built with the plain host compiler when
 # its CPU is the build host's CPU; otherwise with the <triplet>-gcc
@@ -714,6 +962,78 @@ if [ "${1:-}" = "host" ]; then
         esac
     done
     echo "host build done"
+    exit 0
+fi
+
+# -------------------------------------------------------------------
+# Windows host, all targets: ./build.sh host-win [target-triple ...]
+# -------------------------------------------------------------------
+if [ "${1:-}" = "host-win" ]; then
+    shift
+    HOSTS=${@:-"$ALL"}
+    for H in $HOSTS; do
+        case $H in
+            x86_64-w64-mingw32)
+                # The native triple keeps its proven recipe.
+                build_host_mingw
+                ;;
+            x86_64-linux-gnu)
+                gnu_defs "/usr/x86_64-linux-gnu/lib"
+                build_host_mingw_for "$H" x86_64 "-DTCC_TARGET_X86_64" "$ISA_X86_64" \
+                    '-DCONFIG_SYSROOT="/usr/x86_64-linux-gnu"' \
+                    "${GNU_DEFS[@]}"
+                ;;
+            aarch64-linux-gnu)
+                gnu_defs "/usr/aarch64-linux-gnu/lib"
+                build_host_mingw_for "$H" arm64 "-DTCC_TARGET_ARM64" "$ISA_ARM64" \
+                    '-DCONFIG_SYSROOT="/usr/aarch64-linux-gnu"' \
+                    "${GNU_DEFS[@]}"
+                ;;
+            riscv64-linux-gnu)
+                gnu_defs "/usr/riscv64-linux-gnu/lib"
+                build_host_mingw_for "$H" riscv64 "-DTCC_TARGET_RISCV64" "$ISA_RISCV64" \
+                    '-DCONFIG_SYSROOT="/usr/riscv64-linux-gnu"' \
+                    "${GNU_DEFS[@]}"
+                ;;
+            aarch64-linux-android)
+                build_host_mingw_for "$H" arm64 "-DTCC_TARGET_ARM64 -DTARGETOS_ANDROID=1" "$ISA_ARM64" \
+                    '-DCONFIG_TCC_CRTPREFIX="{B}/libc"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/libc:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/aarch64-linux-android"' \
+                    '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
+                ;;
+            x86_64-linux-android)
+                build_host_mingw_for "$H" x86_64 "-DTCC_TARGET_X86_64 -DTARGETOS_ANDROID=1" "$ISA_X86_64" \
+                    '-DCONFIG_TCC_CRTPREFIX="{B}/libc"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/libc:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc:{B}/include-libc/x86_64-linux-android"' \
+                    '-DCONFIG_TCC_ELFINTERP="/system/bin/linker64"'
+                ;;
+            arm64-apple-darwin)
+                build_host_mingw_for "$H" arm64-osx "-DTCC_TARGET_ARM64 -DTCC_TARGET_MACHO" "$ISA_ARM64" \
+                    '-DCONFIG_TCC_CRTPREFIX="{B}/lib"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/lib:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc"'
+                ;;
+            x86_64-apple-darwin)
+                build_host_mingw_for "$H" x86_64-osx "-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO" "$ISA_X86_64" \
+                    '-DCONFIG_TCC_CRTPREFIX="{B}/lib"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}/lib:{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include:{B}/include-libc"'
+                ;;
+            wasm32-wasi)
+                build_host_mingw_for "$H" "" "-DTCC_TARGET_WASM32" "WebAssembly MVP with SIMD128 (v128); no threads/atomics target variant" \
+                    '-DCONFIG_TCC_CRTPREFIX="{B}"' \
+                    '-DCONFIG_TCC_LIBPATHS="{B}"' \
+                    '-DCONFIG_TCC_SYSINCLUDEPATHS="{B}/include"'
+                ;;
+            *)
+                echo "unknown host-win target: $H" >&2
+                exit 1
+                ;;
+        esac
+    done
+    echo "host-win build done"
     exit 0
 fi
 
