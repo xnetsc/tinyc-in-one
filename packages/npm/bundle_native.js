@@ -152,6 +152,11 @@ function writeSubpackage({ subName, subDir, hosts, osCpu, desc, introEn, introZh
     version: mainPkg.version,
     description: desc,
     license: mainPkg.license,
+    repository: {
+      type: 'git',
+      url: 'git+https://github.com/xnetsc/tinyc-in-one.git',
+      directory: 'packages/npm',
+    },
     os: osCpu.os,
     cpu: osCpu.cpu,
     files: ['natives', 'sysroot', 'packaging-manifest.json', 'README.md', 'README.zh-CN.md'],
