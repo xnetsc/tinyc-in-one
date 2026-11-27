@@ -628,11 +628,22 @@ jobs:
         run: |
           bash tests/windows/run_windows_chkstk_unwind.sh > test-outputs/win-chkstk-unwind.log 2>&1
 
+      # Stage all 9 per-triple dists (host-win builds a PE compiler
+      # for every target into build/dist-host/<triple>, each with its
+      # own manifest.json). The npm/python/java steps below read
+      # TINYC_DIST_DIR=stage-dist; staging only the native triple
+      # would limit the Windows-host packages to 1 of 9 targets.
       - name: Stage the packaging dist from the host build
         shell: msys2 {0}
         run: |
           rm -rf stage-dist && mkdir -p stage-dist
-          cp -r build/dist-host/x86_64-w64-mingw32 stage-dist/
+          for d in build/dist-host/*/; do
+            triple=$(basename "$d")
+            cp -r "$d" "stage-dist/$triple"
+            test -f "stage-dist/$triple/manifest.json" || {
+              echo "missing manifest.json for $triple"; exit 1; }
+          done
+          ls stage-dist/
 
       - name: Java package - build jar, run the package test suite (JDK 25)
         shell: msys2 {0}
