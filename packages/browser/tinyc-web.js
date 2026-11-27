@@ -89,6 +89,10 @@ var TinycWeb = (() => {
         source: "include/arm_neon.h"
       },
       {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
         path: "/sysroot/include/dlfcn.h",
         source: "include/dlfcn.h"
       },
@@ -141,8 +145,20 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
@@ -1415,6 +1431,85 @@ var TinycWeb = (() => {
       if (dest) writeBytes(dest, copy);
       return dest;
     }
+    function memchr(ptr, c, n) {
+      const m = u8();
+      const want = c & 255;
+      for (let i = 0; i < n; i++) {
+        if (m[ptr + i] === want) return ptr + i;
+      }
+      return 0;
+    }
+    function strspn(ptr, acceptPtr) {
+      const s = readCString(ptr);
+      const accept = readCString(acceptPtr);
+      let n = 0;
+      while (n < s.length && accept.includes(s[n])) n++;
+      return n;
+    }
+    function strcspn(ptr, rejectPtr) {
+      const s = readCString(ptr);
+      const reject = readCString(rejectPtr);
+      let n = 0;
+      while (n < s.length && !reject.includes(s[n])) n++;
+      return n;
+    }
+    function strpbrk(ptr, acceptPtr) {
+      const n = strcspn(ptr, acceptPtr);
+      return n < strlen(ptr) ? ptr + n : 0;
+    }
+    let strtokSave = 0;
+    function strtok(ptr, delimPtr) {
+      const delim = readCString(delimPtr);
+      let start;
+      if (ptr) {
+        start = ptr;
+      } else {
+        if (!strtokSave) return 0;
+        start = strtokSave;
+      }
+      const m = u8();
+      let i = start;
+      while (m[i] !== 0 && delim.includes(String.fromCharCode(m[i]))) i++;
+      if (m[i] === 0) {
+        strtokSave = 0;
+        return 0;
+      }
+      const token = i;
+      while (m[i] !== 0 && !delim.includes(String.fromCharCode(m[i]))) i++;
+      if (m[i] !== 0) {
+        m[i] = 0;
+        strtokSave = i + 1;
+      } else {
+        strtokSave = 0;
+      }
+      return token;
+    }
+    function strerror(errnum) {
+      const table = {
+        0: "Success",
+        1: "Operation not permitted",
+        2: "No such file or directory",
+        12: "Cannot allocate memory",
+        22: "Invalid argument"
+      };
+      const text = table[errnum] ?? `Unknown error ${errnum | 0}`;
+      const bytes = textEncoder.encode(text);
+      const buf = malloc(bytes.length + 1);
+      if (buf) writeCStringBytes(buf, bytes);
+      return buf;
+    }
+    function strcoll(a, b) {
+      return strcmp(a, b);
+    }
+    function strxfrm(dest, src, n) {
+      const len = strlen(src);
+      if (dest && n > 0) {
+        const take = Math.min(len, n - 1);
+        writeBytes(dest, readBytes(src, take));
+        u8()[dest + take] = 0;
+      }
+      return len;
+    }
     const CT = (() => {
       const t = new Uint8Array(256);
       const U = 1, L = 2, D = 4, S = 8, P = 16, C = 32, X = 64, B = 128;
@@ -1534,6 +1629,34 @@ var TinycWeb = (() => {
     const abs = (v) => Math.abs(v | 0);
     const labs = (v) => Math.abs(v | 0);
     const llabs = (v) => v < 0n ? -v : v;
+    function comparatorFn(cmpPtr) {
+      const table = options.processTable ?? holder?.instance?.exports?.__indirect_function_table;
+      if (!table || typeof table.get !== "function") return null;
+      const fn = table.get(cmpPtr);
+      return typeof fn === "function" ? fn : null;
+    }
+    function qsort(base, nmemb, size, cmpPtr) {
+      const cmp = comparatorFn(cmpPtr);
+      if (!cmp || nmemb < 2 || size <= 0) return;
+      const order = Array.from({ length: nmemb }, (_, i) => i);
+      order.sort((ia, ib) => cmp(base + ia * size, base + ib * size) | 0);
+      const items = order.map((i) => readBytes(base + i * size, size));
+      for (let i = 0; i < nmemb; i++) writeBytes(base + i * size, items[i]);
+    }
+    function bsearch(key, base, nmemb, size, cmpPtr) {
+      const cmp = comparatorFn(cmpPtr);
+      if (!cmp) return 0;
+      let lo = 0;
+      let hi = nmemb - 1;
+      while (lo <= hi) {
+        const mid = lo + hi >> 1;
+        const r = cmp(key, base + mid * size) | 0;
+        if (r === 0) return base + mid * size;
+        if (r < 0) hi = mid - 1;
+        else lo = mid + 1;
+      }
+      return 0;
+    }
     let randState = 1;
     function srand(seed) {
       randState = seed >>> 0 || 1;
@@ -1889,7 +2012,7 @@ var TinycWeb = (() => {
       return emitText(formatString(fmt, va), false);
     }
     function fprintf(stream, fmt, va) {
-      return emitText(formatString(fmt, va), stream === 2);
+      return streamWriteText(stream, formatString(fmt, va));
     }
     function sprintf(dest, fmt, va) {
       const bytes = textEncoder.encode(formatString(fmt, va));
@@ -1904,40 +2027,721 @@ var TinycWeb = (() => {
       }
       return bytes.length;
     }
+    const backing = options.fileSystem ?? null;
+    const memFiles = /* @__PURE__ */ new Map();
+    const backingRead = backing ? (p) => backing.read(p) : (p) => memFiles.has(p) ? memFiles.get(p) : null;
+    const backingWrite = backing ? (p, bytes) => backing.write(p, bytes) : (p, bytes) => {
+      memFiles.set(p, bytes.slice());
+    };
+    const backingRemove = backing ? (p) => typeof backing.remove === "function" ? backing.remove(p) : false : (p) => memFiles.delete(p);
+    function guestPath(ptr) {
+      const raw = readCString(ptr);
+      const parts = [];
+      for (const seg of raw.split("/")) {
+        if (seg === "" || seg === ".") continue;
+        if (seg === "..") parts.pop();
+        else parts.push(seg);
+      }
+      return "/" + parts.join("/");
+    }
+    const openFiles = /* @__PURE__ */ new Map();
+    let nextHandle = 3;
+    let stdinEof = false;
+    function flushStream(st) {
+      backingWrite(st.path, st.data);
+    }
+    function streamGetByte(handle) {
+      if (handle === 0) {
+        const data = stdinRead(1);
+        if (!data.length) stdinEof = true;
+        return data.length ? data[0] : -1;
+      }
+      const st = openFiles.get(handle);
+      if (!st || !st.readable) return -1;
+      if (st.unget.length) return st.unget.pop();
+      if (st.pos >= st.data.length) {
+        st.eof = true;
+        return -1;
+      }
+      return st.data[st.pos++];
+    }
+    function streamUnget(handle, c) {
+      if (handle === 0) {
+        pushback.push(c & 255);
+        stdinEof = false;
+        return;
+      }
+      const st = openFiles.get(handle);
+      if (st) {
+        st.unget.push(c & 255);
+        st.eof = false;
+      }
+    }
+    function streamRead(handle, n) {
+      if (handle === 0) {
+        const data = stdinRead(n);
+        if (data.length < n) stdinEof = true;
+        return data;
+      }
+      const st = openFiles.get(handle);
+      if (!st || !st.readable) return new Uint8Array(0);
+      const parts = [];
+      let got = 0;
+      while (got < n && st.unget.length) {
+        parts.push(Uint8Array.of(st.unget.pop()));
+        got++;
+      }
+      if (got < n) {
+        const take = Math.min(n - got, st.data.length - st.pos);
+        if (take > 0) {
+          parts.push(st.data.slice(st.pos, st.pos + take));
+          st.pos += take;
+          got += take;
+        }
+      }
+      if (got < n) st.eof = true;
+      const out = new Uint8Array(got);
+      let at = 0;
+      for (const p of parts) {
+        out.set(p, at);
+        at += p.length;
+      }
+      return out;
+    }
+    function streamWrite(handle, bytes) {
+      if (handle === 1) {
+        emitOut(bytes);
+        return bytes.length;
+      }
+      if (handle === 2) {
+        emitErr(bytes);
+        return bytes.length;
+      }
+      const st = openFiles.get(handle);
+      if (!st || !st.writable) return 0;
+      if (st.append) st.pos = st.data.length;
+      const end = st.pos + bytes.length;
+      if (end > st.data.length) {
+        const grown = new Uint8Array(end);
+        grown.set(st.data);
+        st.data = grown;
+      }
+      st.data.set(bytes, st.pos);
+      st.pos = end;
+      flushStream(st);
+      return bytes.length;
+    }
+    function streamWriteText(handle, text) {
+      return streamWrite(handle, textEncoder.encode(text));
+    }
+    function fopen(pathPtr, modePtr) {
+      const path = guestPath(pathPtr);
+      const mode = readCString(modePtr);
+      const base = mode[0];
+      if (base !== "r" && base !== "w" && base !== "a") return 0;
+      const plus = mode.includes("+");
+      if (base === "r") {
+        const data = backingRead(path);
+        if (data == null) return 0;
+        const handle2 = nextHandle++;
+        openFiles.set(handle2, {
+          path,
+          data: data.slice(),
+          pos: 0,
+          readable: true,
+          writable: plus,
+          append: false,
+          eof: false,
+          err: false,
+          unget: []
+        });
+        return handle2;
+      }
+      if (base === "w") {
+        if (mode.includes("x") && backingRead(path) != null) return 0;
+        const handle2 = nextHandle++;
+        const st = {
+          path,
+          data: new Uint8Array(0),
+          pos: 0,
+          readable: plus,
+          writable: true,
+          append: false,
+          eof: false,
+          err: false,
+          unget: []
+        };
+        openFiles.set(handle2, st);
+        flushStream(st);
+        return handle2;
+      }
+      const existing = backingRead(path);
+      const handle = nextHandle++;
+      openFiles.set(handle, {
+        path,
+        data: existing ? existing.slice() : new Uint8Array(0),
+        pos: existing ? existing.length : 0,
+        readable: plus,
+        writable: true,
+        append: true,
+        eof: false,
+        err: false,
+        unget: []
+      });
+      return handle;
+    }
+    function fclose(handle) {
+      const st = openFiles.get(handle);
+      if (!st) return handle >= 0 && handle <= 2 ? 0 : -1;
+      flushStream(st);
+      openFiles.delete(handle);
+      return 0;
+    }
+    function fflush(handle) {
+      if (handle === 0) {
+        for (const st2 of openFiles.values()) flushStream(st2);
+        return 0;
+      }
+      const st = openFiles.get(handle);
+      if (st) flushStream(st);
+      return 0;
+    }
+    function fseek(handle, offset, whence) {
+      const st = openFiles.get(handle);
+      if (!st) return -1;
+      const base = whence === 0 ? 0 : whence === 1 ? st.pos : st.data.length;
+      const np = base + offset;
+      if (np < 0) {
+        st.err = true;
+        return -1;
+      }
+      st.pos = np;
+      st.eof = false;
+      st.unget.length = 0;
+      return 0;
+    }
+    function ftell(handle) {
+      const st = openFiles.get(handle);
+      return st ? st.pos : -1;
+    }
+    function rewind(handle) {
+      const st = openFiles.get(handle);
+      if (!st) return;
+      st.pos = 0;
+      st.eof = false;
+      st.err = false;
+      st.unget.length = 0;
+    }
+    function fgetpos(handle, posPtr) {
+      const st = openFiles.get(handle);
+      if (!st) return -1;
+      dv().setBigInt64(posPtr, BigInt(st.pos), true);
+      return 0;
+    }
+    function fsetpos(handle, posPtr) {
+      return fseek(handle, Number(dv().getBigInt64(posPtr, true)), 0);
+    }
+    function feof(handle) {
+      if (handle === 0) return stdinEof ? 1 : 0;
+      const st = openFiles.get(handle);
+      return st && st.eof ? 1 : 0;
+    }
+    function ferror(handle) {
+      const st = openFiles.get(handle);
+      return st && st.err ? 1 : 0;
+    }
+    function clearerr(handle) {
+      if (handle === 0) {
+        stdinEof = false;
+        return;
+      }
+      const st = openFiles.get(handle);
+      if (st) {
+        st.eof = false;
+        st.err = false;
+      }
+    }
+    function freopen(pathPtr, modePtr, handle) {
+      if (!pathPtr) return handle;
+      const st = openFiles.get(handle);
+      if (st) {
+        flushStream(st);
+        openFiles.delete(handle);
+      }
+      const fresh = fopen(pathPtr, modePtr);
+      if (!fresh) return 0;
+      const nst = openFiles.get(fresh);
+      openFiles.delete(fresh);
+      openFiles.set(handle, nst);
+      return handle;
+    }
+    function removeFile(pathPtr) {
+      return backingRemove(guestPath(pathPtr)) ? 0 : -1;
+    }
+    function renameFile(oldPtr, newPtr) {
+      const data = backingRead(guestPath(oldPtr));
+      if (data == null) return -1;
+      backingWrite(guestPath(newPtr), data);
+      backingRemove(guestPath(oldPtr));
+      return 0;
+    }
     function puts(ptr) {
-      return emitText(readCString(ptr) + "\n", false) >= 0 ? 0 : -1;
+      return streamWriteText(1, readCString(ptr) + "\n") >= 0 ? 0 : -1;
     }
     function putchar(c) {
-      emitOut(Uint8Array.of(c & 255));
+      streamWrite(1, Uint8Array.of(c & 255));
       return c;
     }
     function fputs(ptr, stream) {
-      emitText(readCString(ptr), stream === 2);
-      return 0;
+      const bytes = textEncoder.encode(readCString(ptr));
+      return streamWrite(stream, bytes) === bytes.length ? 0 : -1;
     }
     function putc(c, stream) {
-      (stream === 2 ? emitErr : emitOut)(Uint8Array.of(c & 255));
-      return c;
+      return streamWrite(stream, Uint8Array.of(c & 255)) === 1 ? c : -1;
     }
     function fwrite(ptr, size, nmemb, stream) {
       const total = size * nmemb;
       if (total === 0) return 0;
-      (stream === 2 ? emitErr : emitOut)(readBytes(ptr, total));
-      return nmemb;
+      const written = streamWrite(stream, readBytes(ptr, total));
+      return Math.floor(written / size);
     }
-    function fread(ptr, size, nmemb, _stream) {
+    function fread(ptr, size, nmemb, stream) {
       if (size === 0 || nmemb === 0) return 0;
-      const data = stdinRead(size * nmemb);
+      const data = streamRead(stream, size * nmemb);
       if (data.length) writeBytes(ptr, data);
       return Math.floor(data.length / size);
     }
-    function fgetc(_stream) {
-      const data = stdinRead(1);
-      return data.length ? data[0] : -1;
+    function fgetc(stream) {
+      return streamGetByte(stream);
     }
-    function ungetc(c, _stream) {
-      if (c >= 0) pushback.push(c & 255);
+    function ungetc(c, stream) {
+      if (c < 0) return -1;
+      streamUnget(stream, c);
       return c;
+    }
+    function fgets(s, size, stream) {
+      if (size <= 0) return 0;
+      if (size === 1) {
+        u8()[s] = 0;
+        return s;
+      }
+      const bytes = [];
+      while (bytes.length < size - 1) {
+        const c = streamGetByte(stream);
+        if (c < 0) break;
+        bytes.push(c);
+        if (c === 10) break;
+      }
+      if (bytes.length === 0) return 0;
+      writeBytes(s, Uint8Array.from(bytes));
+      u8()[s + bytes.length] = 0;
+      return s;
+    }
+    function scanFrom(getByte, putBack, fmtPtr, vaPtr) {
+      const fmt = readCString(fmtPtr);
+      const va = makeVa(vaPtr);
+      let assigned = 0;
+      let consumed = 0;
+      let inputEof = false;
+      const held = [];
+      const rd = () => {
+        if (held.length) {
+          consumed++;
+          return held.pop();
+        }
+        const c = getByte();
+        if (c < 0) inputEof = true;
+        else consumed++;
+        return c;
+      };
+      const un = (c) => {
+        if (c >= 0) {
+          held.push(c);
+          consumed--;
+        }
+      };
+      const pk = () => {
+        const c = rd();
+        if (c >= 0) un(c);
+        return c;
+      };
+      const isWs = (c) => c === 32 || c >= 9 && c <= 13;
+      const skipWs = () => {
+        for (; ; ) {
+          const c = rd();
+          if (c < 0) return false;
+          if (!isWs(c)) {
+            un(c);
+            return true;
+          }
+        }
+      };
+      const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
+      function scanIntToken(conv, width) {
+        let text = "";
+        const room = () => width < 0 || text.length < width;
+        if (room()) {
+          const c = pk();
+          if (c === 43 || c === 45) text += String.fromCharCode(rd());
+        }
+        let radix = conv === "x" || conv === "X" ? 16 : conv === "o" ? 8 : conv === "i" ? 0 : 10;
+        if ((conv === "x" || conv === "X" || conv === "i") && room()) {
+          const a = pk();
+          if (a === 48) {
+            rd();
+            text += "0";
+            const b = room() ? pk() : -1;
+            if (b === 120 || b === 88) {
+              rd();
+              const d = pk();
+              if (d >= 0 && DIGITS.indexOf(String.fromCharCode(d).toLowerCase()) < 16 && DIGITS.indexOf(String.fromCharCode(d).toLowerCase()) >= 0) {
+                text += "x";
+                radix = 16;
+              } else {
+                un(b);
+              }
+            }
+          }
+        }
+        if (radix === 0) {
+          radix = text.includes("x") ? 16 : text.replace(/^[+-]/, "").startsWith("0") ? 8 : 10;
+        }
+        let digits = 0;
+        while (room()) {
+          const c = pk();
+          if (c < 0) break;
+          const d = DIGITS.indexOf(String.fromCharCode(c).toLowerCase());
+          if (d < 0 || d >= radix) break;
+          text += String.fromCharCode(rd());
+          digits++;
+        }
+        const digitText = text.replace(/^[+-]/, "").replace(/^0[xX]/, "");
+        if (digitText.length === 0) {
+          for (let i2 = text.length - 1; i2 >= 0; i2--) un(text.charCodeAt(i2));
+          return { fail: inputEof && text.length === 0 ? "input" : "match" };
+        }
+        let v = 0n;
+        const br = BigInt(radix);
+        for (const ch of digitText) {
+          v = v * br + BigInt(DIGITS.indexOf(ch.toLowerCase()));
+        }
+        if (text.startsWith("-")) v = -v;
+        return { value: v };
+      }
+      function scanFloatToken(width) {
+        let text = "";
+        const room = () => width < 0 || text.length < width;
+        if (room()) {
+          const c = pk();
+          if (c === 43 || c === 45) text += String.fromCharCode(rd());
+        }
+        const word = (w) => {
+          const base = text;
+          let t = text;
+          for (const ch of w) {
+            if (!room()) return false;
+            const c = pk();
+            if (c < 0 || String.fromCharCode(c).toLowerCase() !== ch) {
+              for (let i2 = t.length - 1; i2 >= base.length; i2--) un(t.charCodeAt(i2));
+              return false;
+            }
+            t += String.fromCharCode(rd());
+          }
+          text = t;
+          return true;
+        };
+        if (word("inf")) {
+          if (!word("inity")) {
+          }
+          return { value: text.startsWith("-") ? -Infinity : Infinity };
+        }
+        if (word("nan")) return { value: NaN };
+        let sawDigit = false;
+        let sawDot = false;
+        while (room()) {
+          const c = pk();
+          if (c < 0) break;
+          if (c >= 48 && c <= 57) {
+            text += String.fromCharCode(rd());
+            sawDigit = true;
+          } else if (c === 46 && !sawDot) {
+            text += String.fromCharCode(rd());
+            sawDot = true;
+          } else break;
+        }
+        if (!sawDigit) {
+          for (let i2 = text.length - 1; i2 >= 0; i2--) un(text.charCodeAt(i2));
+          return { fail: inputEof && text.length === 0 ? "input" : "match" };
+        }
+        if (room()) {
+          const c = pk();
+          if (c === 101 || c === 69) {
+            rd();
+            let exp = "e";
+            if (room()) {
+              const s = pk();
+              if (s === 43 || s === 45) exp += String.fromCharCode(rd());
+            }
+            let expDigits = "";
+            while (room()) {
+              const d = pk();
+              if (d < 48 || d > 57) break;
+              expDigits += String.fromCharCode(rd());
+            }
+            if (expDigits) text += exp + expDigits;
+            else {
+              const tail = exp.slice(1);
+              for (let i2 = tail.length - 1; i2 >= 0; i2--) un(tail.charCodeAt(i2));
+              un(c);
+            }
+          }
+        }
+        return { value: parseFloat(text) };
+      }
+      function storeInt(ptr, value, length) {
+        if (length === "ll" || length === "j") {
+          dv().setBigInt64(ptr, value, true);
+        } else if (length === "hh") {
+          u8()[ptr] = Number(value & 0xffn);
+        } else if (length === "h") {
+          dv().setInt16(ptr, Number(BigInt.asIntN(16, value)), true);
+        } else {
+          dv().setInt32(ptr, Number(BigInt.asIntN(32, value)), true);
+        }
+      }
+      let result2 = null;
+      let i = 0;
+      while (i < fmt.length && result2 === null) {
+        const fc = fmt[i];
+        if (isWs(fc.charCodeAt(0))) {
+          while (i < fmt.length && isWs(fmt.charCodeAt(i))) i++;
+          if (!skipWs()) {
+            result2 = assigned > 0 ? assigned : -1;
+          }
+          continue;
+        }
+        if (fc !== "%") {
+          const c = rd();
+          if (c < 0) result2 = assigned > 0 ? assigned : -1;
+          else if (c !== fc.charCodeAt(0)) {
+            un(c);
+            result2 = assigned;
+          }
+          i++;
+          continue;
+        }
+        i++;
+        if (fmt[i] === "%") {
+          const c = rd();
+          if (c < 0) result2 = assigned > 0 ? assigned : -1;
+          else if (c !== 37) {
+            un(c);
+            result2 = assigned;
+          }
+          i++;
+          continue;
+        }
+        let suppress = false;
+        if (fmt[i] === "*") {
+          suppress = true;
+          i++;
+        }
+        let width = -1;
+        if (i < fmt.length && fmt[i] >= "0" && fmt[i] <= "9") {
+          width = 0;
+          while (i < fmt.length && fmt[i] >= "0" && fmt[i] <= "9") {
+            width = width * 10 + (fmt.charCodeAt(i++) - 48);
+          }
+        }
+        let length = "";
+        if (fmt.startsWith("hh", i)) {
+          length = "hh";
+          i += 2;
+        } else if (fmt.startsWith("ll", i)) {
+          length = "ll";
+          i += 2;
+        } else if (i < fmt.length && "hlzjtL".includes(fmt[i])) length = fmt[i++];
+        const conv = fmt[i++] ?? "";
+        const argPtr = suppress || conv === "%" ? 0 : va.i32();
+        const fail = (kind) => {
+          result2 = kind === "input" && assigned === 0 ? -1 : assigned;
+        };
+        switch (conv) {
+          case "d":
+          case "i":
+          case "u":
+          case "x":
+          case "X":
+          case "o": {
+            if (!skipWs()) {
+              fail("input");
+              break;
+            }
+            const r = scanIntToken(conv === "d" || conv === "u" ? "d" : conv, width);
+            if (r.fail) {
+              fail(r.fail);
+              break;
+            }
+            if (!suppress) {
+              storeInt(argPtr, r.value, length);
+              assigned++;
+            }
+            break;
+          }
+          case "f":
+          case "e":
+          case "E":
+          case "g":
+          case "G":
+          case "a":
+          case "A": {
+            if (!skipWs()) {
+              fail("input");
+              break;
+            }
+            const r = scanFloatToken(width);
+            if (r.fail) {
+              fail(r.fail);
+              break;
+            }
+            if (!suppress) {
+              if (length === "l" || length === "L") {
+                dv().setFloat64(argPtr, r.value, true);
+              } else {
+                dv().setFloat32(argPtr, Math.fround(r.value), true);
+              }
+              assigned++;
+            }
+            break;
+          }
+          case "c": {
+            const want = width < 0 ? 1 : width;
+            const bytes = [];
+            while (bytes.length < want) {
+              const c = rd();
+              if (c < 0) break;
+              bytes.push(c);
+            }
+            if (bytes.length === 0) {
+              fail("input");
+              break;
+            }
+            if (!suppress) {
+              writeBytes(argPtr, Uint8Array.from(bytes));
+              assigned++;
+            }
+            break;
+          }
+          case "s": {
+            if (!skipWs()) {
+              fail("input");
+              break;
+            }
+            const bytes = [];
+            while (width < 0 || bytes.length < width) {
+              const c = pk();
+              if (c < 0 || isWs(c)) break;
+              bytes.push(rd());
+            }
+            if (bytes.length === 0) {
+              fail(inputEof ? "input" : "match");
+              break;
+            }
+            if (!suppress) {
+              writeBytes(argPtr, Uint8Array.from(bytes));
+              u8()[argPtr + bytes.length] = 0;
+              assigned++;
+            }
+            break;
+          }
+          case "[": {
+            let negate = false;
+            if (fmt[i] === "^") {
+              negate = true;
+              i++;
+            }
+            const set = /* @__PURE__ */ new Set();
+            let first = true;
+            while (i < fmt.length && (fmt[i] !== "]" || first)) {
+              first = false;
+              if (fmt[i + 1] === "-" && fmt[i + 2] !== void 0 && fmt[i + 2] !== "]") {
+                const lo = fmt.charCodeAt(i);
+                const hi = fmt.charCodeAt(i + 2);
+                for (let c = lo; c <= hi; c++) set.add(c);
+                i += 3;
+              } else {
+                set.add(fmt.charCodeAt(i));
+                i++;
+              }
+            }
+            i++;
+            const bytes = [];
+            while (width < 0 || bytes.length < width) {
+              const c = pk();
+              if (c < 0) break;
+              if (set.has(c) === negate) break;
+              bytes.push(rd());
+            }
+            if (bytes.length === 0) {
+              fail(inputEof ? "input" : "match");
+              break;
+            }
+            if (!suppress) {
+              writeBytes(argPtr, Uint8Array.from(bytes));
+              u8()[argPtr + bytes.length] = 0;
+              assigned++;
+            }
+            break;
+          }
+          case "p": {
+            if (!skipWs()) {
+              fail("input");
+              break;
+            }
+            const r = scanIntToken("x", width);
+            if (r.fail) {
+              fail(r.fail);
+              break;
+            }
+            if (!suppress) {
+              dv().setInt32(argPtr, Number(BigInt.asIntN(32, r.value)), true);
+              assigned++;
+            }
+            break;
+          }
+          case "n": {
+            if (!suppress) storeInt(argPtr, BigInt(consumed), length);
+            break;
+          }
+          default:
+            result2 = assigned;
+            break;
+        }
+      }
+      for (let k = 0; k < held.length; k++) putBack(held[k]);
+      return result2 === null ? assigned : result2;
+    }
+    function scanf(fmt, va) {
+      return scanFrom(() => streamGetByte(0), (c) => streamUnget(0, c), fmt, va);
+    }
+    function fscanf(stream, fmt, va) {
+      return scanFrom(
+        () => streamGetByte(stream),
+        (c) => streamUnget(stream, c),
+        fmt,
+        va
+      );
+    }
+    function sscanf(str, fmt, va) {
+      let idx = 0;
+      const get = () => {
+        const c = u8()[str + idx];
+        if (c === 0) return -1;
+        idx++;
+        return c;
+      };
+      return scanFrom(get, () => {
+      }, fmt, va);
     }
     const env = {
       // memory / string
@@ -1956,6 +2760,14 @@ var TinycWeb = (() => {
       strrchr,
       strstr,
       strdup,
+      memchr,
+      strspn,
+      strcspn,
+      strpbrk,
+      strtok,
+      strerror,
+      strcoll,
+      strxfrm,
       // allocation
       malloc,
       calloc,
@@ -1980,6 +2792,27 @@ var TinycWeb = (() => {
       fgetc,
       getchar: () => fgetc(0),
       ungetc,
+      fopen,
+      fclose,
+      fflush,
+      fseek,
+      ftell,
+      rewind,
+      fgetpos,
+      fsetpos,
+      feof,
+      ferror,
+      clearerr,
+      freopen,
+      remove: removeFile,
+      rename: renameFile,
+      fgets,
+      scanf,
+      fscanf,
+      sscanf,
+      vscanf: scanf,
+      vfscanf: fscanf,
+      vsscanf: sscanf,
       // stdlib
       exit,
       abort,
@@ -1997,6 +2830,8 @@ var TinycWeb = (() => {
       abs,
       labs,
       llabs,
+      bsearch,
+      qsort,
       rand,
       srand,
       getenv: (_name) => 0,
@@ -5687,7 +6522,25 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         stdin: options.stdin,
         heapBase: 1024,
         memoryAllocator: true,
-        processTable: this.table
+        processTable: this.table,
+        // A process attached to an instance shares the instance's
+        // virtual FS as its stdio file space: guest fopen reads and
+        // writes land in the same files the host stages and reads
+        // back. A standalone process gets the shim layer's private
+        // in-memory file space instead.
+        fileSystem: this._tinyc ? {
+          read: (p) => {
+            try {
+              return this._tinyc.fs.hasFile(p) ? this._tinyc.fs.readFile(p) : null;
+            } catch {
+              return null;
+            }
+          },
+          write: (p, bytes) => {
+            this._tinyc.fs.addFileSync(p, bytes);
+          },
+          remove: (p) => this._tinyc.fs.removeFile(p)
+        } : void 0
       });
       this._defaultEnv = def.env;
       this._allocatorState = def.allocatorState;
