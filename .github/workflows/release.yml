@@ -251,6 +251,21 @@ jobs:
           cp wasm-backend/tests/test-output.txt test-outputs/wasm-backend-regression.log
           exit $rc
 
+      # The browser package unit suite (test.mjs) covers the
+      # dylink loader, including the sysroot memory-cache
+      # branches, which the consumer page test does not
+      # exercise; test-web-bundle.mjs covers the script
+      # bundle entry points. Both run on emsdk's Node 24,
+      # like the thread suite below.
+      - name: Browser package - unit tests
+        run: |
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          cd packages/browser
+          "$EMSDK_NODE" --test test.mjs \
+            > "$GITHUB_WORKSPACE/test-outputs/browser-unit-tests.log" 2>&1
+          "$EMSDK_NODE" --experimental-vm-modules --test test-web-bundle.mjs \
+            >> "$GITHUB_WORKSPACE/test-outputs/browser-unit-tests.log" 2>&1
+
       # The §11 thread suite (packages/browser/test-threads) was
       # local-only until run 45779099647, so CI never judged it.
       # It runs here, after the wasm-backend regression built
