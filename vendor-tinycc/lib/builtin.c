@@ -16,6 +16,11 @@
  * __builtin_popcount
  * __builtin_parity
  * for int, long and long long
+ *
+ * and __builtin_bswap16, __builtin_bswap32, __builtin_bswap64:
+ * some bundled header sets (bionic's <sys/endian.h>) define
+ * htons/htonl and the rest of the byte-order family as macros
+ * over those names.
  */
 
 static const unsigned char table_1_32[] = {
@@ -132,6 +137,29 @@ int BUILTIN(parityl) (unsigned long x) __attribute__((alias(BUILTINN(parity))));
 int BUILTIN(parityl) (unsigned long x) __attribute__((alias(BUILTINN(parityll))));
 #endif
 
+unsigned short BUILTIN(bswap16) (unsigned short x)
+{
+    return (unsigned short)((x >> 8) | (x << 8));
+}
+
+unsigned int BUILTIN(bswap32) (unsigned int x)
+{
+    return ((x & 0x000000ffU) << 24) | ((x & 0x0000ff00U) << 8) |
+           ((x & 0x00ff0000U) >> 8) | ((x & 0xff000000U) >> 24);
+}
+
+unsigned long long BUILTIN(bswap64) (unsigned long long x)
+{
+    return ((x & 0x00000000000000ffULL) << 56) |
+           ((x & 0x000000000000ff00ULL) << 40) |
+           ((x & 0x0000000000ff0000ULL) << 24) |
+           ((x & 0x00000000ff000000ULL) << 8) |
+           ((x & 0x000000ff00000000ULL) >> 8) |
+           ((x & 0x0000ff0000000000ULL) >> 24) |
+           ((x & 0x00ff000000000000ULL) >> 40) |
+           ((x & 0xff00000000000000ULL) >> 56);
+}
+
 #ifndef __TINYC__
 #if defined(__GNUC__) && (__GNUC__ >= 6)
 /* gcc overrides alias from __builtin_ffs... to ffs.. so use assembly code */
@@ -161,4 +189,7 @@ int __builtin_popcountll(unsigned long long x) __attribute__((alias("__tcc_built
 int __builtin_parity(unsigned int x) __attribute__((alias("__tcc_builtin_parity")));
 int __builtin_parityl(unsigned long x) __attribute__((alias("__tcc_builtin_parityl")));
 int __builtin_parityll(unsigned long long x) __attribute__((alias("__tcc_builtin_parityll")));
+unsigned short __builtin_bswap16(unsigned short x) __attribute__((alias("__tcc_builtin_bswap16")));
+unsigned int __builtin_bswap32(unsigned int x) __attribute__((alias("__tcc_builtin_bswap32")));
+unsigned long long __builtin_bswap64(unsigned long long x) __attribute__((alias("__tcc_builtin_bswap64")));
 #endif

@@ -10,7 +10,7 @@ library implementation ships here.
 
 ## Layout
 
-- `include/` — 37 headers, staged into the dist at
+- `include/` — 42 headers, staged into the dist at
   `lib/tcc/include-libc/` (the compiler's baked-in search path is
   `{B}/include-libc:{B}/include`: this set first, TCC's builtin
   header layer second).
@@ -84,10 +84,15 @@ is outside what these headers guarantee.
 Declared: the C standard library surface (stdio, stdlib,
 string, strings, math in all three floating forms, fenv,
 ctype, time, wide characters, errno, limits, stdint,
-inttypes, locale, setjmp, signal, assert) and the common
+inttypes, locale, setjmp, signal, assert), the common
 POSIX surface (unistd, fcntl, dirent, pthread core, sched, and sys/types, sys/stat,
 sys/time, sys/wait, sys/mman, sys/uio, sys/resource,
-sys/ucontext).  Combined
+sys/ucontext), and the networking surface (sys/socket.h,
+netinet/in.h, netinet/tcp.h, arpa/inet.h, netdb.h: the socket
+endpoint API and name/address lookup, with the Darwin
+layouts — the length byte in the address structures,
+SOL_SOCKET 0xffff, the positive BSD getaddrinfo error
+codes).  Combined
 with TCC's builtin layer (stddef, stdarg, stdbool, stdalign,
 stdnoreturn, stdatomic, float, tgmath, varargs) the set is the
 complete compile-time surface the Darwin targets ship.  Four
@@ -100,8 +105,7 @@ sys/ucontext.h (the machine state tccrun.c's backtrace reads
 out of the signal handler's context), and runetype.h (the
 _DefaultRuneLocale pointer bcheck.c takes the address of).
 
-Not declared: networking headers (sys/socket.h, netdb.h,
-netinet/*, arpa/*), mach and other Darwin-specific subsystems
+Not declared: mach and other Darwin-specific subsystems
 past the dispatch semaphore surface above, pthread cancellation
 and spin locks, and anything past the surface above.  Programs
 using those still need the platform SDK headers.

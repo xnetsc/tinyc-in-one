@@ -22,6 +22,11 @@
 #include <sys/resource.h>
 #include <sys/mman.h>
 #include <sys/ucontext.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -64,6 +69,19 @@ int main(void) {
     SZ(nlink_t); SZ(blksize_t); SZ(blkcnt_t); SZ(clock_t);
     SZ(suseconds_t); SZ(pid_t); SZ(uid_t); SZ(size_t); SZ(ptrdiff_t);
     SZ(fenv_t); SZ(fexcept_t);
+    SZ(socklen_t); SZ(struct sockaddr); SZ(struct sockaddr_in);
+    SZ(struct sockaddr_in6); SZ(struct sockaddr_storage);
+    SZ(struct msghdr); SZ(struct cmsghdr); SZ(struct linger);
+    SZ(struct addrinfo); SZ(struct hostent); SZ(struct servent);
+    SZ(struct ip_mreq); SZ(struct in6_addr);
+    OFF(struct sockaddr_in, sin_port); OFF(struct sockaddr_in, sin_addr);
+    OFF(struct sockaddr_in6, sin6_port); OFF(struct sockaddr_in6, sin6_addr);
+    OFF(struct sockaddr_in6, sin6_scope_id);
+    OFF(struct addrinfo, ai_addrlen); OFF(struct addrinfo, ai_addr);
+    OFF(struct addrinfo, ai_next);
+    OFF(struct msghdr, msg_iov); OFF(struct msghdr, msg_control);
+    OFF(struct msghdr, msg_flags);
+    OFF(struct hostent, h_addr_list); OFF(struct servent, s_port);
     OFF(struct stat, st_size); OFF(struct stat, st_mtimespec);
     OFF(struct stat, st_birthtimespec); OFF(struct stat, st_blocks);
     OFF(struct dirent, d_name); OFF(struct dirent, d_reclen);
@@ -109,6 +127,31 @@ int main(void) {
     K(PATH_MAX); K(RAND_MAX); K(BUFSIZ); K(FD_SETSIZE);
     K(SEEK_SET); K(F_GETFL); K(F_SETLK); K(AT_FDCWD);
     K(_SC_PAGESIZE); K(_SC_NPROCESSORS_ONLN); K(_SC_OPEN_MAX);
+    K(AF_UNIX); K(AF_INET); K(AF_INET6); K(AF_ROUTE); K(AF_LINK);
+    K(SOCK_STREAM); K(SOCK_DGRAM); K(SOCK_RAW); K(SOCK_RDM);
+    K(SOCK_SEQPACKET);
+    K(IPPROTO_IP); K(IPPROTO_TCP); K(IPPROTO_UDP); K(IPPROTO_IPV6);
+    K(IPPROTO_RAW);
+    K(SOL_SOCKET); K(SO_REUSEADDR); K(SO_KEEPALIVE); K(SO_BROADCAST);
+    K(SO_LINGER); K(SO_SNDBUF); K(SO_RCVBUF); K(SO_SNDTIMEO);
+    K(SO_RCVTIMEO); K(SO_ERROR); K(SO_TYPE); K(SO_NOSIGPIPE);
+    K(SOMAXCONN);
+    K(SHUT_RD); K(SHUT_WR); K(SHUT_RDWR);
+    K(MSG_OOB); K(MSG_PEEK); K(MSG_DONTROUTE); K(MSG_WAITALL);
+    K(MSG_DONTWAIT); K(MSG_NOSIGNAL);
+    K(IP_TTL); K(IP_MULTICAST_IF); K(IP_ADD_MEMBERSHIP);
+    K(IP_DROP_MEMBERSHIP); K(IPV6_V6ONLY);
+    K(TCP_NODELAY); K(TCP_MAXSEG); K(TCP_NOPUSH); K(TCP_KEEPALIVE);
+    K(TCP_KEEPINTVL); K(TCP_KEEPCNT); K(TCP_FASTOPEN);
+    K(INADDR_LOOPBACK); K(INET_ADDRSTRLEN); K(INET6_ADDRSTRLEN);
+    K(AI_PASSIVE); K(AI_CANONNAME); K(AI_NUMERICHOST);
+    K(AI_NUMERICSERV); K(AI_ALL); K(AI_V4MAPPED_CFG);
+    K(AI_ADDRCONFIG); K(AI_V4MAPPED);
+    K(EAI_BADFLAGS); K(EAI_NONAME); K(EAI_AGAIN); K(EAI_FAIL);
+    K(EAI_NODATA); K(EAI_FAMILY); K(EAI_SOCKTYPE); K(EAI_SERVICE);
+    K(EAI_MEMORY); K(EAI_SYSTEM); K(EAI_OVERFLOW);
+    K(NI_MAXHOST); K(NI_MAXSERV); K(NI_NOFQDN); K(NI_NUMERICHOST);
+    K(NI_NAMEREQD); K(NI_NUMERICSERV); K(NI_DGRAM);
     printf("RLIM_INFINITY=%llu\n", (unsigned long long)RLIM_INFINITY);
     return 0;
 }

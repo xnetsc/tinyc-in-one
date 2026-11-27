@@ -195,6 +195,25 @@ ISA_X86_64="x86-64 baseline; scalar floating point via SSE2 (xmm registers); no 
 ISA_ARM64="ARMv8.0-A baseline (FP/NEON register file is architectural); scalar FP code generation only, no NEON vector instructions, no SVE"
 ISA_RISCV64="RV64GC baseline (I/M/A/F/D/C); no Vector extension (RVV) support"
 
+# add_win32_pthread <SRC>
+# The win32 target's pthread surface (win32/include/pthread.h,
+# sched.h, semaphore.h) is implemented by win32/lib/pthread.c
+# over the Win32 primitives in kernel32; the implementation
+# ships statically inside libtcc1.a, which every program
+# links, so pthread programs need no extra link flag and no
+# runtime DLL beyond the Windows system ones. Compile it with
+# the just-built cross compiler and merge it into that
+# compiler's libtcc1.a before any dist copy is taken.
+add_win32_pthread() {
+    local SRC=$1
+    local XTCC="$SRC/x86_64-win32-tcc"
+    [ -x "$XTCC" ] || XTCC="$SRC/x86_64-win32-tcc.exe"
+    "$XTCC" -B"$SRC/win32" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/win32/lib/pthread.c" -o "$SRC/tinyc-win32-pthread.o"
+    (cd "$SRC" && ar r "x86_64-win32-libtcc1.a" \
+        "tinyc-win32-pthread.o")
+}
+
 build_one() {
     local TRIPLE=$1 CT=$2 LIBMODE=$3 TDEFS=$4 ISA=$5
     shift 5
@@ -227,6 +246,7 @@ build_one() {
         (cd "$SRC" && make -j"$(nproc)" >/dev/null)
         (cd "$SRC" && make "cross-$CT" >/dev/null)
         if [ "$TRIPLE" = x86_64-w64-mingw32 ]; then
+            add_win32_pthread "$SRC"
             LIBTCC1_REL="lib/tcc/win32/lib/libtcc1.a"
             mkdir -p "$DIST/lib/tcc/win32/lib" "$DIST/lib/tcc/win32/include"
             cp "$SRC/$CT-libtcc1.a" "$DIST/$LIBTCC1_REL"
@@ -432,6 +452,7 @@ PYEOF
     [ -x "$XTCC" ] || XTCC="$SRC/x86_64-win32-tcc.exe"
     "$XTCC" -B"$SRC/win32" -I"$SRC/include" -I"$SRC" \
         -c "$SRC/lib/runmain.c" -o "$SRC/runmain.o"
+    add_win32_pthread "$SRC"
     cp "$SRC/x86_64-win32-libtcc1.a" "$DIST/lib/tcc/win32/lib/libtcc1.a"
     cp "$SRC/runmain.o" "$DIST/lib/tcc/win32/lib/"
     cp "$SRC"/win32/lib/*.def "$DIST/lib/tcc/win32/lib/"

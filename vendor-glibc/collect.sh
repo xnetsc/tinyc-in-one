@@ -18,7 +18,8 @@
 #   * three exception clusters ship with it: the pthread
 #     cluster (pthread.h, sched.h, semaphore.h), the socket
 #     cluster (sys/socket.h, netinet/in.h, netinet/tcp.h,
-#     arpa/inet.h), and dlfcn.h;
+#     arpa/inet.h) together with the name-resolution surface
+#     (netdb.h, rpc/netdb.h), and dlfcn.h;
 #   * everything at or above that level is out: application
 #     frameworks, subsystem interfaces, the rest of the
 #     networking domain, OS interfaces that are neither C nor
@@ -88,9 +89,6 @@ EXCLUDED=(
     sys/quota.h sys/acct.h sys/rseq.h
     # not a C header at all: the Fortran vector-math interface
     finclude/
-    # second cut: the resolver's lookup header leaves the
-    # socket cluster (the cluster is the endpoint API only)
-    netdb.h rpc/netdb.h
     # OS interfaces that are neither C nor POSIX: event and
     # descriptor facilities, tracing, mount and attribute
     # interfaces, process and system control, the ELF and

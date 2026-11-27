@@ -25,6 +25,10 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <stdatomic.h>
 #include <pthread.h>
 
@@ -232,6 +236,79 @@ int main(void) {
         }
         unlink(path);
         rmdir(dir);
+    }
+    /* socket: a loopback stream pair, one exchange each way */
+    {
+        int ls = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in a;
+        socklen_t alen = sizeof a;
+        int ok = 0;
+        memset(&a, 0, sizeof a);
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        a.sin_port = 0;
+        if (ls >= 0 && bind(ls, (struct sockaddr *)&a, sizeof a) == 0 &&
+            listen(ls, 4) == 0 &&
+            getsockname(ls, (struct sockaddr *)&a, &alen) == 0) {
+            int cs = socket(AF_INET, SOCK_STREAM, 0);
+            if (cs >= 0 && connect(cs, (struct sockaddr *)&a, sizeof a) == 0) {
+                int as = accept(ls, NULL, NULL);
+                if (as >= 0) {
+                    char buf[8] = {0};
+                    ok = send(cs, "ping", 4, 0) == 4 &&
+                         recv(as, buf, 4, MSG_WAITALL) == 4 &&
+                         memcmp(buf, "ping", 4) == 0 &&
+                         send(as, "pong", 4, 0) == 4 &&
+                         recv(cs, buf, 4, MSG_WAITALL) == 4 &&
+                         memcmp(buf, "pong", 4) == 0;
+                    close(as);
+                }
+                close(cs);
+            }
+            close(ls);
+        }
+        SECTION("socket.loopback", ok);
+    }
+    /* netdb: numeric lookup, the localhost name, numeric reverse */
+    {
+        struct addrinfo hints, *res = NULL, *p;
+        int ok_num = 0, ok_name = 0, ok_rev = 0;
+        char host[NI_MAXHOST];
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo("127.0.0.1", "80", &hints, &res) == 0 && res) {
+            struct sockaddr_in *sin = (struct sockaddr_in *)res->ai_addr;
+            ok_num = res->ai_family == AF_INET &&
+                     sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK) &&
+                     sin->sin_port == htons(80);
+            freeaddrinfo(res);
+            res = NULL;
+        }
+        if (getaddrinfo("localhost", NULL, &hints, &res) == 0 && res) {
+            for (p = res; p; p = p->ai_next) {
+                struct sockaddr_in *sin = (struct sockaddr_in *)p->ai_addr;
+                if (p->ai_family == AF_INET &&
+                    sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK))
+                    ok_name = 1;
+            }
+            freeaddrinfo(res);
+            res = NULL;
+        }
+        {
+            struct sockaddr_in a;
+            memset(&a, 0, sizeof a);
+            a.sin_family = AF_INET;
+            a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            a.sin_port = htons(80);
+            ok_rev = getnameinfo((struct sockaddr *)&a, sizeof a,
+                                 host, sizeof host, NULL, 0,
+                                 NI_NUMERICHOST) == 0 &&
+                     strcmp(host, "127.0.0.1") == 0;
+        }
+        SECTION("netdb.numeric", ok_num);
+        SECTION("netdb.localhost", ok_name);
+        SECTION("netdb.reverse", ok_rev);
     }
     /* mmap */
     {

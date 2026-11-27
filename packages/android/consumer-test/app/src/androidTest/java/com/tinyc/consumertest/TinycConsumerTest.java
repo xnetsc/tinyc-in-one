@@ -67,6 +67,106 @@ public class TinycConsumerTest {
         }
     }
 
+    /**
+     * The bundled header set's networking and threading surface,
+     * compiled from the AAR's own sysroot and run in memory:
+     * a pthread counter, a socket loopback exchange, and netdb
+     * lookups (numeric and the localhost name). The program
+     * returns the number of the first failing section, 0 when
+     * all pass.
+     */
+    @Test
+    public void networkingAndThreadingRun() throws Exception {
+        TinycAssets.Paths paths = TinycAssets.init(ctx());
+        String prog = String.join("\n",
+            "#include <string.h>",
+            "#include <pthread.h>",
+            "#include <unistd.h>",
+            "#include <sys/socket.h>",
+            "#include <netinet/in.h>",
+            "#include <arpa/inet.h>",
+            "#include <netdb.h>",
+            "static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;",
+            "static int counter;",
+            "static void *worker(void *arg) {",
+            "    int i; (void)arg;",
+            "    for (i = 0; i < 25000; i++) {",
+            "        pthread_mutex_lock(&lock);",
+            "        counter++;",
+            "        pthread_mutex_unlock(&lock);",
+            "    }",
+            "    return 0;",
+            "}",
+            "int main(void) {",
+            "    pthread_t th[4]; int i, made = 0;",
+            "    for (i = 0; i < 4; i++)",
+            "        if (pthread_create(&th[i], 0, worker, 0) == 0) made++;",
+            "    for (i = 0; i < made; i++) pthread_join(th[i], 0);",
+            "    if (made != 4 || counter != 100000) return 1;",
+            "    {",
+            "        int ls = socket(AF_INET, SOCK_STREAM, 0);",
+            "        struct sockaddr_in a; socklen_t alen = sizeof a;",
+            "        int ok = 0;",
+            "        memset(&a, 0, sizeof a);",
+            "        a.sin_family = AF_INET;",
+            "        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);",
+            "        a.sin_port = 0;",
+            "        if (ls >= 0 && bind(ls, (struct sockaddr *)&a, sizeof a) == 0",
+            "            && listen(ls, 4) == 0",
+            "            && getsockname(ls, (struct sockaddr *)&a, &alen) == 0) {",
+            "            int cs = socket(AF_INET, SOCK_STREAM, 0);",
+            "            if (cs >= 0 && connect(cs, (struct sockaddr *)&a, sizeof a) == 0) {",
+            "                int as = accept(ls, 0, 0);",
+            "                if (as >= 0) {",
+            "                    char b[8] = {0};",
+            "                    ok = send(cs, \"ping\", 4, 0) == 4",
+            "                        && recv(as, b, 4, MSG_WAITALL) == 4",
+            "                        && memcmp(b, \"ping\", 4) == 0",
+            "                        && send(as, \"pong\", 4, 0) == 4",
+            "                        && recv(cs, b, 4, MSG_WAITALL) == 4",
+            "                        && memcmp(b, \"pong\", 4) == 0;",
+            "                    close(as);",
+            "                }",
+            "                close(cs);",
+            "            }",
+            "            close(ls);",
+            "        }",
+            "        if (!ok) return 2;",
+            "    }",
+            "    {",
+            "        struct addrinfo hints, *res = 0, *p;",
+            "        int ok_num = 0, ok_name = 0;",
+            "        memset(&hints, 0, sizeof hints);",
+            "        hints.ai_family = AF_INET;",
+            "        hints.ai_socktype = SOCK_STREAM;",
+            "        if (getaddrinfo(\"127.0.0.1\", \"80\", &hints, &res) == 0 && res) {",
+            "            struct sockaddr_in *sin = (struct sockaddr_in *)res->ai_addr;",
+            "            ok_num = res->ai_family == AF_INET",
+            "                && sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)",
+            "                && sin->sin_port == htons(80);",
+            "            freeaddrinfo(res); res = 0;",
+            "        }",
+            "        if (!ok_num) return 3;",
+            "        if (getaddrinfo(\"localhost\", 0, &hints, &res) == 0 && res) {",
+            "            for (p = res; p; p = p->ai_next) {",
+            "                struct sockaddr_in *sin = (struct sockaddr_in *)p->ai_addr;",
+            "                if (p->ai_family == AF_INET",
+            "                    && sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK))",
+            "                    ok_name = 1;",
+            "            }",
+            "            freeaddrinfo(res); res = 0;",
+            "        }",
+            "        if (!ok_name) return 4;",
+            "    }",
+            "    return 0;",
+            "}");
+        try (Tinyc t = Tinyc.create(paths)) {
+            t.setOutputType(Tinyc.OUTPUT_MEMORY);
+            t.compileString(prog);
+            assertEquals(0, t.run("prog"));
+        }
+    }
+
     @Test
     public void runCliVersionSucceeds() throws Exception {
         TinycAssets.init(ctx());

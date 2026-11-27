@@ -157,6 +157,9 @@ LAYOUT_ASSERTS = """
 #include <sys/resource.h>
 #include <sys/ucontext.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <fenv.h>
@@ -267,6 +270,43 @@ SA_SIZE(mbstate_t, 128);
 SA_SIZE(struct sched_param, 8);
 SA_SIZE(struct utimbuf, 16);
 SA_SIZE(struct lconv, 96);
+
+SA_SIZE(socklen_t, 4);
+SA_SIZE(struct sockaddr, 16);
+SA_OFF(struct sockaddr, sa_family, 1);
+SA_OFF(struct sockaddr, sa_data, 2);
+SA_SIZE(struct sockaddr_storage, 128);
+SA_OFF(struct sockaddr_storage, __ss_align, 8);
+SA_SIZE(struct sockaddr_in, 16);
+SA_OFF(struct sockaddr_in, sin_port, 2);
+SA_OFF(struct sockaddr_in, sin_addr, 4);
+SA_SIZE(struct in6_addr, 16);
+SA_SIZE(struct sockaddr_in6, 28);
+SA_OFF(struct sockaddr_in6, sin6_port, 2);
+SA_OFF(struct sockaddr_in6, sin6_addr, 8);
+SA_OFF(struct sockaddr_in6, sin6_scope_id, 24);
+SA_SIZE(struct ip_mreq, 8);
+SA_SIZE(struct ipv6_mreq, 20);
+SA_SIZE(struct linger, 8);
+SA_SIZE(struct msghdr, 48);
+SA_OFF(struct msghdr, msg_iov, 16);
+SA_OFF(struct msghdr, msg_iovlen, 24);
+SA_OFF(struct msghdr, msg_control, 32);
+SA_OFF(struct msghdr, msg_controllen, 40);
+SA_OFF(struct msghdr, msg_flags, 44);
+SA_SIZE(struct cmsghdr, 12);
+SA_SIZE(struct addrinfo, 48);
+SA_OFF(struct addrinfo, ai_addrlen, 16);
+SA_OFF(struct addrinfo, ai_addr, 24);
+SA_OFF(struct addrinfo, ai_canonname, 32);
+SA_OFF(struct addrinfo, ai_next, 40);
+SA_SIZE(struct hostent, 32);
+SA_OFF(struct hostent, h_addr_list, 24);
+SA_SIZE(struct netent, 24);
+SA_SIZE(struct servent, 32);
+SA_OFF(struct servent, s_port, 16);
+SA_OFF(struct servent, s_proto, 24);
+SA_SIZE(struct protoent, 24);
 
 int main(void) { return 0; }
 """

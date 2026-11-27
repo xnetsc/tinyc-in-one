@@ -30,9 +30,9 @@ extensions, plus the individual kernel UAPI headers that surface's
     facilities, ptrace, prctl, mount, the extended-attribute
     and process-control interfaces, the syscall number table
     (syscall.h, sys/syscall.h), the Android system-properties
-    interface, and their kin. The socket cluster is the
-    endpoint API only and no longer carries netdb.h: name
-    lookup is the resolver's layer;
+    interface, and their kin. The socket cluster carries
+    netdb.h with it: name lookup ships, the resolver library
+    behind it (resolv.h) does not;
     One member of that class stays: sys/user.h, because
     bionic's sys/ucontext.h (named by signal.h) includes it —
     a closure keep, not surface (the position sys/procfs.h
@@ -101,14 +101,15 @@ UAPI_DIRS = ("linux", "asm-generic") + tuple(
 
 # Top-level headers that do not ship: other libraries' surfaces
 # (zlib, JNI, ICU's local config), the application-level POSIX
-# message-queue, AIO and DNS-resolver surfaces, the resolver's
-# lookup header, and the convenience / legacy class. (fstab.h,
+# message-queue and AIO surfaces, the DNS resolver library
+# (resolv.h), and the convenience / legacy class. (fstab.h,
 # re_comp.h, regexp.h, stab.h and a.out.h belong to the same
-# class; the NDK tree carries none of them.)
+# class; the NDK tree carries none of them.) The lookup header
+# netdb.h ships with the socket cluster: name resolution is
+# part of that surface.
 EXCLUDED_FILES = {
     "zlib.h", "zconf.h", "jni.h", "uconfig_local.h",
     "mqueue.h", "aio.h", "resolv.h",
-    "netdb.h",
     "getopt.h", "pty.h", "mntent.h", "stdio_ext.h",
     "utmp.h", "utmpx.h", "lastlog.h", "sysexits.h", "paths.h",
     "elf.h", "link.h", "fts.h", "execinfo.h",

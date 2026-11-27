@@ -15,6 +15,14 @@
 # PT_INTERP and DT_NEEDED are checked. The product runs only on
 # Android (the emulator job); here the check is link-level - a
 # failed link is itself the unresolved-symbol failure.
+#
+# The linux-gnu triples get a hosted battery of their own
+# (tests/gnu_battery.c): stdio file IO, pthread, a socket
+# loopback exchange and netdb lookup, compiled with the
+# triple's packaged compiler against the bundled glibc headers
+# and crt objects. The product runs here: natively for the
+# host triple, under qemu-user for the other two (SKIP when
+# the qemu binary is absent, the test_hosts.sh rule).
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -132,6 +140,38 @@ battery_android() {
     readelf -d "$out" >> "$LOG" 2>&1
 }
 
+# battery_gnu <triple> <qemu-binary-or-native> <qemu-sysroot>
+battery_gnu() {
+    local triple=$1 qemu=$2 sysroot=$3
+    local dist=$ROOT/build/dist/$triple
+    if [ ! -x "$dist/bin/tinyc" ]; then
+        note "SKIP: $triple gnu battery (not built)"
+        return
+    fi
+    local out=$TMP/gnu-battery-$triple
+    if ! "$dist/bin/tinyc" "$ROOT/tests/gnu_battery.c" -lpthread \
+            -o "$out" >> "$LOG" 2>&1; then
+        fail "$triple: gnu battery compile/link failed"
+        return
+    fi
+    local -a RUN=()
+    if [ "$qemu" != native ]; then
+        if ! command -v "$qemu" >/dev/null 2>&1; then
+            note "SKIP: $triple gnu battery run ($qemu not installed; link passed)"
+            return
+        fi
+        RUN=("$qemu" -L "$sysroot")
+    fi
+    local bout rc
+    bout=$("${RUN[@]}" "$out" 2>&1) && rc=0 || rc=$?
+    echo "$bout" >> "$LOG"
+    if [ $rc -eq 0 ] && echo "$bout" | grep -q "BATTERY OK"; then
+        note "PASS: $triple gnu battery (stdio, pthread, socket, netdb; ran ${qemu})"
+    else
+        fail "$triple: gnu battery run failed (${qemu}): $(echo "$bout" | grep FAIL | head -3 | tr '\n' ' ')"
+    fi
+}
+
 smoke x86_64-linux-gnu    elf "Advanced Micro Devices X86-64" "/lib64/ld-linux-x86-64.so.2"
 smoke aarch64-linux-gnu   elf "AArch64"                       "/lib/ld-linux-aarch64.so.1"
 smoke riscv64-linux-gnu   elf "RISC-V"                        "/lib/ld-linux-riscv64-lp64d.so.1"
@@ -140,6 +180,17 @@ smoke aarch64-linux-android elf "AArch64"                     "/system/bin/linke
 smoke x86_64-linux-android  elf "Advanced Micro Devices X86-64" "/system/bin/linker64"
 battery_android aarch64-linux-android
 battery_android x86_64-linux-android
+if [ "$HOST_TRIPLE" = x86_64-linux-gnu ]; then
+    battery_gnu x86_64-linux-gnu native ""
+else
+    battery_gnu x86_64-linux-gnu qemu-x86_64-static /usr/x86_64-linux-gnu
+fi
+if [ "$HOST_TRIPLE" = aarch64-linux-gnu ]; then
+    battery_gnu aarch64-linux-gnu native ""
+else
+    battery_gnu aarch64-linux-gnu qemu-aarch64-static /usr/aarch64-linux-gnu
+fi
+battery_gnu riscv64-linux-gnu qemu-riscv64-static /usr/riscv64-linux-gnu
 
 echo >> "$LOG"
 if [ $FAIL -eq 0 ]; then note "MATRIX SMOKE: ALL PASS"; else note "MATRIX SMOKE: FAILURES PRESENT"; fi

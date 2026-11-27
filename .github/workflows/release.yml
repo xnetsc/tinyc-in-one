@@ -560,6 +560,17 @@ jobs:
         run: |
           bash tests/windows/run_windows_simd_smoke.sh > test-outputs/win-simd-smoke.log 2>&1
 
+      # Feature evidence for the win32 target surface the
+      # header-consistency pass completed: the pthread program
+      # (linked with no -lpthread; its imports are checked to
+      # stay within the Windows system DLLs) and the Winsock
+      # getaddrinfo/loopback program, both compiled with the
+      # built tinyc.exe and run natively.
+      - name: Feature smoke (PE)
+        shell: bash
+        run: |
+          bash tests/windows/run_windows_feature_smoke.sh > test-outputs/win-feature-smoke.log 2>&1
+
       # Cross-frame unwind evidence for the __chkstk prolog: a
       # >=4096-byte frame's UNWIND_INFO must put the frame setup
       # codes at the end of the call to __chkstk (prolog offset
