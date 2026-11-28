@@ -1162,6 +1162,23 @@ const PX_SIZE = 1024, PX_MAXARGS = 16,
 const PX_IDLE = 0, PX_REQUEST = 1, PX_DONE = 2;
 const PX_OK = 0, PX_ERROR = 1;
 const PX_TYPE_CODES = { i32: 1, i64: 2, f32: 3, f64: 4 };
+// The net-request block: the channel a worker's JS-module
+// replicas send transport operations (fetch / WebSocket) to
+// the coordinator through. One per thread, reserved from the
+// region allocator on first use. Same shape discipline as the
+// PX block: a state word the worker waits on (servicing load
+// tasks while it waits), a JSON descriptor the coordinator
+// reads, a JSON result the coordinator writes; bulk bytes
+// (request bodies, response bodies, messages) move through
+// the shared memory itself, addressed by the descriptor.
+const NET_STATE = 0,       // futex word: NET_IDLE/NET_REQUEST/NET_DONE
+  NET_OP = 4,              // operation code (see rtNetServices)
+  NET_DESC = 8,            // descriptor JSON address
+  NET_DESCLEN = 12,        // descriptor JSON length
+  NET_RESULT = 16,         // result JSON address (coordinator-allocated)
+  NET_RESULTLEN = 20;      // result JSON length
+const NET_SIZE = 256;
+const NET_IDLE = 0, NET_REQUEST = 1, NET_DONE = 2;
 // The thread-region allocator (§3.1): exact-size free lists
 // for the regions a thread owns — its record, its key array,
 // its per-module stacks and TLS areas — whose sizes are
@@ -1214,6 +1231,7 @@ export function startThreadWorker(boot, helpers, port) {
       recordAddr: boot.recordAddr,
       keyArrayAddr: boot.keyArrayAddr || 0,
       proxyAddr: 0,            // §5.7 proxy block, reserved lazily
+      netAddr: 0,              // net-request block, reserved lazily
       regions: boot.regions || {}, // canonical -> { stackBase, tlsArea }
     },
     hostImports: new Set(boot.hostImports ?? []), // "module.name" keys
@@ -1496,6 +1514,155 @@ function rtHostProxyCall(rt, key, type, args) {
   return result;
 }
 
+/** This thread's net-request block, reserved on first use. */
+function rtNetBlock(rt) {
+  if (!rt.my.netAddr) rt.my.netAddr = rtRegionAlloc(rt, NET_SIZE, 8);
+  return rt.my.netAddr;
+}
+
+/** Send one transport operation to the coordinator and wait
+ *  for its result descriptor. The wait services load tasks,
+ *  like a host-proxy wait: the coordinator may need this
+ *  thread to build replicas before it can complete a request
+ *  the operation depends on. Throws the coordinator's error
+ *  text when the result reports failure. */
+function rtNetCall(rt, op, desc) {
+  const base = rtNetBlock(rt);
+  const view = rt.view();
+  const sidx = base / 4;
+  if (Atomics.load(view, sidx) !== NET_IDLE) {
+    throw new Error('tinyc: net: a net request is already outstanding on this thread');
+  }
+  const bytes = rtEncoder.encode(JSON.stringify(desc));
+  const ptr = rt.shimEnv.env.malloc(bytes.length || 1);
+  new Uint8Array(rt.memory.buffer).set(bytes, ptr);
+  rt.writeI32(base + NET_OP, op);
+  rt.writeI32(base + NET_DESC, ptr);
+  rt.writeI32(base + NET_DESCLEN, bytes.length);
+  Atomics.store(view, sidx, NET_REQUEST);
+  rt.port.postMessage({ type: 'net-request', addr: base });
+  while (Atomics.load(view, sidx) !== NET_DONE) {
+    rtServiceLoads(rt);
+    if (Atomics.load(view, sidx) === NET_DONE) break;
+    const v = Atomics.load(view, sidx);
+    if (v !== NET_DONE) Atomics.wait(view, sidx, v, POLL_MS);
+  }
+  const rptr = rt.readI32(base + NET_RESULT);
+  const rlen = rt.readI32(base + NET_RESULTLEN);
+  const text = rtDecoder.decode(
+    new Uint8Array(rt.memory.buffer).slice(rptr, rptr + rlen));
+  rt.shimEnv.env.free(rptr);
+  rt.shimEnv.env.free(ptr);
+  Atomics.store(view, sidx, NET_IDLE);
+  const result = JSON.parse(text);
+  if (!result.ok) throw new Error(result.error || 'tinyc: net: request failed');
+  return result;
+}
+
+/** The ctx.net surface for a JS module replica in this worker:
+ *  the same contract as the coordinator's, synchronous — each
+ *  operation crosses to the coordinator through the net-request
+ *  block and the calling thread waits. Bulk bytes move through
+ *  the shared memory: wsSend's bytes are read from it by the
+ *  coordinator; readBody's and wsRecv's bytes are written into
+ *  it by the coordinator. */
+function rtNetServices(rt) {
+  return {
+    isAsync: false,
+    http: (desc) => {
+      const r = rtNetCall(rt, 1, desc);
+      return { status: r.status, headers: r.headers, bodyLen: r.bodyLen, transfer: r.transfer };
+    },
+    readBody: (transfer, dest, offset, len) => {
+      rtNetCall(rt, 6, { transfer, dest, offset, len });
+    },
+    dropBody: (transfer) => { rtNetCall(rt, 7, { transfer }); },
+    wsOpen: (url, protocols) => rtNetCall(rt, 2, { url, protocols }).conn,
+    wsSend: (conn, ptr, len, binary) => {
+      rtNetCall(rt, 3, { conn, ptr, len, binary: !!binary });
+    },
+    wsRecv: (conn, dest, capacity) => {
+      const r = rtNetCall(rt, 4, { conn, dest, capacity });
+      return { received: r.received, binary: r.binary, fin: r.fin, remaining: r.remaining };
+    },
+    wsClose: (conn) => { rtNetCall(rt, 5, { conn }); },
+  };
+}
+
+/** The ctx a JS implementation runs against in this worker:
+ *  the worker's shim context plus the process allocator (its
+ *  state lives in the shared memory), callExport (a function
+ *  export of any replica this thread holds, resolved through
+ *  the worker's symbol table) and the synchronous net services.
+ *  One ctx per replica record. */
+function rtJsCtx(rt, wrec) {
+  if (wrec.jsCtx) return wrec.jsCtx;
+  const ctx = { ...rt.shimCtx };
+  ctx.alloc = (n) => rt.shimEnv.env.malloc(n | 0);
+  ctx.free = (p) => { rt.shimEnv.env.free(p | 0); };
+  ctx.callExport = (name, ...args) => {
+    const sym = rt.symbols.get(name);
+    const target = sym && sym.wrec.instance
+      ? sym.wrec.instance.exports[name] : undefined;
+    if (typeof target !== 'function') {
+      throw new Error(
+        `tinyc: JS module "${wrec.canonical}": no function ` +
+        `export named "${name}" to call`);
+    }
+    return target(...args);
+  };
+  ctx.callFunction = (ptr, ...args) => {
+    const fn = rt.table.get(ptr | 0);
+    if (typeof fn !== 'function') {
+      throw new Error(
+        `tinyc: JS module "${wrec.canonical}": no function ` +
+        `at table index ${ptr} to call`);
+    }
+    return fn(...args);
+  };
+  ctx.net = rtNetServices(rt);
+  wrec.jsCtx = ctx;
+  return ctx;
+}
+
+/** Evaluate a replica's JS implementation in this worker and
+ *  bind its declared JS exports: wrapped per the shim
+ *  convention with their declared signatures and placed in
+ *  this thread's table at the module's slots, so guest code
+ *  calls them and takes their addresses like wasm functions.
+ *  No Suspending wrap here: in a worker the implementation
+ *  runs synchronously (its net operations block through the
+ *  net-request channel), so an export declared async in the
+ *  manifest returns plain values in this context. */
+function rtBindJsPart(rt, wrec, wasmInstance) {
+  const meta = wrec.meta;
+  let raw;
+  try {
+    raw = rt.helpers.evaluateJsModule(meta.sourceText, wrec.canonical);
+  } catch (err) {
+    throw new Error(
+      `tinyc: cannot load "${wrec.canonical}": its JS ` +
+      `implementation failed to evaluate: ${err.message}`);
+  }
+  const ctx = rtJsCtx(rt, wrec);
+  const out = {};
+  for (const e of meta.exports) {
+    if (e.origin !== 'js') continue;
+    const fn = raw[e.name];
+    if (typeof fn !== 'function') {
+      throw new Error(
+        `tinyc: cannot load "${wrec.canonical}": its JS ` +
+        `implementation does not provide the declared export ` +
+        `"${e.name}"`);
+    }
+    const bound = (...args) => fn(ctx, ...args);
+    const wrapped = rt.helpers.makeWrapperFunction(bound, e.sig);
+    rt.table.set(wrec.tableBase + e.value, wrapped);
+    out[e.name] = wrapped;
+  }
+  return out;
+}
+
 /** The directory block covering `tid` (§6.6), or 0 when the
  *  tid is past the table's arithmetic cap. With `create`, a
  *  missing block is reserved, zeroed and published by CAS:
@@ -1653,11 +1820,31 @@ function rtAddReplica(rt, m) {
     tlsBaseGlobal: null,
     importTypes: null,
   };
-  const compiled = new WebAssembly.Module(m.bodyBytes);
-  wrec.importTypes = rt.helpers.parseImportTypes(m.bodyBytes);
-  const instance = new WebAssembly.Instance(
-    compiled, rtReplicaImports(rt, wrec, compiled));
-  wrec.instance = instance;
+  // A js-kind replica evaluates the unit's implementation in
+  // this worker (the code is per-context; the data is the
+  // shared memory, as with a wasm replica). A mixed replica
+  // instantiates its wasm body first, then binds the JS part
+  // against the merged record.
+  let instance = null;
+  if (meta.kind !== 'js') {
+    const compiled = new WebAssembly.Module(m.bodyBytes);
+    wrec.importTypes = rt.helpers.parseImportTypes(m.bodyBytes);
+    instance = new WebAssembly.Instance(
+      compiled, rtReplicaImports(rt, wrec, compiled));
+    wrec.instance = instance;
+  } else {
+    wrec.importTypes = new Map();
+  }
+  if (meta.kind !== 'wasm') {
+    const jsExports = rtBindJsPart(rt, wrec, instance);
+    wrec.instance = instance
+      ? { exports: { ...instance.exports, ...jsExports } }
+      : { exports: {
+          ...jsExports,
+          __tinyc_dylink_init: () => 0,
+          __tinyc_dylink_fini: () => {},
+        } };
+  }
   rt.records.set(wrec.canonical, wrec);
   rt.byHandle.set(wrec.handle, wrec);
   // Register by unit file name, first loaded wins (the
@@ -1862,8 +2049,21 @@ function rtFunctionImport(rt, wrec, imp, visible) {
     }, type);
   }
   const name = imp.name;
-  return rt.helpers.makeWrapperFunction(() => {
-    throw new Error(`tinyc: call to unresolved function "${name}"`);
+  // No symbol is registered yet: the provider may be this
+  // very module (a mixed unit whose wasm body imports its own
+  // JS part — its symbols register only after instantiation)
+  // or a replica built later in boot order. Resolve at call
+  // time, when every replica of the process exists; a name
+  // that is still unprovided then fails as unresolved, as on
+  // the coordinator.
+  return rt.helpers.makeWrapperFunction((...args) => {
+    const s = rt.symbols.get(name);
+    const target = s && s.entry.kind === 0 && visible(s.wrec) &&
+      s.wrec.instance ? s.wrec.instance.exports[name] : undefined;
+    if (typeof target !== 'function') {
+      throw new Error(`tinyc: call to unresolved function "${name}"`);
+    }
+    return target(...args);
   }, type);
 }
 

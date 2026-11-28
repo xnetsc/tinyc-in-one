@@ -134,6 +134,19 @@ fs.mkdirSync(sysrootOut, { recursive: true });
 const problems = [];
 const libNotices = [];
 
+// The wasm32-wasi sysroot carries the js-kind library units
+// (libcurl / libpcre2 / libmbedtls): regenerate them from their
+// libsrc sources first, so the staged copies are never stale.
+if (targets.includes('wasm32-wasi')) {
+  const gen = spawnSync(process.execPath, [
+    path.join(here, 'gen-js-lib-units.mjs'),
+  ], { stdio: 'inherit' });
+  if (gen.status !== 0) {
+    problems.push('wasm32-wasi: gen-js-lib-units.mjs failed ' +
+      `(exit ${gen.status})`);
+  }
+}
+
 for (const target of targets) {
   const manifestPath = path.join(manifestsDir, `${target}.json`);
   if (!fs.existsSync(manifestPath)) {

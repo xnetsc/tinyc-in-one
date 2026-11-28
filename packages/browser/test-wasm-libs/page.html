@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tinyc wasm-libs suite</title>
+<script type="module">
+import { createProcess } from '/index.mjs';
+import { runSuite } from '/test-wasm-libs/suite.mjs';
+
+const UNIT_NAMES = [
+  'libcurl.tinyc.js', 'libpcre2.tinyc.js', 'libmbedtls.tinyc.js',
+  'libhybrid.tinyc.js', 'libhybridbad.tinyc.js',
+];
+const GUEST_NAMES = [
+  'crypto_need', 'crypto_dlopen', 'regex_need', 'regex_dlopen',
+  'curl_need', 'curl_dlopen', 'curl_ws', 'curl_nodecl',
+  'hybrid_need', 'hybrid_dlopen', 'hybrid_bad_need', 'remote_dlopen',
+];
+
+async function fetchBytes(name) {
+  const res = await fetch('/' + name);
+  if (!res.ok) throw new Error(`fetch ${name}: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+try {
+  const units = new Map();
+  for (const name of UNIT_NAMES) units.set(name, await fetchBytes(name));
+  const guests = new Map();
+  for (const name of GUEST_NAMES) guests.set(name, await fetchBytes(name));
+  const tier = window.crossOriginIsolated ? 'real' : 'simulated';
+  const results = await runSuite({
+    createProcess,
+    guestBytes: async (name) => guests.get(name),
+    units,
+    baseUrl: location.origin + '/',
+    tier,
+    onCase: (name) => { document.title = 'running: ' + name; },
+    prefetchRemote: async (name) => {
+      const res = await fetch('/' + name);
+      if (!res.ok) throw new Error(`prefetch ${name}: HTTP ${res.status}`);
+      const text = await res.text();
+      const manifest = JSON.parse(
+        text.slice(text.indexOf(' = ') + 3, text.lastIndexOf(';')));
+      const registry = globalThis.__TINYC_DYLINK_REGISTRY__ ??=
+        Object.create(null);
+      registry[`/sysroot/lib/${name}`] = manifest;
+    },
+  });
+  window.__wasmLibsResult = { tier, results };
+} catch (err) {
+  window.__wasmLibsResult = {
+    tier: window.crossOriginIsolated ? 'real' : 'simulated',
+    results: [{ name: 'harness', ok: false, detail: String(err && err.stack || err) }],
+  };
+}
+document.title = 'done';
+</script>

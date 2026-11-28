@@ -1,123 +1,270 @@
 {
-  "name": "tinyc-sysroot",
-  "version": 1,
-  "target": "wasm32-wasi",
-  "binPath": "/sysroot/bin/tinyc",
-  "includeDir": "/sysroot/include",
-  "includeFiles": [
-    {
-      "path": "/sysroot/include/arm_neon.h",
-      "source": "include/arm_neon.h"
-    },
-    {
-      "path": "/sysroot/include/ctype.h",
-      "source": "include/ctype.h"
-    },
-    {
-      "path": "/sysroot/include/dlfcn.h",
-      "source": "include/dlfcn.h"
-    },
-    {
-      "path": "/sysroot/include/emmintrin.h",
-      "source": "include/emmintrin.h"
-    },
-    {
-      "path": "/sysroot/include/float.h",
-      "source": "include/float.h"
-    },
-    {
-      "path": "/sysroot/include/iso646.h",
-      "source": "include/iso646.h"
-    },
-    {
-      "path": "/sysroot/include/limits.h",
-      "source": "include/limits.h"
-    },
-    {
-      "path": "/sysroot/include/math.h",
-      "source": "include/math.h"
-    },
-    {
-      "path": "/sysroot/include/pthread.h",
-      "source": "include/pthread.h"
-    },
-    {
-      "path": "/sysroot/include/stdalign.h",
-      "source": "include/stdalign.h"
-    },
-    {
-      "path": "/sysroot/include/stdarg.h",
-      "source": "include/stdarg.h"
-    },
-    {
-      "path": "/sysroot/include/stdatomic.h",
-      "source": "include/stdatomic.h"
-    },
-    {
-      "path": "/sysroot/include/stdbool.h",
-      "source": "include/stdbool.h"
-    },
-    {
-      "path": "/sysroot/include/stddef.h",
-      "source": "include/stddef.h"
-    },
-    {
-      "path": "/sysroot/include/stdint.h",
-      "source": "include/stdint.h"
-    },
-    {
-      "path": "/sysroot/include/stdio.h",
-      "source": "include/stdio.h"
-    },
-    {
-      "path": "/sysroot/include/stdlib.h",
-      "source": "include/stdlib.h"
-    },
-    {
-      "path": "/sysroot/include/stdnoreturn.h",
-      "source": "include/stdnoreturn.h"
-    },
-    {
-      "path": "/sysroot/include/string.h",
-      "source": "include/string.h"
-    },
-    {
-      "path": "/sysroot/include/tccdefs.h",
-      "source": "include/tccdefs.h"
-    },
-    {
-      "path": "/sysroot/include/tgmath.h",
-      "source": "include/tgmath.h"
-    },
-    {
-      "path": "/sysroot/include/varargs.h",
-      "source": "include/varargs.h"
-    },
-    {
-      "path": "/sysroot/include/wasm_simd128.h",
-      "source": "include/wasm_simd128.h"
-    },
-    {
-      "path": "/sysroot/include/xmmintrin.h",
-      "source": "include/xmmintrin.h"
-    },
-    {
-      "path": "/sysroot/include/tcclib.h",
-      "source": "tcclib.h"
-    }
-  ],
-  "libDir": "/sysroot/lib",
-  "libFiles": [
-    {
-      "binary": true,
-      "path": "/sysroot/lib/libtcc1.a",
-      "source": "lib/wasm32-wasi/libtcc1.a"
-    }
-  ],
-  "outputs": {
-    "module": {
-      "format": "WebAssembly",
-      "ext": ".wasm"
-    }
+ "name": "tinyc-sysroot",
+ "version": 1,
+ "target": "wasm32-wasi",
+ "binPath": "/sysroot/bin/tinyc",
+ "includeDir": "/sysroot/include",
+ "includeFiles": [
+  {
+   "path": "/sysroot/include/arm_neon.h",
+   "source": "include/arm_neon.h"
+  },
+  {
+   "path": "/sysroot/include/ctype.h",
+   "source": "include/ctype.h"
+  },
+  {
+   "path": "/sysroot/include/dlfcn.h",
+   "source": "include/dlfcn.h"
+  },
+  {
+   "path": "/sysroot/include/emmintrin.h",
+   "source": "include/emmintrin.h"
+  },
+  {
+   "path": "/sysroot/include/float.h",
+   "source": "include/float.h"
+  },
+  {
+   "path": "/sysroot/include/iso646.h",
+   "source": "include/iso646.h"
+  },
+  {
+   "path": "/sysroot/include/limits.h",
+   "source": "include/limits.h"
+  },
+  {
+   "path": "/sysroot/include/math.h",
+   "source": "include/math.h"
+  },
+  {
+   "path": "/sysroot/include/pthread.h",
+   "source": "include/pthread.h"
+  },
+  {
+   "path": "/sysroot/include/stdalign.h",
+   "source": "include/stdalign.h"
+  },
+  {
+   "path": "/sysroot/include/stdarg.h",
+   "source": "include/stdarg.h"
+  },
+  {
+   "path": "/sysroot/include/stdatomic.h",
+   "source": "include/stdatomic.h"
+  },
+  {
+   "path": "/sysroot/include/stdbool.h",
+   "source": "include/stdbool.h"
+  },
+  {
+   "path": "/sysroot/include/stddef.h",
+   "source": "include/stddef.h"
+  },
+  {
+   "path": "/sysroot/include/stdint.h",
+   "source": "include/stdint.h"
+  },
+  {
+   "path": "/sysroot/include/stdio.h",
+   "source": "include/stdio.h"
+  },
+  {
+   "path": "/sysroot/include/stdlib.h",
+   "source": "include/stdlib.h"
+  },
+  {
+   "path": "/sysroot/include/stdnoreturn.h",
+   "source": "include/stdnoreturn.h"
+  },
+  {
+   "path": "/sysroot/include/string.h",
+   "source": "include/string.h"
+  },
+  {
+   "path": "/sysroot/include/tccdefs.h",
+   "source": "include/tccdefs.h"
+  },
+  {
+   "path": "/sysroot/include/tgmath.h",
+   "source": "include/tgmath.h"
+  },
+  {
+   "path": "/sysroot/include/varargs.h",
+   "source": "include/varargs.h"
+  },
+  {
+   "path": "/sysroot/include/wasm_simd128.h",
+   "source": "include/wasm_simd128.h"
+  },
+  {
+   "path": "/sysroot/include/xmmintrin.h",
+   "source": "include/xmmintrin.h"
+  },
+  {
+   "path": "/sysroot/include/tcclib.h",
+   "source": "tcclib.h"
+  },
+  {
+   "path": "/sysroot/include/time.h",
+   "source": "include/time.h"
+  },
+  {
+   "path": "/sysroot/include/inttypes.h",
+   "source": "include/inttypes.h"
+  },
+  {
+   "path": "/sysroot/include/sys/types.h",
+   "source": "include/sys/types.h"
+  },
+  {
+   "path": "/sysroot/include/sys/select.h",
+   "source": "include/sys/select.h"
+  },
+  {
+   "path": "/sysroot/include/sys/time.h",
+   "source": "include/sys/time.h"
+  },
+  {
+   "path": "/sysroot/include/sys/socket.h",
+   "source": "include/sys/socket.h"
+  },
+  {
+   "path": "/sysroot/include/curl/curl.h",
+   "source": "include/curl/curl.h"
+  },
+  {
+   "path": "/sysroot/include/curl/curlver.h",
+   "source": "include/curl/curlver.h"
+  },
+  {
+   "path": "/sysroot/include/curl/system.h",
+   "source": "include/curl/system.h"
+  },
+  {
+   "path": "/sysroot/include/curl/easy.h",
+   "source": "include/curl/easy.h"
+  },
+  {
+   "path": "/sysroot/include/curl/multi.h",
+   "source": "include/curl/multi.h"
+  },
+  {
+   "path": "/sysroot/include/curl/urlapi.h",
+   "source": "include/curl/urlapi.h"
+  },
+  {
+   "path": "/sysroot/include/curl/options.h",
+   "source": "include/curl/options.h"
+  },
+  {
+   "path": "/sysroot/include/curl/header.h",
+   "source": "include/curl/header.h"
+  },
+  {
+   "path": "/sysroot/include/curl/websockets.h",
+   "source": "include/curl/websockets.h"
+  },
+  {
+   "path": "/sysroot/include/curl/mprintf.h",
+   "source": "include/curl/mprintf.h"
+  },
+  {
+   "path": "/sysroot/include/curl/typecheck-gcc.h",
+   "source": "include/curl/typecheck-gcc.h"
+  },
+  {
+   "path": "/sysroot/include/pcre2.h",
+   "source": "include/pcre2.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/aes.h",
+   "source": "include/mbedtls/aes.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/base64.h",
+   "source": "include/mbedtls/base64.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/build_info.h",
+   "source": "include/mbedtls/build_info.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/check_config.h",
+   "source": "include/mbedtls/check_config.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/config_adjust_legacy_crypto.h",
+   "source": "include/mbedtls/config_adjust_legacy_crypto.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/config_adjust_ssl.h",
+   "source": "include/mbedtls/config_adjust_ssl.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/config_adjust_x509.h",
+   "source": "include/mbedtls/config_adjust_x509.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/mbedtls_config.h",
+   "source": "include/mbedtls/mbedtls_config.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/md.h",
+   "source": "include/mbedtls/md.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/md5.h",
+   "source": "include/mbedtls/md5.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/platform_time.h",
+   "source": "include/mbedtls/platform_time.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/platform_util.h",
+   "source": "include/mbedtls/platform_util.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/private_access.h",
+   "source": "include/mbedtls/private_access.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/sha256.h",
+   "source": "include/mbedtls/sha256.h"
+  },
+  {
+   "path": "/sysroot/include/mbedtls/sha512.h",
+   "source": "include/mbedtls/sha512.h"
   }
+ ],
+ "libDir": "/sysroot/lib",
+ "libFiles": [
+  {
+   "binary": true,
+   "path": "/sysroot/lib/libtcc1.a",
+   "source": "lib/wasm32-wasi/libtcc1.a"
+  },
+  {
+   "binary": true,
+   "path": "/sysroot/lib/libcurl.tinyc.js",
+   "source": "lib/wasm32-wasi/libcurl.tinyc.js"
+  },
+  {
+   "binary": true,
+   "path": "/sysroot/lib/libpcre2.tinyc.js",
+   "source": "lib/wasm32-wasi/libpcre2.tinyc.js"
+  },
+  {
+   "binary": true,
+   "path": "/sysroot/lib/libmbedtls.tinyc.js",
+   "source": "lib/wasm32-wasi/libmbedtls.tinyc.js"
+  }
+ ],
+ "outputs": {
+  "module": {
+   "format": "WebAssembly",
+   "ext": ".wasm"
+  }
+ }
 }

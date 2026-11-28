@@ -298,6 +298,26 @@ jobs:
           "$EMSDK_NODE" packages/browser/test-threads/run-page.mjs \
             > test-outputs/test-threads-page.log 2>&1
 
+      # The wasm-libs suite (packages/browser/test-wasm-libs)
+      # covers the js-kind and mixed-kind library units —
+      # libcurl, PCRE2 and the mbedTLS crypto subset as JS
+      # implementations, plus a hybrid unit — in both usage
+      # forms (needed and dlopen), with the Node runner on the
+      # simulated tier and the page runner on the real tier.
+      - name: Wasm-libs suite - Node simulated tier
+        run: |
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          "$EMSDK_NODE" --experimental-wasm-jspi packages/browser/test-wasm-libs/run-node.mjs \
+            > test-outputs/test-wasm-libs-node.log 2>&1
+
+      - name: Wasm-libs suite - browser page tiers
+        env:
+          TINYC_PLAYWRIGHT_DIR: /tmp/pw
+        run: |
+          : "${EMSDK_NODE:?emsdk node (EMSDK_NODE) is not set}"
+          "$EMSDK_NODE" packages/browser/test-wasm-libs/run-page.mjs \
+            > test-outputs/test-wasm-libs-page.log 2>&1
+
       - name: Android package - native libs, then the Gradle AAR
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}

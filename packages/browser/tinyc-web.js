@@ -52,6 +52,7 @@ var TinycWeb = (() => {
     createShimContext: () => createShimContext,
     createWasiShim: () => createWasiShim,
     default: () => index_default,
+    evaluateJsModule: () => evaluateJsModule,
     flushIO: () => flushIO,
     getLoadedTargets: () => getLoadedTargets,
     isRunnableTarget: () => isRunnableTarget,
@@ -184,6 +185,138 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/tcclib.h",
         source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/curl/curl.h",
+        source: "include/curl/curl.h"
+      },
+      {
+        path: "/sysroot/include/curl/curlver.h",
+        source: "include/curl/curlver.h"
+      },
+      {
+        path: "/sysroot/include/curl/system.h",
+        source: "include/curl/system.h"
+      },
+      {
+        path: "/sysroot/include/curl/easy.h",
+        source: "include/curl/easy.h"
+      },
+      {
+        path: "/sysroot/include/curl/multi.h",
+        source: "include/curl/multi.h"
+      },
+      {
+        path: "/sysroot/include/curl/urlapi.h",
+        source: "include/curl/urlapi.h"
+      },
+      {
+        path: "/sysroot/include/curl/options.h",
+        source: "include/curl/options.h"
+      },
+      {
+        path: "/sysroot/include/curl/header.h",
+        source: "include/curl/header.h"
+      },
+      {
+        path: "/sysroot/include/curl/websockets.h",
+        source: "include/curl/websockets.h"
+      },
+      {
+        path: "/sysroot/include/curl/mprintf.h",
+        source: "include/curl/mprintf.h"
+      },
+      {
+        path: "/sysroot/include/curl/typecheck-gcc.h",
+        source: "include/curl/typecheck-gcc.h"
+      },
+      {
+        path: "/sysroot/include/pcre2.h",
+        source: "include/pcre2.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/aes.h",
+        source: "include/mbedtls/aes.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/base64.h",
+        source: "include/mbedtls/base64.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/build_info.h",
+        source: "include/mbedtls/build_info.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/check_config.h",
+        source: "include/mbedtls/check_config.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/config_adjust_legacy_crypto.h",
+        source: "include/mbedtls/config_adjust_legacy_crypto.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/config_adjust_ssl.h",
+        source: "include/mbedtls/config_adjust_ssl.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/config_adjust_x509.h",
+        source: "include/mbedtls/config_adjust_x509.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/mbedtls_config.h",
+        source: "include/mbedtls/mbedtls_config.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/md.h",
+        source: "include/mbedtls/md.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/md5.h",
+        source: "include/mbedtls/md5.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/platform_time.h",
+        source: "include/mbedtls/platform_time.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/platform_util.h",
+        source: "include/mbedtls/platform_util.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/private_access.h",
+        source: "include/mbedtls/private_access.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/sha256.h",
+        source: "include/mbedtls/sha256.h"
+      },
+      {
+        path: "/sysroot/include/mbedtls/sha512.h",
+        source: "include/mbedtls/sha512.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -192,6 +325,21 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libtcc1.a",
         source: "lib/wasm32-wasi/libtcc1.a"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libcurl.tinyc.js",
+        source: "lib/wasm32-wasi/libcurl.tinyc.js"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libpcre2.tinyc.js",
+        source: "lib/wasm32-wasi/libpcre2.tinyc.js"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libmbedtls.tinyc.js",
+        source: "lib/wasm32-wasi/libmbedtls.tinyc.js"
       }
     ],
     outputs: {
@@ -6660,6 +6808,18 @@ ${src}`;
 globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(manifest)};
 `;
   }
+  function evaluateJsModule(sourceText, canonical) {
+    const module = { exports: {} };
+    const fn = new Function("module", "exports", sourceText);
+    fn(module, module.exports);
+    const out = module.exports;
+    if (!out || typeof out !== "object") {
+      throw new TinycDylinkError(
+        `tinyc: the JS implementation of "${canonical}" did not register an export table (module.exports is not an object)`
+      );
+    }
+    return out;
+  }
   function manifestToLibrary(manifest, canonical) {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
       throw new TinycDylinkError(`tinyc: manifest for "${canonical}" is not an object`);
@@ -6669,17 +6829,86 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         `tinyc: manifest for "${canonical}" has unsupported version ${manifest.version}`
       );
     }
-    if (typeof manifest.body !== "string") {
+    const kind = manifest.kind === void 0 ? "wasm" : String(manifest.kind);
+    if (kind !== "wasm" && kind !== "js" && kind !== "mixed") {
+      throw new TinycDylinkError(
+        `tinyc: manifest for "${canonical}" has unsupported kind "${manifest.kind}"`
+      );
+    }
+    let sourceText = null;
+    if (kind !== "wasm") {
+      if (typeof manifest.js !== "string") {
+        throw new TinycDylinkError(
+          `tinyc: manifest for "${canonical}" is kind "${kind}" but carries no JS implementation ("js")`
+        );
+      }
+      const jsBytes = base64ToBytes(manifest.js);
+      if (typeof manifest.js_hash === "string" && sha256Hex(jsBytes) !== manifest.js_hash) {
+        throw new TinycDylinkError(
+          `tinyc: manifest for "${canonical}": JS implementation fails its recorded SHA-256 hash`
+        );
+      }
+      sourceText = textDecoder2.decode(jsBytes);
+    }
+    let bodyBytes;
+    if (typeof manifest.body === "string") {
+      bodyBytes = base64ToBytes(manifest.body);
+      if (typeof manifest.hash === "string" && sha256Hex(bodyBytes) !== manifest.hash) {
+        throw new TinycDylinkError(
+          `tinyc: manifest for "${canonical}": body fails its recorded SHA-256 hash`
+        );
+      }
+    } else if (kind === "js") {
+      bodyBytes = base64ToBytes(manifest.js);
+    } else {
       throw new TinycDylinkError(`tinyc: manifest for "${canonical}" carries no body`);
     }
-    const bodyBytes = base64ToBytes(manifest.body);
-    if (typeof manifest.hash === "string" && sha256Hex(bodyBytes) !== manifest.hash) {
-      throw new TinycDylinkError(
-        `tinyc: manifest for "${canonical}": body fails its recorded SHA-256 hash`
-      );
+    const exportEntries = (Array.isArray(manifest.exports) ? manifest.exports : []).map((e) => ({
+      name: String(e.name),
+      kind: e.kind | 0,
+      value: e.value | 0,
+      tls: e.tls ? 1 : 0,
+      origin: e.origin === "js" ? "js" : "wasm",
+      sig: e.sig && Array.isArray(e.sig.params) && Array.isArray(e.sig.results) ? { params: e.sig.params.map(String), results: e.sig.results.map(String) } : null,
+      async: e.async ? 1 : 0
+    }));
+    {
+      const origins = /* @__PURE__ */ new Map();
+      for (const e of exportEntries) {
+        const prev = origins.get(e.name);
+        if (prev !== void 0 && prev !== e.origin) {
+          throw new TinycDylinkError(
+            `tinyc: manifest for "${canonical}": export "${e.name}" is defined twice, once by the wasm body and once by the JS implementation`
+          );
+        }
+        origins.set(e.name, e.origin);
+        if (e.origin === "js") {
+          if (kind === "wasm") {
+            throw new TinycDylinkError(
+              `tinyc: manifest for "${canonical}": export "${e.name}" is declared with JS origin in a wasm-kind unit`
+            );
+          }
+          if (!e.sig) {
+            throw new TinycDylinkError(
+              `tinyc: manifest for "${canonical}": JS export "${e.name}" declares no signature ("sig")`
+            );
+          }
+        }
+      }
+      if (kind === "js") {
+        for (const e of exportEntries) {
+          if (e.origin !== "js") {
+            throw new TinycDylinkError(
+              `tinyc: manifest for "${canonical}": export "${e.name}" is declared with wasm origin in a js-kind unit`
+            );
+          }
+        }
+      }
     }
     const meta = {
       version: 1,
+      kind,
+      sourceText,
       flavor: manifest.flavor | 0,
       memSize: manifest.mem_size | 0,
       memAlign: manifest.mem_align || 16,
@@ -6701,14 +6930,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       // documented default (DEFAULT_SEARCH_DIRS).
       searchDirs: Array.isArray(manifest.search_dirs) ? manifest.search_dirs.map(String) : void 0,
       dataGotFunc: Array.isArray(manifest.data_got_func) ? manifest.data_got_func.map(String) : [],
-      exports: (Array.isArray(manifest.exports) ? manifest.exports : []).map((e) => ({
-        name: String(e.name),
-        kind: e.kind | 0,
-        value: e.value | 0,
-        tls: e.tls ? 1 : 0
-      }))
+      exports: exportEntries
     };
-    if (!(meta.memSize > 0)) {
+    if (kind !== "js" && !(meta.memSize > 0)) {
       throw new TinycDylinkError(
         `tinyc: manifest for "${canonical}" has an invalid layout (mem_size)`
       );
@@ -7690,16 +7914,19 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         scope.pathBase
       );
       let lastError = null;
+      let invalidError = null;
       for (const candidate of candidates) {
         try {
           await this._libraryFetched(candidate);
           return candidate;
         } catch (err) {
-          lastError = err;
+          if (this._libraryErrors.has(candidate)) invalidError ??= err;
+          else lastError = err;
         }
       }
+      const chosen = invalidError ?? lastError;
       throw new TinycDylinkError(
-        `tinyc: cannot find library "${name}" (searched: ${candidates.join(", ")})` + (lastError ? `: ${lastError.message}` : "")
+        `tinyc: cannot find library "${name}" (searched: ${candidates.join(", ")})` + (chosen ? `: ${chosen.message}` : "")
       );
     }
     /** Resolve a dlopen-style library name through the process
@@ -8052,6 +8279,13 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
             put(imp.module, imp.name, this._functionValue(hit.record, imp.name, record));
             continue;
           }
+          const ownEntry = record.exports.get(imp.name);
+          if (ownEntry && ownEntry.kind === 0 && record.meta.exports.some(
+            (e) => e.name === imp.name && e.origin === "js"
+          )) {
+            put(imp.module, imp.name, this._functionValue(record, imp.name, record));
+            continue;
+          }
           unresolvedFunctions.push(imp.name);
           put(imp.module, imp.name, () => {
             throw new Error(
@@ -8139,7 +8373,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         throw new TinycDylinkError(why ? `tinyc: cannot load "${canonical}": ${why}` : `tinyc: cannot load "${canonical}": not present locally (a host loadModule call retrieves it from the base URL first)`);
       }
       const meta = lib.meta;
-      if (this._threaded && meta.stackSize === void 0) {
+      if (this._threaded && meta.kind !== "js" && meta.stackSize === void 0) {
         throw new TinycDylinkError(
           `tinyc: cannot load "${canonical}" into a threaded process: the module's metadata carries no stack_size; it predates the threaded module revision (threads design \xA73.3)`
         );
@@ -8196,6 +8430,14 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
               scope.originDir,
               scope.pathBase
             );
+            for (const cand of searched) {
+              const why = this._libraryErrors.get(cand);
+              if (why) {
+                throw new TinycDylinkError(
+                  `tinyc: cannot load "${canonical}": its needed library "${need}" is present at ${cand} but invalid: ${why}`
+                );
+              }
+            }
             throw new TinycDylinkError(
               `tinyc: cannot load "${canonical}": its needed library "${need}" is not present locally (searched: ${searched.join(", ")}; a host loadModule call retrieves libraries from the base URL first)`
             );
@@ -8206,59 +8448,74 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
           });
           record.neededRecords.push(dep);
         }
-        const bodyBytes = this.threadTier === "real" ? patchSharedMemoryImport(lib.bodyBytes) : lib.bodyBytes;
-        record.bodyBytes = bodyBytes;
-        const wasmModule = this.threadTier === "real" ? new WebAssembly.Module(bodyBytes) : lib.wasmModule ?? new WebAssembly.Module(bodyBytes);
-        record.wasmModule = wasmModule;
-        record.importTypes = parseImportTypes(bodyBytes);
-        const {
-          imports,
-          unresolvedFunctions,
-          unresolvedGotMem,
-          unresolvedOther,
-          unresolvedDataGotFunc,
-          unresolvedGotTls
-        } = this._buildImports(record, wasmModule);
-        if (unresolvedGotMem.length > 0) {
-          throw new TinycDylinkError(
-            `tinyc: cannot load "${canonical}": unresolved variable(s) ${unresolvedGotMem.map((n) => `"${n}"`).join(", ")} (GOT.mem references bind eagerly)`
-          );
+        let instance = null;
+        if (meta.kind !== "js") {
+          const bodyBytes = this.threadTier === "real" ? patchSharedMemoryImport(lib.bodyBytes) : lib.bodyBytes;
+          record.bodyBytes = bodyBytes;
+          const wasmModule = this.threadTier === "real" ? new WebAssembly.Module(bodyBytes) : lib.wasmModule ?? new WebAssembly.Module(bodyBytes);
+          record.wasmModule = wasmModule;
+          record.importTypes = parseImportTypes(bodyBytes);
+          const {
+            imports,
+            unresolvedFunctions,
+            unresolvedGotMem,
+            unresolvedOther,
+            unresolvedDataGotFunc,
+            unresolvedGotTls
+          } = this._buildImports(record, wasmModule);
+          if (unresolvedGotMem.length > 0) {
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": unresolved variable(s) ${unresolvedGotMem.map((n) => `"${n}"`).join(", ")} (GOT.mem references bind eagerly)`
+            );
+          }
+          if (unresolvedGotTls.length > 0) {
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": unresolved TLS variable(s) ${unresolvedGotTls.map((n) => `"${n}"`).join(", ")} (GOT.tls references bind eagerly)`
+            );
+          }
+          if (unresolvedDataGotFunc.length > 0) {
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedDataGotFunc.map((n) => `"${n}"`).join(", ")} (GOT.func references from static data bind eagerly)`
+            );
+          }
+          if (flags & RTLD_NOW && unresolvedFunctions.length > 0) {
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedFunctions.map((n) => `"${n}"`).join(", ")} under RTLD_NOW`
+            );
+          }
+          if (unresolvedOther.length > 0) {
+            throw new TinycDylinkError(
+              `tinyc: cannot load "${canonical}": unsupported import(s) ` + unresolvedOther.join(", ")
+            );
+          }
+          try {
+            instance = new WebAssembly.Instance(wasmModule, imports);
+          } catch (err) {
+            throw new TinycDylinkError(
+              `tinyc: cannot instantiate "${canonical}": ${err.message}`
+            );
+          }
+          record.instance = instance;
+        } else {
+          record.bodyBytes = lib.bodyBytes;
+          record.importTypes = /* @__PURE__ */ new Map();
         }
-        if (unresolvedGotTls.length > 0) {
-          throw new TinycDylinkError(
-            `tinyc: cannot load "${canonical}": unresolved TLS variable(s) ${unresolvedGotTls.map((n) => `"${n}"`).join(", ")} (GOT.tls references bind eagerly)`
-          );
+        if (meta.kind !== "wasm") {
+          const jsExports = this._instantiateJsPart(record, instance);
+          record.instance = instance ? { exports: { ...instance.exports, ...jsExports } } : { exports: {
+            ...jsExports,
+            __tinyc_dylink_init: () => 0,
+            __tinyc_dylink_fini: () => {
+            }
+          } };
+          instance = record.instance;
         }
-        if (unresolvedDataGotFunc.length > 0) {
-          throw new TinycDylinkError(
-            `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedDataGotFunc.map((n) => `"${n}"`).join(", ")} (GOT.func references from static data bind eagerly)`
-          );
-        }
-        if (flags & RTLD_NOW && unresolvedFunctions.length > 0) {
-          throw new TinycDylinkError(
-            `tinyc: cannot load "${canonical}": unresolved function(s) ${unresolvedFunctions.map((n) => `"${n}"`).join(", ")} under RTLD_NOW`
-          );
-        }
-        if (unresolvedOther.length > 0) {
-          throw new TinycDylinkError(
-            `tinyc: cannot load "${canonical}": unsupported import(s) ` + unresolvedOther.join(", ")
-          );
-        }
-        let instance;
-        try {
-          instance = new WebAssembly.Instance(wasmModule, imports);
-        } catch (err) {
-          throw new TinycDylinkError(
-            `tinyc: cannot instantiate "${canonical}": ${err.message}`
-          );
-        }
-        record.instance = instance;
         if (typeof instance.exports.__tinyc_dylink_init !== "function" || typeof instance.exports.__tinyc_dylink_fini !== "function") {
           throw new TinycDylinkError(
             `tinyc: module "${canonical}" does not export __tinyc_dylink_init/__tinyc_dylink_fini; it is not a loadable dylink module`
           );
         }
-        if (this._threaded && typeof instance.exports.__tinyc_dylink_swap_sp !== "function") {
+        if (this._threaded && meta.kind !== "js" && typeof instance.exports.__tinyc_dylink_swap_sp !== "function") {
           throw new TinycDylinkError(
             `tinyc: module "${canonical}" does not export __tinyc_dylink_swap_sp; a threaded process requires it (threads design \xA73.1)`
           );
@@ -8276,6 +8533,340 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       } catch (err) {
         this._rollbackLoad(record);
         throw err;
+      }
+    }
+    /** Evaluate a js-kind (or the JS part of a mixed) module's
+     *  implementation in this context and bind its exports:
+     *  each declared JS export is wrapped per the shim convention
+     *  (fn(ctx, ...cArgs)), typed by its declared signature through
+     *  makeWrapperFunction, and placed in the process table at the
+     *  module's slot, so guest code can call it and take its
+     *  address like any wasm function. An export declared async is
+     *  Suspending-wrapped where the context has JSPI (the sim tier
+     *  runs it through the promising entries); without JSPI the
+     *  wrapper refuses by name when called — in the real tier the
+     *  coordinator's copy is never called, the workers' replicas
+     *  run the implementation through their own net channel.
+     *  Returns the wrapped export set for the merged instance. */
+    _instantiateJsPart(record, wasmInstance) {
+      const meta = record.meta;
+      let raw;
+      try {
+        raw = evaluateJsModule(meta.sourceText, record.canonical);
+      } catch (err) {
+        throw new TinycDylinkError(
+          `tinyc: cannot load "${record.canonical}": its JS implementation failed to evaluate: ${err.message}`
+        );
+      }
+      const ctx = this._jsModuleCtx(record);
+      const out = {};
+      for (const e of meta.exports) {
+        if (e.origin !== "js") continue;
+        const fn = raw[e.name];
+        if (typeof fn !== "function") {
+          throw new TinycDylinkError(
+            `tinyc: cannot load "${record.canonical}": its JS implementation does not provide the declared export "${e.name}"`
+          );
+        }
+        let bound = (...args) => fn(ctx, ...args);
+        if (e.async) {
+          if (typeof WebAssembly.Suspending === "function") {
+            bound = new WebAssembly.Suspending(bound);
+          } else {
+            const name = e.name, canonical = record.canonical;
+            bound = () => {
+              throw new TinycDylinkError(
+                `tinyc: "${name}" of "${canonical}" is an asynchronous export; this context has no JSPI (WebAssembly.Suspending) to run it`
+              );
+            };
+          }
+        }
+        const wrapped = makeWrapperFunction(bound, e.sig);
+        this.table.set(record.tableBase + e.value, wrapped);
+        out[e.name] = wrapped;
+      }
+      return out;
+    }
+    /** The ctx a JS implementation runs against in this context:
+     *  the shim context (memory access, C string helpers, io) plus
+     *  the process allocator (alloc/free — library state lives in
+     *  the shared guest memory, so it is the same state in every
+     *  context), callExport (invoke a function export of this
+     *  module or of the global symbol table by name, through the
+     *  process table), and the net services (fetch / WebSocket
+     *  through the platform; async — the exports that use them are
+     *  declared async). One ctx per module record per context. */
+    _jsModuleCtx(record) {
+      if (record.jsCtx) return record.jsCtx;
+      const ctx = createShimContext(this._holder, this._byteIO);
+      const env = this._defaultEnv;
+      ctx.alloc = (n) => env.malloc(n | 0);
+      ctx.free = (p) => {
+        env.free(p | 0);
+      };
+      ctx.callExport = (name, ...args) => {
+        const entry = record.exports.get(name) ?? this._globalSymbols.get(name);
+        if (!entry || entry.kind !== 0) {
+          throw new Error(
+            `tinyc: JS module "${record.canonical}": no function export named "${name}" to call`
+          );
+        }
+        const fn = this.table.get(entry.value);
+        if (typeof fn !== "function") {
+          throw new Error(
+            `tinyc: JS module "${record.canonical}": the export "${name}" has no callable in the process table`
+          );
+        }
+        return fn(...args);
+      };
+      ctx.callFunction = (ptr, ...args) => {
+        const fn = this.table.get(ptr | 0);
+        if (typeof fn !== "function") {
+          throw new Error(
+            `tinyc: JS module "${record.canonical}": no function at table index ${ptr} to call`
+          );
+        }
+        return fn(...args);
+      };
+      ctx.net = this._netServicesFor(ctx);
+      record.jsCtx = ctx;
+      return ctx;
+    }
+    // ---- net services (fetch / WebSocket) for JS modules ----
+    //
+    // Response bodies and inbound WebSocket messages are held
+    // host-side under numeric ids; a consumer copies body bytes
+    // into the process memory explicitly (readBody) and receives
+    // message bytes into a guest buffer (wsRecv). The same service
+    // object backs this context's own JS modules (direct calls)
+    // and, through the net-request protocol (_serveNetRequest),
+    // the real tier's workers, whose JS replicas run the library
+    // code locally and send only the transport operations here.
+    /** The ctx.net surface for a JS module evaluated in this
+     *  context. Async throughout: http/wsOpen/wsRecv return
+     *  promises; the exports behind them are declared async. */
+    _netServicesFor(ctx) {
+      const host = this._netHost();
+      return {
+        isAsync: true,
+        http: (desc) => host.http(desc),
+        readBody: (transfer, dest, offset, len) => host.readBodyInto(transfer, ctx.u8(), dest, offset, len),
+        dropBody: (transfer) => {
+          host.transfers.delete(transfer);
+        },
+        wsOpen: (url, protocols) => host.wsOpen(url, protocols),
+        wsSend: (conn, ptr, len, binary) => host.wsSend(conn, ctx.readBytes(ptr, len), binary),
+        wsRecv: async (conn, dest, capacity) => {
+          const r = await host.wsRecv(conn, capacity);
+          if (r.received > 0) ctx.writeBytes(dest, r.bytes);
+          return { received: r.received, binary: r.binary, fin: r.fin, remaining: r.remaining };
+        },
+        wsClose: (conn) => {
+          host.wsClose(conn);
+        }
+      };
+    }
+    /** The per-process net host state: body transfers and live
+     *  WebSocket connections, shared by every JS module and every
+     *  worker channel of this process. */
+    _netHost() {
+      if (this._netHostState) return this._netHostState;
+      const transfers = /* @__PURE__ */ new Map();
+      const conns = /* @__PURE__ */ new Map();
+      let nextId = 1;
+      const host = {
+        transfers,
+        async http(desc) {
+          const init = { method: desc.method || "GET" };
+          if (Array.isArray(desc.headers) && desc.headers.length > 0) {
+            init.headers = desc.headers;
+          }
+          if (desc.body !== null && desc.body !== void 0) {
+            init.body = base64ToBytes(desc.body);
+          }
+          if (desc.follow) init.redirect = "follow";
+          else init.redirect = "manual";
+          const res = await fetch(desc.url, init);
+          const body = new Uint8Array(await res.arrayBuffer());
+          const id = nextId++;
+          transfers.set(id, body);
+          const headers = [];
+          res.headers.forEach((v, k) => headers.push([k, v]));
+          return { status: res.status, headers, bodyLen: body.length, transfer: id };
+        },
+        readBodyInto(transfer, u8, dest, offset, len) {
+          const body = transfers.get(transfer);
+          if (!body) throw new Error(`tinyc: net: unknown body transfer ${transfer}`);
+          const n = Math.max(0, Math.min(len, body.length - offset));
+          u8.set(body.subarray(offset, offset + n), dest);
+          return n;
+        },
+        wsOpen(url, protocols) {
+          return new Promise((resolve, reject) => {
+            let ws;
+            try {
+              ws = new WebSocket(url, protocols && protocols.length ? protocols : void 0);
+            } catch (err) {
+              reject(err);
+              return;
+            }
+            ws.binaryType = "arraybuffer";
+            const conn = {
+              ws,
+              queue: [],
+              waiter: null,
+              pending: null,
+              closed: false,
+              error: null
+            };
+            const id = nextId++;
+            conns.set(id, conn);
+            ws.onmessage = (ev) => {
+              const bytes = typeof ev.data === "string" ? textEncoder2.encode(ev.data) : new Uint8Array(ev.data);
+              const item = { bytes, binary: typeof ev.data !== "string" };
+              if (conn.waiter) {
+                const w = conn.waiter;
+                conn.waiter = null;
+                w(item);
+              } else {
+                conn.queue.push(item);
+              }
+            };
+            ws.onclose = () => {
+              conn.closed = true;
+              if (conn.waiter) {
+                const w = conn.waiter;
+                conn.waiter = null;
+                w(null);
+              }
+            };
+            ws.onerror = () => {
+              conn.error = new Error(`tinyc: net: WebSocket error for ${url}`);
+              if (conn.waiter) {
+                const w = conn.waiter;
+                conn.waiter = null;
+                w(null);
+              }
+            };
+            ws.onopen = () => resolve(id);
+          });
+        },
+        wsSend(id, bytes, binary) {
+          const conn = conns.get(id);
+          if (!conn || conn.closed) {
+            throw new Error(`tinyc: net: WebSocket connection ${id} is not open`);
+          }
+          if (binary) conn.ws.send(bytes);
+          else conn.ws.send(textDecoder2.decode(bytes));
+        },
+        // Take up to `capacity` bytes of the next message (or of
+        // the message currently being drained), waiting for one
+        // if none is at hand. Resolves {received: 0, ...} when the
+        // connection is closed and drained.
+        async wsRecv(id, capacity) {
+          const conn = conns.get(id);
+          if (!conn) throw new Error(`tinyc: net: unknown WebSocket connection ${id}`);
+          if (!conn.pending) {
+            let item = conn.queue.shift();
+            if (!item) {
+              if (conn.closed) return { received: 0, binary: true, fin: true, remaining: 0 };
+              item = await new Promise((resolve) => {
+                conn.waiter = resolve;
+              });
+              if (!item) return { received: 0, binary: true, fin: true, remaining: 0 };
+            }
+            conn.pending = { bytes: item.bytes, binary: item.binary, offset: 0 };
+          }
+          const p = conn.pending;
+          const n = Math.min(capacity, p.bytes.length - p.offset);
+          const out = p.bytes.subarray(p.offset, p.offset + n);
+          p.offset += n;
+          const fin = p.offset >= p.bytes.length;
+          const remaining = p.bytes.length - p.offset;
+          if (fin) conn.pending = null;
+          return { received: n, bytes: out, binary: p.binary, fin, remaining };
+        },
+        wsClose(id) {
+          const conn = conns.get(id);
+          if (!conn) return;
+          conns.delete(id);
+          try {
+            conn.ws.close();
+          } catch {
+          }
+        },
+        conn(id) {
+          return conns.get(id);
+        }
+      };
+      this._netHostState = host;
+      return host;
+    }
+    /** Serve one worker net request (real tier): the worker's JS
+     *  replica sent a transport operation; it runs here, against
+     *  the coordinator's net host, and the result descriptor is
+     *  written back through shared memory. The protocol is the
+     *  NET_* block in threads.mjs: the worker wrote a JSON
+     *  descriptor (op-specific) and waits on the state word; body
+     *  and message bytes move through the shared memory itself —
+     *  wsSend's bytes are read from it, readBody's and wsRecv's
+     *  bytes are written into it — only descriptors cross as JSON.
+     *  A wsRecv with no message at hand completes when one
+     *  arrives; the waiting worker services load tasks meanwhile,
+     *  as it does in a host-proxy wait. */
+    async _serveNetRequest(tid, msg) {
+      const addr = msg.addr | 0;
+      const u8 = () => new Uint8Array(this.memory.buffer);
+      const i32 = () => new Int32Array(this.memory.buffer);
+      const readJson = (ptr, len) => (
+        // Copy before decoding: the memory is shared with the
+        // workers, and TextDecoder refuses shared views.
+        JSON.parse(textDecoder2.decode(u8().slice(ptr, ptr + len)))
+      );
+      const finish = (result) => {
+        const bytes = textEncoder2.encode(JSON.stringify(result));
+        const ptr = this._defaultEnv.malloc(bytes.length || 1);
+        u8().set(bytes, ptr);
+        i32()[addr / 4 + 4] = ptr;
+        i32()[addr / 4 + 5] = bytes.length;
+        Atomics.store(i32(), addr / 4, 2);
+        Atomics.notify(i32(), addr / 4);
+      };
+      try {
+        const desc = readJson(i32()[addr / 4 + 2], i32()[addr / 4 + 3]);
+        const op = i32()[addr / 4 + 1];
+        const host = this._netHost();
+        let result;
+        if (op === 1) {
+          result = { ok: true, ...await host.http(desc) };
+        } else if (op === 6) {
+          const n = host.readBodyInto(desc.transfer, u8(), desc.dest, desc.offset, desc.len);
+          result = { ok: true, written: n };
+        } else if (op === 7) {
+          host.transfers.delete(desc.transfer);
+          result = { ok: true };
+        } else if (op === 2) {
+          result = { ok: true, conn: await host.wsOpen(desc.url, desc.protocols) };
+        } else if (op === 3) {
+          host.wsSend(
+            desc.conn,
+            u8().slice(desc.ptr, desc.ptr + desc.len),
+            desc.binary
+          );
+          result = { ok: true };
+        } else if (op === 4) {
+          const r = await host.wsRecv(desc.conn, desc.capacity);
+          if (r.received > 0) u8().set(r.bytes, desc.dest);
+          result = { ok: true, received: r.received, binary: r.binary, fin: r.fin, remaining: r.remaining };
+        } else if (op === 5) {
+          host.wsClose(desc.conn);
+          result = { ok: true };
+        } else {
+          result = { ok: false, error: `tinyc: net: unknown op ${op}` };
+        }
+        finish(result);
+      } catch (err) {
+        finish({ ok: false, error: String(err?.message ?? err) });
       }
     }
     /** Run a record's init on this context's instance — the
@@ -9608,6 +10199,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
           break;
         case "dlopen-request":
           void this._realGuestLoad(msg);
+          break;
+        case "net-request":
+          void this._serveNetRequest(tid, msg);
           break;
         case "dlclose-note": {
           const record = this._handles.get(msg.handle);

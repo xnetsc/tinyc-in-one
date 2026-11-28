@@ -1746,7 +1746,13 @@ test('export: products come out of the virtual FS as bytes and as a Blob', async
 // supply — the standard streams as fixed handle values, files
 // over the process's file space, no errno surface — which only
 // the wasm32 target runs against; the other targets take these
-// headers from their own SDK. Every other target ships the
+// headers from their own SDK. The libcurl / PCRE2 / mbedTLS
+// headers and the minimal type headers they pull in (time.h,
+// inttypes.h, sys/types.h, sys/select.h, sys/time.h,
+// sys/socket.h) are in this set for the same reason: the three
+// libraries ship for the wasm32 target alone in this package, as
+// js-kind units of its sysroot; the other targets link the real
+// libraries of their own platforms. Every other target ships the
 // shared freestanding set.
 const WASM_ONLY_INCLUDE_PATHS = new Set([
   '/sysroot/include/arm_neon.h',
@@ -1759,6 +1765,39 @@ const WASM_ONLY_INCLUDE_PATHS = new Set([
   '/sysroot/include/string.h',
   '/sysroot/include/wasm_simd128.h',
   '/sysroot/include/xmmintrin.h',
+  '/sysroot/include/time.h',
+  '/sysroot/include/inttypes.h',
+  '/sysroot/include/sys/types.h',
+  '/sysroot/include/sys/select.h',
+  '/sysroot/include/sys/time.h',
+  '/sysroot/include/sys/socket.h',
+  '/sysroot/include/curl/curl.h',
+  '/sysroot/include/curl/curlver.h',
+  '/sysroot/include/curl/system.h',
+  '/sysroot/include/curl/easy.h',
+  '/sysroot/include/curl/multi.h',
+  '/sysroot/include/curl/urlapi.h',
+  '/sysroot/include/curl/options.h',
+  '/sysroot/include/curl/header.h',
+  '/sysroot/include/curl/websockets.h',
+  '/sysroot/include/curl/mprintf.h',
+  '/sysroot/include/curl/typecheck-gcc.h',
+  '/sysroot/include/pcre2.h',
+  '/sysroot/include/mbedtls/aes.h',
+  '/sysroot/include/mbedtls/base64.h',
+  '/sysroot/include/mbedtls/build_info.h',
+  '/sysroot/include/mbedtls/check_config.h',
+  '/sysroot/include/mbedtls/config_adjust_legacy_crypto.h',
+  '/sysroot/include/mbedtls/config_adjust_ssl.h',
+  '/sysroot/include/mbedtls/config_adjust_x509.h',
+  '/sysroot/include/mbedtls/mbedtls_config.h',
+  '/sysroot/include/mbedtls/md.h',
+  '/sysroot/include/mbedtls/md5.h',
+  '/sysroot/include/mbedtls/platform_time.h',
+  '/sysroot/include/mbedtls/platform_util.h',
+  '/sysroot/include/mbedtls/private_access.h',
+  '/sysroot/include/mbedtls/sha256.h',
+  '/sysroot/include/mbedtls/sha512.h',
 ]);
 const sharedIncludeFiles = sysrootManifest.includeFiles.filter(
   (e) => !WASM_ONLY_INCLUDE_PATHS.has(e.path));
@@ -1783,7 +1822,7 @@ const windowsIncludeFiles = sharedIncludeFiles.filter(
 // the libSystem text stub for Darwin.  wasm32-wasi carries none:
 // its runtime is the shim layer.
 const EXPECTED_LIB_SOURCES = {
-  'wasm32-wasi': [],
+  'wasm32-wasi': ['libcurl.tinyc.js', 'libpcre2.tinyc.js', 'libmbedtls.tinyc.js'],
   'x86_64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
   'aarch64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
   'riscv64-linux-gnu': ['crt1.o', 'crti.o', 'crtn.o', 'libc.so', 'libm.so'],
@@ -2550,4 +2589,146 @@ test('search: a needed short name binds a module already loaded from outside the
   await proc.loadModule('/app/main.tinyc.js');
   assert.equal(proc.moduleHandle('libside.tinyc.js'), placed);
   assert.ok(loadedPaths(proc).includes('/app/main.tinyc.js'));
+});
+
+// ---------------------------------------------------------------------
+// js-kind and mixed-kind units: the manifest carries a "js"
+// payload (base64 source + its SHA-256) beside the wasm body
+// fields; each export declares its origin, and the loader
+// evaluates the source and binds the declared functions into
+// the same module record as any wasm exports.
+// ---------------------------------------------------------------------
+
+/** A js-kind (or mixed) manifest over a JS source text. */
+function jsManifest(source, exports, extra = {}) {
+  const bytes = new TextEncoder().encode(source);
+  return {
+    version: 1,
+    kind: 'js',
+    flavor: 0,
+    js: Buffer.from(bytes).toString('base64'),
+    js_hash: createHash('sha256').update(bytes).digest('hex'),
+    mem_size: 0,
+    mem_align: 16,
+    bss_off: 0,
+    bss_size: 0,
+    table_size: exports.length,
+    needed: [],
+    search_dirs: DEFAULT_DIRS,
+    data_got_func: [],
+    exports,
+    ...extra,
+  };
+}
+
+const JS_ANSWER_EXPORT = {
+  name: 'js_answer', kind: 0, value: 0, origin: 'js',
+  sig: { params: ['i32'], results: ['i32'] },
+};
+
+test('js-kind: a js unit loads and its export runs', async () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libanswer.tinyc.js', jsManifest(
+    'module.exports = { js_answer: (ctx, x) => x + 1 };',
+    [JS_ANSWER_EXPORT]));
+  const proc = h.newProcess();
+  await proc.loadModule('libanswer.tinyc.js');
+  const rec = proc._modules.get('/sysroot/lib/libanswer.tinyc.js');
+  assert.ok(rec, 'module record exists');
+  assert.equal(rec.instance.exports.js_answer(41), 42);
+});
+
+test('js-kind: the same export from both origins is a duplicate definition', async () => {
+  const h = makeSearchHarness();
+  const source = 'module.exports = { __tinyc_dylink_init: (ctx) => 0 };';
+  const manifest = synthManifest(false, {
+    kind: 'mixed',
+    js: Buffer.from(source, 'utf8').toString('base64'),
+    js_hash: createHash('sha256').update(source, 'utf8').digest('hex'),
+    table_size: 3,
+    exports: [
+      { name: '__tinyc_dylink_init', kind: 0, value: 0 },
+      { name: '__tinyc_dylink_fini', kind: 0, value: 1 },
+      {
+        name: '__tinyc_dylink_init', kind: 0, value: 2, origin: 'js',
+        sig: { params: [], results: ['i32'] },
+      },
+    ],
+  });
+  h.place('/sysroot/lib/libdupe.tinyc.js', manifest);
+  const proc = h.newProcess();
+  await assert.rejects(proc.loadModule('libdupe.tinyc.js'), (err) => {
+    assert.match(err.message, /__tinyc_dylink_init/);
+    assert.match(err.message, /defined twice/);
+    return true;
+  });
+});
+
+test('js-kind: a declared js export the source does not provide fails the load by name', async () => {
+  const h = makeSearchHarness();
+  h.place('/sysroot/lib/libmissing.tinyc.js', jsManifest(
+    'module.exports = { something_else: (ctx) => 0 };',
+    [JS_ANSWER_EXPORT]));
+  const proc = h.newProcess();
+  await assert.rejects(proc.loadModule('libmissing.tinyc.js'), (err) => {
+    assert.match(err.message, /libmissing/);
+    assert.match(err.message, /js_answer/);
+    assert.match(err.message, /does not provide/);
+    return true;
+  });
+});
+
+test('js-kind: a js export without a signature is an invalid manifest', async () => {
+  const h = makeSearchHarness();
+  const { sig, ...noSig } = JS_ANSWER_EXPORT;
+  h.place('/sysroot/lib/libnosig.tinyc.js', jsManifest(
+    'module.exports = { js_answer: (ctx, x) => x };', [noSig]));
+  const proc = h.newProcess();
+  await assert.rejects(proc.loadModule('libnosig.tinyc.js'), (err) => {
+    assert.match(err.message, /js_answer/);
+    assert.match(err.message, /signature/);
+    return true;
+  });
+});
+
+test('js-kind: a tampered js payload fails its hash check', async () => {
+  const h = makeSearchHarness();
+  const manifest = jsManifest(
+    'module.exports = { js_answer: (ctx, x) => x + 1 };',
+    [JS_ANSWER_EXPORT]);
+  manifest.js_hash = '0'.repeat(64);
+  h.place('/sysroot/lib/libtampered.tinyc.js', manifest);
+  const proc = h.newProcess();
+  await assert.rejects(proc.loadModule('libtampered.tinyc.js'), (err) => {
+    assert.match(err.message, /SHA-256 hash/);
+    return true;
+  });
+});
+
+test('mixed-kind: wasm and js exports share one module record', async () => {
+  const h = makeSearchHarness();
+  const manifest = synthManifest(false, {
+    kind: 'mixed',
+    js: Buffer.from('module.exports = { js_extra: (ctx) => 7 };', 'utf8')
+      .toString('base64'),
+    js_hash: createHash('sha256')
+      .update('module.exports = { js_extra: (ctx) => 7 };', 'utf8')
+      .digest('hex'),
+    table_size: 3,
+    exports: [
+      { name: '__tinyc_dylink_init', kind: 0, value: 0 },
+      { name: '__tinyc_dylink_fini', kind: 0, value: 1 },
+      {
+        name: 'js_extra', kind: 0, value: 2, origin: 'js',
+        sig: { params: [], results: ['i32'] },
+      },
+    ],
+  });
+  h.place('/sysroot/lib/libmixed.tinyc.js', manifest);
+  const proc = h.newProcess();
+  await proc.loadModule('libmixed.tinyc.js');
+  const rec = proc._modules.get('/sysroot/lib/libmixed.tinyc.js');
+  assert.ok(rec, 'module record exists');
+  assert.equal(typeof rec.instance.exports.__tinyc_dylink_init, 'function');
+  assert.equal(rec.instance.exports.js_extra(), 7);
 });

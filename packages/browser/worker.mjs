@@ -23,7 +23,7 @@ import {
   loadTinyc, normalizeIO, flushIO,
   manifestToLibrary, libraryFromBytes, parseImportTypes,
   makeWrapperFunction, createWasiShim, createShimContext,
-  canonicalModulePath, libraryNameForms,
+  canonicalModulePath, libraryNameForms, evaluateJsModule,
 } from './index.mjs';
 import { startThreadWorker } from './threads.mjs';
 
@@ -244,7 +244,7 @@ if (isDedicatedWorker) {
       startThreadWorker(ev.data, {
         manifestToLibrary, libraryFromBytes, parseImportTypes,
         makeWrapperFunction, createWasiShim, createShimContext,
-        canonicalModulePath, libraryNameForms,
+        canonicalModulePath, libraryNameForms, evaluateJsModule,
       }, self);
       return;
     }
