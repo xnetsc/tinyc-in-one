@@ -196,7 +196,13 @@ patch("libtcc.c",
 # include <limits.h>
 # include <sys/stat.h>
 # ifdef __APPLE__
-#  include <mach-o/dyld.h>
+/* _NSGetExecutablePath is declared in <mach-o/dyld.h>, but that
+ * header pulls in <mach-o/loader.h>, whose Mach-O struct
+ * definitions collide with tccmacho.c's own definitions in this
+ * translation unit (tcc.c includes libtcc.c, which includes
+ * tccmacho.c at its line 63, before this resolver). Declare the
+ * one function we need directly instead of including the header. */
+extern int _NSGetExecutablePath(char *buf, uint32_t *bufsize);
 # endif
 
 static int tinyc_layout_file(const char *path)

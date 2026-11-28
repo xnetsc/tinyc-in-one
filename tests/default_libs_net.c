@@ -59,10 +59,18 @@ static int base_port;
 
 /* The server threads bind asynchronously; each sets its
    ready flag once it is listening, and main waits on the
-   flags before driving that server. */
+   flags before driving that server. wait_ready returns 0
+   (and says so) when a server never becomes ready, so a
+   failed check reports the missing server instead of a
+   misleading client error. */
 static volatile int ready_http, ready_ws, ready_tls;
-static void wait_ready(volatile int *flag) {
+static int wait_ready(volatile int *flag, const char *name, int port) {
     for (int i = 0; i < 400 && !*flag; i++) sleep_ms(25);
+    if (!*flag) {
+        printf("server not ready: %s on 127.0.0.1:%d after 10s\n", name, port);
+        return 0;
+    }
+    return 1;
 }
 
 /* ---------------- raw HTTP server ---------------- */
@@ -76,9 +84,16 @@ static sock_t listen_on(int port) {
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     a.sin_port = htons((unsigned short)port);
     if (bind(fd, (struct sockaddr *)&a, sizeof(a)) || listen(fd, 4)) {
-        perror("listen_on");
+#ifdef _WIN32
+        fprintf(stderr, "listen_on: port %d bind/listen failed: WSA error %d\n",
+                port, WSAGetLastError());
+#else
+        fprintf(stderr, "listen_on: port %d bind/listen failed: %s\n",
+                port, strerror(errno));
+#endif
         exit(1);
     }
+    fprintf(stderr, "listening on 127.0.0.1:%d\n", port);
     return fd;
 }
 
@@ -100,7 +115,15 @@ static void *http_server(void *arg) {
     ready_http = 1;
     for (int i = 0; i < 2; i++) {           /* one GET, one POST */
         sock_t fd = accept(lfd, NULL, NULL);
-        if (!sock_valid(fd)) return NULL;
+        if (!sock_valid(fd)) {
+#ifdef _WIN32
+            fprintf(stderr, "http server: accept failed: WSA error %d\n",
+                    WSAGetLastError());
+#else
+            fprintf(stderr, "http server: accept failed: %s\n", strerror(errno));
+#endif
+            return NULL;
+        }
         static char buf[8192];
         int n = read_until(fd, buf, sizeof(buf), "\r\n\r\n");
         int clen = 0;
@@ -140,7 +163,15 @@ static void *ws_server(void *arg) {
     sock_t lfd = listen_on(base_port + 2);
     ready_ws = 1;
     sock_t fd = accept(lfd, NULL, NULL);
-    if (!sock_valid(fd)) return NULL;
+    if (!sock_valid(fd)) {
+#ifdef _WIN32
+        fprintf(stderr, "ws server: accept failed: WSA error %d\n",
+                WSAGetLastError());
+#else
+        fprintf(stderr, "ws server: accept failed: %s\n", strerror(errno));
+#endif
+        return NULL;
+    }
     static char buf[8192];
     read_until(fd, buf, sizeof(buf), "\r\n\r\n");
     char key[128] = { 0 };
@@ -211,7 +242,11 @@ static void *https_server(void *arg) {
     if (mbedtls_pk_parse_key(&pkey, (const unsigned char *)TEST_SRV_KEY_PEM,
                              strlen(TEST_SRV_KEY_PEM) + 1, NULL, 0,
                              mbedtls_ctr_drbg_random, &ctr_drbg)) return NULL;
-    if (mbedtls_net_bind(&listen_fd, "127.0.0.1", port, MBEDTLS_NET_PROTO_TCP)) return NULL;
+    if (mbedtls_net_bind(&listen_fd, "127.0.0.1", port, MBEDTLS_NET_PROTO_TCP)) {
+        fprintf(stderr, "tls server: bind failed on 127.0.0.1:%s\n", port);
+        return NULL;
+    }
+    fprintf(stderr, "listening on 127.0.0.1:%s (tls)\n", port);
     ready_tls = 1;
     if (mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER,
                                     MBEDTLS_SSL_TRANSPORT_STREAM,
@@ -271,18 +306,33 @@ static size_t wr(void *p, size_t sz, size_t nm, void *u) {
 
 static int check_http(void) {
     char url[64];
+    char errbuf[CURL_ERROR_SIZE];
     CURL *c = curl_easy_init();
+    if (!c) { printf("curl: init failed\n"); return 1; }
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
+    curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+    errbuf[0] = 0;
     clen = 0; cbuf[0] = 0;
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/hello", base_port);
     curl_easy_setopt(c, CURLOPT_URL, url);
-    if (curl_easy_perform(c) != CURLE_OK) { printf("curl: GET failed\n"); return 1; }
+    CURLcode rc = curl_easy_perform(c);
+    if (rc != CURLE_OK) {
+        printf("curl: GET failed: %s (%d)%s%s\n", curl_easy_strerror(rc),
+               (int)rc, errbuf[0] ? ": " : "", errbuf);
+        return 1;
+    }
     if (!strstr(cbuf, "tinyc-http-ok")) { printf("curl: GET body: %s\n", cbuf); return 1; }
     clen = 0; cbuf[0] = 0;
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/echo", base_port);
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_POSTFIELDS, "ping=42");
-    if (curl_easy_perform(c) != CURLE_OK) { printf("curl: POST failed\n"); return 1; }
+    errbuf[0] = 0;
+    rc = curl_easy_perform(c);
+    if (rc != CURLE_OK) {
+        printf("curl: POST failed: %s (%d)%s%s\n", curl_easy_strerror(rc),
+               (int)rc, errbuf[0] ? ": " : "", errbuf);
+        return 1;
+    }
     if (!strstr(cbuf, "ping=42")) { printf("curl: POST body: %s\n", cbuf); return 1; }
     curl_easy_cleanup(c);
     printf("curl: http GET and POST ok\n");
@@ -291,15 +341,20 @@ static int check_http(void) {
 
 static int check_https(const char *cafile) {
     char url[64];
+    char errbuf[CURL_ERROR_SIZE];
     snprintf(url, sizeof(url), "https://127.0.0.1:%d/", base_port + 1);
     CURL *c = curl_easy_init();
+    if (!c) { printf("curl: init failed\n"); return 1; }
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_CAINFO, cafile);
+    curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+    errbuf[0] = 0;
     clen = 0; cbuf[0] = 0;
     CURLcode rc = curl_easy_perform(c);
     if (rc != CURLE_OK) {
-        printf("curl: HTTPS failed: %s\n", curl_easy_strerror(rc));
+        printf("curl: HTTPS failed: %s (%d)%s%s\n", curl_easy_strerror(rc),
+               (int)rc, errbuf[0] ? ": " : "", errbuf);
         return 1;
     }
     if (!strstr(cbuf, "tinyc-tls-ok")) { printf("curl: HTTPS body: %s\n", cbuf); return 1; }
@@ -321,15 +376,26 @@ static int check_https(const char *cafile) {
 
 static int check_ws(void) {
     char url[64];
+    char errbuf[CURL_ERROR_SIZE];
     snprintf(url, sizeof(url), "ws://127.0.0.1:%d/", base_port + 2);
     CURL *c = curl_easy_init();
+    if (!c) { printf("curl: init failed\n"); return 1; }
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_CONNECT_ONLY, 2L);
-    if (curl_easy_perform(c) != CURLE_OK) { printf("curl: ws connect failed\n"); return 1; }
+    curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+    errbuf[0] = 0;
+    CURLcode crc = curl_easy_perform(c);
+    if (crc != CURLE_OK) {
+        printf("curl: ws connect failed: %s (%d)%s%s\n", curl_easy_strerror(crc),
+               (int)crc, errbuf[0] ? ": " : "", errbuf);
+        return 1;
+    }
     const char *msg = "tinyc-ws-ping";
     size_t sent = 0;
-    if (curl_ws_send(c, msg, strlen(msg), &sent, 0, CURLWS_TEXT) != CURLE_OK) {
-        printf("curl: ws send failed\n");
+    crc = curl_ws_send(c, msg, strlen(msg), &sent, 0, CURLWS_TEXT);
+    if (crc != CURLE_OK) {
+        printf("curl: ws send failed: %s (%d)%s%s\n", curl_easy_strerror(crc),
+               (int)crc, errbuf[0] ? ": " : "", errbuf);
         return 1;
     }
     curl_socket_t sock;
@@ -357,7 +423,11 @@ static int check_ws(void) {
 #endif
         rc = curl_ws_recv(c, buf, sizeof(buf) - 1, &nread, &meta);
     }
-    if (rc != CURLE_OK) { printf("curl: ws recv failed\n"); return 1; }
+    if (rc != CURLE_OK) {
+        printf("curl: ws recv failed: %s (%d)%s%s\n", curl_easy_strerror(rc),
+               (int)rc, errbuf[0] ? ": " : "", errbuf);
+        return 1;
+    }
     buf[nread] = 0;
     if (strcmp(buf, msg)) { printf("curl: ws echo was: %s\n", buf); return 1; }
     curl_easy_cleanup(c);
@@ -382,9 +452,9 @@ int main(int argc, char **argv) {
     thread_t th_http, th_ws;
     thread_create(&th_http, http_server);
     thread_create(&th_ws, ws_server);
-    wait_ready(&ready_http);
+    if (!wait_ready(&ready_http, "http", base_port)) return 1;
     if (check_http()) return 1;
-    wait_ready(&ready_ws);
+    if (!wait_ready(&ready_ws, "ws", base_port + 2)) return 1;
     if (check_ws()) return 1;
     thread_join(th_http);
     thread_join(th_ws);
@@ -393,7 +463,7 @@ int main(int argc, char **argv) {
        the server thread serves both sequentially. */
     thread_t th_tls;
     thread_create(&th_tls, https_server);
-    wait_ready(&ready_tls);
+    if (!wait_ready(&ready_tls, "tls", base_port + 1)) return 1;
     if (check_https(cafile)) return 1;
     thread_join(th_tls);
     remove(cafile);
