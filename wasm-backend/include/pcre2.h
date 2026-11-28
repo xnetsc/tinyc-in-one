@@ -1038,15 +1038,19 @@ PCRE2_TYPES_STRUCTURES_AND_FUNCTIONS
 #undef PCRE2_OTHER_FUNCTIONS
 #undef PCRE2_TYPES_STRUCTURES_AND_FUNCTIONS
 
-/* PCRE2_CODE_UNIT_WIDTH must be defined. If it is 8, 16, or 32, redefine
-PCRE2_SUFFIX to use it. If it is 0, undefine the other macros and make
-PCRE2_SUFFIX a no-op. Otherwise, generate an error. */
+/* PCRE2_CODE_UNIT_WIDTH selects the code unit width. If it is 8, 16,
+or 32, redefine PCRE2_SUFFIX to use it. If it is 0, undefine the other
+macros and make PCRE2_SUFFIX a no-op. Otherwise, generate an error.
+This sysroot ships the 8-bit code unit only, so a translation unit
+that does not define PCRE2_CODE_UNIT_WIDTH gets 8: upstream pcre2.h
+requires the width to be defined before inclusion, and this default
+is the local deviation for the single-width build. An explicit width
+is still honoured, and an unsupported width still errors below. */
 
 #undef PCRE2_SUFFIX
 #ifndef PCRE2_CODE_UNIT_WIDTH
-#error PCRE2_CODE_UNIT_WIDTH must be defined before including pcre2.h.
-#error Use 8, 16, or 32; or 0 for a multi-width application.
-#else  /* PCRE2_CODE_UNIT_WIDTH is defined */
+#define PCRE2_CODE_UNIT_WIDTH 8
+#endif
 #if PCRE2_CODE_UNIT_WIDTH == 8 || \
     PCRE2_CODE_UNIT_WIDTH == 16 || \
     PCRE2_CODE_UNIT_WIDTH == 32
@@ -1058,7 +1062,6 @@ PCRE2_SUFFIX a no-op. Otherwise, generate an error. */
 #else
 #error PCRE2_CODE_UNIT_WIDTH must be 0, 8, 16, or 32.
 #endif
-#endif  /* PCRE2_CODE_UNIT_WIDTH is defined */
 
 #ifdef __cplusplus
 }  /* extern "C" */

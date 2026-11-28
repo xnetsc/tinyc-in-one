@@ -17,7 +17,11 @@
  *      manifest ships, one header at a time. A header must compile
  *      standalone, except the registered expectations in
  *      header_gate_expectations.json, which must fail with the
- *      registered diagnostic signature instead.
+ *      registered diagnostic signature instead. The include form
+ *      is the manifest path relative to the sysroot include
+ *      directory, so a header in a subdirectory (sys/types.h,
+ *      curl/curl.h, mbedtls/aes.h) is tested under the name a
+ *      program actually includes it under.
  *
  * For wasm32-wasi (the runnable target) it additionally compiles
  * and runs whole programs through the packaged API: a plain
@@ -154,15 +158,25 @@ for (const target of targets) {
   }
 
   for (const entry of manifest.includeFiles ?? []) {
+    // The include form is the manifest path relative to the
+    // sysroot include directory, not the basename: a header in a
+    // subdirectory is only includable under its relative path
+    // (sys/types.h, curl/curl.h, mbedtls/aes.h), and the basename
+    // form can silently test a different top-level header that
+    // shares the name (sys/time.h vs time.h). Top-level headers
+    // are unaffected: their relative path is the basename.
+    const includeForm = entry.path.startsWith('/sysroot/include/')
+      ? entry.path.slice('/sysroot/include/'.length)
+      : entry.path.split('/').pop();
     const header = entry.path.split('/').pop();
     const exp = expectationFor(header, target);
-    const r = await tryCompile(`#include <${header}>\nint tinyc_gate_marker;`);
+    const r = await tryCompile(`#include <${includeForm}>\nint tinyc_gate_marker;`);
     if (!exp) {
-      report(r.ok, `${target}: #include <${header}> compiles standalone`,
+      report(r.ok, `${target}: #include <${includeForm}> compiles standalone`,
         r.ok ? '' : r.diagnostic);
     } else if (exp.expect === 'error') {
       const sigOk = !r.ok && (r.all ?? r.diagnostic).includes(exp.diagnostic_includes);
-      report(sigOk, `${target}: #include <${header}> fails with its registered signature`,
+      report(sigOk, `${target}: #include <${includeForm}> fails with its registered signature`,
         r.ok
           ? 'compiled successfully; the registered expectation says it must not'
           : sigOk
