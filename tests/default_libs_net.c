@@ -508,7 +508,15 @@ static void probe_raw_connect(void) {
    exercised by the local battery too. */
 static void probe_nb_connect(void) {
     sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (!sock_valid(fd)) { printf("nb connect: socket failed\n"); return; }
+    if (!sock_valid(fd)) {
+#ifdef _WIN32
+        printf("nb connect: socket failed, WSA error %d\n", WSAGetLastError());
+#else
+        printf("nb connect: socket failed, errno %d (%s)\n",
+               errno, strerror(errno));
+#endif
+        return;
+    }
 #ifdef _WIN32
     u_long nb = 1;
     if (ioctlsocket(fd, FIONBIO, &nb) != 0) {
@@ -557,6 +565,12 @@ static void probe_nb_connect(void) {
         return;
     }
 #endif
+#ifdef _WIN32
+    printf("nb connect: connect in progress (WSAEWOULDBLOCK)\n");
+#else
+    printf("nb connect: connect in progress (EINPROGRESS)\n");
+#endif
+    fflush(stdout);
     /* Same three-way split as the ws wait loop: select on
        Windows and darwin (whose bundled headers declare select
        in <sys/time.h> and have no <poll.h>), poll elsewhere --
@@ -568,9 +582,40 @@ static void probe_nb_connect(void) {
     struct timeval tv = { 5, 0 };
     FD_ZERO(&wfds);
     FD_SET(fd, &wfds);
+#ifdef _WIN32
+    /* Winsock select reads the socket handles out of the
+       fd_set, so print the set itself: a fd_count of 0 here
+       means the macro never registered the socket, and the
+       WSAPoll comparison after a timeout tells whether the
+       socket or the select call is the broken step. */
+    printf("nb connect: socket=%lld fd_count=%u\n",
+           (long long)fd, wfds.fd_count);
+    fflush(stdout);
+#endif
     rc = select((int)fd + 1, NULL, &wfds, NULL, &tv);
     if (rc == 0) {
+#ifdef _WIN32
+        printf("nb connect: select timed out after 5s (not writable), "
+               "WSA error %d, FD_ISSET=%d fd_count=%u\n",
+               WSAGetLastError(), FD_ISSET(fd, &wfds) != 0, wfds.fd_count);
+        /* Same socket, other wait primitive: if WSAPoll reports
+           it writable, select itself is the broken step; if it
+           also times out, the non-blocking connect never
+           completes and the fault is below select. */
+        {
+            WSAPOLLFD pfd;
+            pfd.fd = fd;
+            pfd.events = POLLOUT;
+            pfd.revents = 0;
+            int prc = WSAPoll(&pfd, 1, 5000);
+            printf("nb connect: WSAPoll on same socket: rc=%d revents=0x%x, "
+                   "WSA error %d\n", prc, (unsigned)pfd.revents,
+                   WSAGetLastError());
+        }
+        fflush(stdout);
+#else
         printf("nb connect: select timed out after 5s (not writable)\n");
+#endif
         sock_close(fd);
         return;
     }
@@ -584,6 +629,11 @@ static void probe_nb_connect(void) {
         sock_close(fd);
         return;
     }
+#ifdef _WIN32
+    printf("nb connect: select rc=%d FD_ISSET=%d\n",
+           rc, FD_ISSET(fd, &wfds) != 0);
+    fflush(stdout);
+#endif
 #else
     struct pollfd pfd;
     pfd.fd = fd;

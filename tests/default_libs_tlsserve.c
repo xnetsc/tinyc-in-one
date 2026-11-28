@@ -32,6 +32,7 @@
    with nothing in the log. */
 #ifndef _WIN32
 #include <signal.h>
+#include <sys/time.h>
 #include <unistd.h>
 static volatile const char *tls_stage = "start";
 static volatile long tls_handshake_iters = 0;
@@ -51,6 +52,34 @@ static void tls_err(const char *what, int ret) {
     mbedtls_strerror(ret, buf, sizeof(buf));
     printf("%s %d (%s)\n", what, ret, buf);
     fflush(stdout);
+}
+
+/* Logging bio wrappers: the handshake can block inside the
+   first recv with no output at all, so each recv/send logs
+   its entry and its return. A recv entry with no return means
+   the ClientHello never reached the bio; a return whose first
+   byte is 0x16 means a TLS record arrived and the handshake
+   is stuck parsing it, not waiting for it. */
+static int tls_recv(void *ctx, unsigned char *buf, size_t len) {
+    int fd = ((mbedtls_net_context *) ctx)->fd;
+    int ret;
+    printf("bio recv: fd=%d len=%lu\n", fd, (unsigned long) len);
+    fflush(stdout);
+    ret = mbedtls_net_recv(ctx, buf, len);
+    printf("bio recv: fd=%d ret=%d first=0x%02x\n", fd, ret,
+           ret > 0 ? buf[0] : 0);
+    fflush(stdout);
+    return ret;
+}
+static int tls_send(void *ctx, const unsigned char *buf, size_t len) {
+    int fd = ((mbedtls_net_context *) ctx)->fd;
+    int ret;
+    printf("bio send: fd=%d len=%lu\n", fd, (unsigned long) len);
+    fflush(stdout);
+    ret = mbedtls_net_send(ctx, buf, len);
+    printf("bio send: fd=%d ret=%d\n", fd, ret);
+    fflush(stdout);
+    return ret;
 }
 
 static int load_file(const char *path, unsigned char *buf, size_t cap, size_t *len) {
@@ -107,8 +136,24 @@ int main(int argc, char **argv) {
     printf("accepted\n"); fflush(stdout);
 #ifndef _WIN32
     tls_stage = "handshake";
+    /* Readiness probe before the first handshake call: if the
+       client already sent bytes, select reports the accepted
+       socket readable and the handshake's first recv returns
+       at once; if it reports nothing after 3 s, no ClientHello
+       has arrived and the stall is on the client/network side,
+       not in the bio. */
+    {
+        fd_set rfds;
+        struct timeval tv = { 3, 0 };
+        FD_ZERO(&rfds);
+        FD_SET(client_fd.fd, &rfds);
+        int sr = select(client_fd.fd + 1, &rfds, NULL, NULL, &tv);
+        printf("pre-handshake select: fd=%d ret=%d readable=%d\n",
+               client_fd.fd, sr, sr > 0 && FD_ISSET(client_fd.fd, &rfds));
+        fflush(stdout);
+    }
 #endif
-    mbedtls_ssl_set_bio(&ssl, &client_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
+    mbedtls_ssl_set_bio(&ssl, &client_fd, tls_send, tls_recv, NULL);
     while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
 #ifndef _WIN32
         tls_handshake_iters++;

@@ -26,8 +26,17 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); }
 
 "$TC" "$ROOT/tests/default_libs.c" -lpcre2 -lmbedcrypto \
     -o "$TMP/battery1" || { fail "battery1 build"; exit 1; }
+# libcurl is linked whole-archive: the mac-host link drops
+# archive members that are only referenced from the static
+# protocols table in url.c (ws/wss and the other table-only
+# handlers have no code reference anywhere, so the normal
+# archive pull never sees them and the linked binary has no
+# ws handler even though libcurl.a does). Pulling the whole
+# archive makes every handler present; the -no-whole-archive
+# after -lcurl keeps mbedTLS on the normal pull.
 "$TC" "$ROOT/tests/default_libs_net.c" \
-    -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
+    -Wl,-whole-archive -lcurl -Wl,-no-whole-archive \
+    -lmbedtls -lmbedx509 -lmbedcrypto \
     -o "$TMP/battery2" || { fail "battery2 build"; exit 1; }
 "$TC" "$ROOT/tests/default_libs_tlsserve.c" \
     -lmbedtls -lmbedx509 -lmbedcrypto \
