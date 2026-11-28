@@ -1,0 +1,21 @@
+Bundled-build patch: mbedtls entropy_poll.c includes
+<sys/syscall.h> unconditionally on Linux/glibc to probe for
+SYS_getrandom. The bundled header sets do not ship
+<sys/syscall.h>; without it the file cannot compile at all,
+even though the getrandom path is optional (the code falls
+back to /dev/urandom when SYS_getrandom is undefined). Guard
+the include with __has_include so the optional probe only
+runs when the header is actually available.
+
+--- a/library/entropy_poll.c
++++ b/library/entropy_poll.c
+@@ -75,7 +75,9 @@
+  */
+ #if ((defined(__linux__) && defined(__GLIBC__)) || defined(__midipix__))
+ #include <unistd.h>
++#if defined(__has_include) && __has_include(<sys/syscall.h>)
+ #include <sys/syscall.h>
++#endif
+ #if defined(SYS_getrandom)
+ #define HAVE_GETRANDOM
+ #include <errno.h>

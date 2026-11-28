@@ -262,6 +262,47 @@ add_win32_pthread() {
         "tinyc-win32-pthread.o")
 }
 
+# add_default_libs <triple> <dist>
+# Build the bundled default libraries (libcurl, PCRE2, mbedTLS;
+# see libs-config/README.md) into the dist's sysroot with a
+# compiler that targets <triple> and runs on this machine: the
+# dist's own binary when it runs here, else the matrix dist's
+# binary for the same target, else $TINYC_LIBS_TCC when the
+# caller provides one. The library bytes depend only on the
+# target, so any of these compilers produces the same sysroot
+# content. When no usable compiler exists the build fails,
+# unless TINYC_LIBS_SKIP=1 is set (compiler-only dev builds of
+# foreign-host dists), in which case the dist is left without
+# the libraries and says so.
+add_default_libs() {
+    local TRIPLE=$1 DIST=$2 FAMILY
+    case $TRIPLE in
+        *-linux-gnu)     FAMILY=linux-gnu ;;
+        *-linux-android) FAMILY=android ;;
+        *-apple-darwin)  FAMILY=darwin ;;
+        *-w64-mingw32)   FAMILY=windows ;;
+        *) return 0 ;;
+    esac
+    local cand XTCC=""
+    for cand in ${TINYC_LIBS_TCC:-} "$DIST/bin/tinyc" \
+                "$ROOT/build/dist/$TRIPLE/bin/tinyc"; do
+        [ -n "$cand" ] && [ -x "$cand" ] || continue
+        if "$cand" -v </dev/null >/dev/null 2>&1; then XTCC=$cand; break; fi
+    done
+    if [ -z "$XTCC" ]; then
+        if [ "${TINYC_LIBS_SKIP:-}" = 1 ]; then
+            echo "WARNING: no runnable $TRIPLE compiler here; " \
+                 "$DIST ships without the default libraries" >&2
+            return 0
+        fi
+        echo "error: no runnable $TRIPLE compiler for the default " \
+             "libraries (set TINYC_LIBS_SKIP=1 to build without them)" >&2
+        exit 1
+    fi
+    bash "$ROOT/tools/build_default_libs.sh" --tcc "$XTCC" \
+        --triple "$TRIPLE" --family "$FAMILY" --dist "$DIST"
+}
+
 build_one() {
     local TRIPLE=$1 CT=$2 LIBMODE=$3 TDEFS=$4 ISA=$5
     shift 5
@@ -358,6 +399,7 @@ $(print_outputs $FAMILY)
   "libtcc1": "$LIBTCC1_REL"$EXTRA_JSON
 }
 EOF
+    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc" | sed 's/^/  /'
 }
@@ -430,6 +472,7 @@ $(print_outputs macho)
   "libc_lib": "lib/tcc/lib"
 }
 EOF
+    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc" | sed 's/^/  /'
 }
@@ -573,6 +616,7 @@ $(print_outputs elf)
   "verification": "host smoke test (native execution when the variant matches the test host, qemu-user otherwise): tests/test_hosts.sh"
 }
 EOF
+    TINYC_LIBS_TCC="$SRC/$CT-tcc" add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc" | sed 's/^/  /'
 }
@@ -693,6 +737,7 @@ $(print_outputs pe)
   "verification": "PE format and export table checked with objdump; execution and the LoadLibrary path are exercised on the Windows CI runner (tests/consumer/win_host_test.c)"
 }
 EOF
+    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }
@@ -924,6 +969,7 @@ $LIBTCC1_LINE
   "verification": "PE format and export table checked with objdump; per-target compile smoke is exercised on the Windows CI runner (see HOST-CROSS-BUILDS.md)"
 }
 EOF
+    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }

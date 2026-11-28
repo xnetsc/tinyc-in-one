@@ -1,0 +1,35 @@
+Bundled-build patch: curl/system.h's __TINYC__ branch assumes
+a POSIX target (it pulls <sys/socket.h> for socklen_t). The
+bundled Windows target is also built with TCC, where there is
+no <sys/socket.h> and the winsock length type is int. Give the
+branch a _WIN32 case with the same values the __MINGW32__
+branch uses. This header is staged into the sysroot, so
+consumers of the bundled libcurl get the same fix.
+
+--- a/include/curl/system.h
++++ b/include/curl/system.h
+@@ -275,6 +275,16 @@
+ #endif
+ 
+ #elif defined(__TINYC__) /* also known as tcc */
++#  if defined(_WIN32)
++#    include <inttypes.h>
++#    define CURL_TYPEOF_CURL_OFF_T     long long
++#    define CURL_FORMAT_CURL_OFF_T     PRId64
++#    define CURL_FORMAT_CURL_OFF_TU    PRIu64
++#    define CURL_SUFFIX_CURL_OFF_T     LL
++#    define CURL_SUFFIX_CURL_OFF_TU    ULL
++#    define CURL_TYPEOF_CURL_SOCKLEN_T int
++#    define CURL_PULL_SYS_TYPES_H      1
++#  else
+ #  define CURL_TYPEOF_CURL_OFF_T     long long
+ #  define CURL_FORMAT_CURL_OFF_T     "lld"
+ #  define CURL_FORMAT_CURL_OFF_TU    "llu"
+@@ -282,6 +292,7 @@
+ #  define CURL_TYPEOF_CURL_SOCKLEN_T socklen_t
+ #  define CURL_PULL_SYS_TYPES_H      1
+ #  define CURL_PULL_SYS_SOCKET_H     1
++#  endif
+ 
+ #elif defined(__SUNPRO_C) || defined(__SUNPRO_CC) /* Oracle Solaris Studio */
+ #  if !defined(__LP64) && (defined(__ILP32) ||                          \

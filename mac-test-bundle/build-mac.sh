@@ -464,6 +464,23 @@ build_mac_target() {
     esac
     write_manifest "$DIST" "$TRIPLE" "$ISA_JSON" "$LIBTCC1_REL" "$EXTRA_JSON"
 
+    # The bundled default libraries (libcurl, PCRE2, mbedTLS;
+    # see libs-config/README.md), built with this dist's own
+    # compiler, as in build.sh's dists.
+    local LIBS_FAMILY=""
+    case $TRIPLE in
+        *-linux-gnu)     LIBS_FAMILY=linux-gnu ;;
+        *-linux-android) LIBS_FAMILY=android ;;
+        *-apple-darwin)  LIBS_FAMILY=darwin ;;
+        *-w64-mingw32)   LIBS_FAMILY=windows ;;
+    esac
+    if [ -n "$LIBS_FAMILY" ]; then
+        step "default libraries ($TRIPLE)"
+        bash "$ROOT/tools/build_default_libs.sh" --tcc "$DUAL" \
+            --triple "$TRIPLE" --family "$LIBS_FAMILY" --dist "$DIST" \
+            || fail "default libraries ($TRIPLE)"
+    fi
+
     step "dist layout ($TRIPLE)"
     find "$DIST" -type f | sort | sed "s|$BUNDLE/|  |"
 }

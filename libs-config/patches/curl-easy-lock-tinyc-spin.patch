@@ -1,0 +1,36 @@
+Bundled-build patch: libcurl's easy_lock.h spin lock uses two
+spin-wait primitives the bundled compiler cannot emit: the
+aarch64 "yield" instruction through inline asm (its aarch64
+assembler does not implement that hint instruction) and
+__builtin_ia32_pause on x86_64 (TCC reports the builtin via
+__has_builtin and defines __GNUC__ on some targets, but the
+Mach-O backend does not lower it, leaving an undefined
+symbol). When building with TCC, fall through to the
+sched_yield branch instead: both are only spin-wait hints,
+and sched_yield serves the same purpose.
+
+--- a/lib/easy_lock.h
++++ b/lib/easy_lock.h
+@@ -66,6 +66,12 @@
+   __has_builtin(__builtin_ia32_pause)
+ #define HAVE_BUILTIN_IA32_PAUSE
+ #endif
++#ifdef __TINYC__
++/* TCC reports the pause builtin and defines __GNUC__ on some
++   targets, but does not lower the builtin everywhere (the
++   Mach-O backend leaves an undefined symbol). */
++#undef HAVE_BUILTIN_IA32_PAUSE
++#endif
+ 
+ #endif
+ 
+@@ -79,7 +85,7 @@
+       /* Reduce load (not mandatory) */
+ #ifdef HAVE_BUILTIN_IA32_PAUSE
+       __builtin_ia32_pause();
+-#elif defined(__aarch64__)
++#elif defined(__aarch64__) && !defined(__TINYC__)
+       __asm__ volatile("yield" ::: "memory");
+ #elif defined(HAVE_SCHED_YIELD)
+       sched_yield();
+diff -ruN a/lib/strerror.c b/lib/strerror.c

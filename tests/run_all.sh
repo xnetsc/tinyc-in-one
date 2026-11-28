@@ -54,6 +54,10 @@ section "host variant smoke tests (cross-built hosts, qemu-user)"
 bash tests/test_hosts.sh
 ok $? "host smoke (details: tests/host-test-output.txt)"
 
+section "default libraries battery (libcurl, PCRE2, mbedTLS)"
+bash tests/test_default_libs.sh
+ok $? "default libraries battery"
+
 echo
 if [ $FAIL -eq 0 ]; then echo "ALL SUITES PASS"; else echo "SOME SUITES FAILED"; fi
 exit $FAIL

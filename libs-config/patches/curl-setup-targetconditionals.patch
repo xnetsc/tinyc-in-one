@@ -1,0 +1,20 @@
+Bundled-build patch: libcurl's curl_setup.h includes the
+Apple SDK header <TargetConditionals.h> unconditionally on
+__APPLE__. The bundled darwin header set does not ship it; its
+only use in curl_setup.h is an SDK macro fixup that is a
+no-op when the TARGET_OS_* macros are undefined, which is
+the correct state for the bundled macOS targets. Guard the
+include with __has_include.
+
+--- a/lib/curl_setup.h
++++ b/lib/curl_setup.h
+@@ -65,7 +65,9 @@
+ 
+ #if defined(__APPLE__)
+ #include <sys/types.h>
++#if defined(__has_include) && __has_include(<TargetConditionals.h>)
+ #include <TargetConditionals.h>
++#endif
+ /* Fixup faulty target macro initialization in macOS SDK since v14.4 (as of
+    15.0 beta). The SDK target detection in `TargetConditionals.h` correctly
+    detects macOS, but fails to set the macro's old name `TARGET_OS_OSX`, then

@@ -1,0 +1,52 @@
+Bundled-build patch: three places in mbedTLS assume a full
+MSVC/MinGW Windows environment that the bundled TCC win32
+target does not provide.
+
+1. mbedtls_platform_gmtime_r() calls gmtime_s() on _WIN32.
+   The bundled import set has no gmtime_s. Treat TCC like the
+   old MinGW case (PLATFORM_UTIL_USE_GMTIME): fall back to
+   gmtime() copied under the threading mutex. threading.c
+   gets the matching condition so the mutex it defines under
+   THREADING_USE_GMTIME exists for that fallback.
+
+2. mbedtls_platform_zeroize() calls SecureZeroMemory() on
+   _WIN32, which the bundled win32 headers implement as an
+   inline built on the __stosb compiler intrinsic; TCC has
+   no such intrinsic, so the symbol stays undefined. Under
+   TCC use a volatile byte loop with the same
+   cannot-be-optimized-away property.
+
+--- a/library/platform_util.c
++++ b/library/platform_util.c
+@@ -107,6 +107,9 @@
+ #endif
+ #elif defined(__STDC_LIB_EXT1__) && !defined(__IAR_SYSTEMS_ICC__)
+         memset_s(buf, len, 0, len);
++#elif defined(_WIN32) && defined(__TINYC__)
++        do { volatile unsigned char *vp = (volatile unsigned char *) buf;
++             size_t n = len; while (n != 0) { *vp++ = 0; n--; } } while (0);
+ #elif defined(_WIN32)
+         SecureZeroMemory(buf, len);
+ #else
+@@ -165,7 +168,8 @@
+  * we keep it private by only defining it in this file
+  */
+ #if !(defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)) || \
+-    (defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
++    (defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)) || \
++    defined(__TINYC__)
+ #define PLATFORM_UTIL_USE_GMTIME
+ #endif
+ 
+--- a/library/threading.c
++++ b/library/threading.c
+@@ -39,7 +39,8 @@
+  * we keep it private by only defining it in this file
+  */
+ 
+-#if !(defined(_WIN32) && !defined(EFIX64) && !defined(EFI32))
++#if !(defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)) || \
++    defined(__TINYC__)
+ #define THREADING_USE_GMTIME
+ #endif /* ! ( defined(_WIN32) && !defined(EFIX64) && !defined(EFI32) ) */
+ 

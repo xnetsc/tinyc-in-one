@@ -92,6 +92,15 @@ jobs:
           bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
           cp tests/host-test-output.txt test-outputs/
 
+      # The default libraries (libcurl, PCRE2, mbedTLS) as
+      # functional runs, not just link closure: the battery
+      # programs are built with each dist's packaged compiler
+      # and executed - natively for x86_64-linux-gnu, under
+      # qemu-user for aarch64/riscv64 - with local HTTP/HTTPS/
+      # WebSocket round trips and system-tool interop legs.
+      - name: Default libraries battery (functional, qemu cross runs)
+        run: bash tests/test_default_libs.sh > test-outputs/default-libs.log 2>&1
+
       # The vendor suite and the SIMD differential suites test
       # the compiler in the tree (the package steps below test
       # the packages): what ships is what CI tested. The x86
@@ -449,6 +458,12 @@ jobs:
           bash tests/test_hosts.sh > test-outputs/host-smoke.log 2>&1
           cp tests/host-test-output.txt test-outputs/
 
+      # The default libraries battery, as in the x86_64 job:
+      # aarch64-linux-gnu runs natively here, x86_64/riscv64
+      # under qemu-user.
+      - name: Default libraries battery (functional, qemu cross runs)
+        run: bash tests/test_default_libs.sh > test-outputs/default-libs.log 2>&1
+
       # The vendor suite in native form (arm64-gen.c compiled as
       # its own translation unit, the form the cross builds mask)
       # and the NEON differential suite: what ships is what CI
@@ -636,6 +651,17 @@ jobs:
         run: |
           bash tests/windows/run_windows_feature_smoke.sh > test-outputs/win-feature-smoke.log 2>&1
 
+      # The default libraries (libcurl, PCRE2, mbedTLS) as
+      # functional runs on the real Windows runner: the battery
+      # programs are built with the Windows host dist's
+      # tinyc.exe against the staged static archives and run
+      # natively, with local HTTP/HTTPS/WebSocket round trips
+      # and system-curl/OpenSSL interop legs.
+      - name: Default libraries battery (PE)
+        shell: bash
+        run: |
+          bash tests/windows/run_windows_default_libs.sh > test-outputs/win-default-libs.log 2>&1
+
       # Cross-frame unwind evidence for the __chkstk prolog: a
       # >=4096-byte frame's UNWIND_INFO must put the frame setup
       # codes at the end of the call to __chkstk (prolog offset
@@ -818,6 +844,19 @@ jobs:
         run: |
           bash tests/macos/run_macos_sdkfree.sh > test-outputs/mac-sdkfree.log 2>&1
 
+      # The default libraries (libcurl, PCRE2, mbedTLS) as
+      # functional runs: the battery programs are built with
+      # this job's bundle dist compiler against the staged
+      # static archives and run as Mach-O executables, with
+      # local HTTP/HTTPS/WebSocket round trips and system-curl/
+      # OpenSSL interop legs. Each macOS job covers its own
+      # triple, so both Darwin targets execute here.
+      - name: Default libraries battery (Mach-O)
+        env:
+          TINYC_MAC_DIST: ${{ github.workspace }}/mac-test-bundle/dist/${{ matrix.triple }}
+        run: |
+          bash tests/macos/run_macos_default_libs.sh > test-outputs/mac-default-libs.log 2>&1
+
       # SIMD execution evidence on this platform: the script
       # runs the shipped bundle kernel built above on the SIMD
       # probes as Mach-O executables, diffed against clang:
@@ -946,13 +985,21 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # The default libraries battery for x86_64-linux-android,
+      # built with the dist compiler from the same fetched
+      # artifact; the run phase executes inside the emulator
+      # step below, before the AAR consumer tests.
+      - name: Build the default libraries battery (android)
+        run: |
+          bash tests/run_android_emulator_libs.sh build \
+            fetched-assets/tinyc-x86_64-linux-gnu.tar.gz
       - name: Run the AAR consumer tests on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           profile: pixel
-          script: cd packages/android/consumer-test && gradle :app:connectedDebugAndroidTest
+          script: bash tests/run_android_emulator_libs.sh run && cd packages/android/consumer-test && gradle :app:connectedDebugAndroidTest
       - uses: actions/upload-artifact@v4
         if: always()
         with:
