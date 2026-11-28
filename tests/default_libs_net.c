@@ -506,6 +506,38 @@ static void probe_raw_connect(void) {
    each step prints its own result so the log shows where the
    path breaks. Runs on every platform so the probe itself is
    exercised by the local battery too. */
+
+/* Read the pending connect error off the socket: after a wait
+   timeout the error is the only authority on whether the
+   connect is merely slow or already failed, and with what
+   code. On Windows the value is a Winsock code (10061 =
+   refused, 10060 = timed out, 10054 = reset); elsewhere it
+   is an errno. */
+static void print_so_error(sock_t fd) {
+    int soerr = 0;
+#ifdef _WIN32
+    int olen = sizeof(soerr);
+#else
+    socklen_t olen = sizeof(soerr);
+#endif
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &olen) != 0) {
+#ifdef _WIN32
+        printf("nb connect: getsockopt SO_ERROR failed, WSA error %d\n",
+               WSAGetLastError());
+#else
+        printf("nb connect: getsockopt SO_ERROR failed, errno %d (%s)\n",
+               errno, strerror(errno));
+#endif
+        return;
+    }
+#ifdef _WIN32
+    printf("nb connect: SO_ERROR=%d\n", soerr);
+#else
+    printf("nb connect: SO_ERROR=%d (%s)\n", soerr, strerror(soerr));
+#endif
+    fflush(stdout);
+}
+
 static void probe_nb_connect(void) {
     sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
     if (!sock_valid(fd)) {
@@ -601,7 +633,11 @@ static void probe_nb_connect(void) {
         /* Same socket, other wait primitive: if WSAPoll reports
            it writable, select itself is the broken step; if it
            also times out, the non-blocking connect never
-           completes and the fault is below select. */
+           completes and the fault is below select. The revents
+           bits are decoded in the log: 0x01 POLLIN, 0x02
+           POLLPRI, 0x04 POLLOUT, 0x08 POLLERR, 0x10 POLLHUP,
+           0x20 POLLNVAL -- a value without POLLOUT/POLLERR is
+           not a completed or refused connect. */
         {
             WSAPOLLFD pfd;
             pfd.fd = fd;
@@ -611,10 +647,25 @@ static void probe_nb_connect(void) {
             printf("nb connect: WSAPoll on same socket: rc=%d revents=0x%x, "
                    "WSA error %d\n", prc, (unsigned)pfd.revents,
                    WSAGetLastError());
+            printf("nb connect: WSAPoll revents 0x%x:",
+                   (unsigned)pfd.revents);
+            if (pfd.revents & POLLIN) printf(" POLLIN");
+            if (pfd.revents & POLLPRI) printf(" POLLPRI");
+            if (pfd.revents & POLLOUT) printf(" POLLOUT");
+            if (pfd.revents & POLLERR) printf(" POLLERR");
+            if (pfd.revents & POLLHUP) printf(" POLLHUP");
+            if (pfd.revents & POLLNVAL) printf(" POLLNVAL");
+            printf("\n");
         }
         fflush(stdout);
+        /* The wait primitives disagree (select: nothing in 5 s;
+           WSAPoll: events pending), so the pending error is the
+           authority: it says whether the connect failed, and
+           with what code, or is still in progress (SO_ERROR 0). */
+        print_so_error(fd);
 #else
         printf("nb connect: select timed out after 5s (not writable)\n");
+        print_so_error(fd);
 #endif
         sock_close(fd);
         return;
@@ -642,6 +693,7 @@ static void probe_nb_connect(void) {
     rc = poll(&pfd, 1, 5000);
     if (rc == 0) {
         printf("nb connect: poll timed out after 5s (not writable)\n");
+        print_so_error(fd);
         sock_close(fd);
         return;
     }
@@ -682,6 +734,21 @@ static void probe_nb_connect(void) {
     sock_close(fd);
 }
 
+/* The ws/wss handlers are referenced only from the static
+   protocols table in url.c, so a link that pulls archive
+   members only on direct reference drops them and the ws
+   scheme is reported unsupported even though libcurl.a
+   contains them (seen on the mac-host link). Reference them
+   directly so the archive pull sees them on every platform;
+   the linker resolves the names, the object types do not
+   matter here. */
+extern const char Curl_handler_ws[];
+extern const char Curl_handler_wss[];
+static const void *tinyc_ws_handler_refs[] = {
+    (const void *)Curl_handler_ws,
+    (const void *)Curl_handler_wss,
+};
+
 /* Probe whether the ws scheme is recognised at all, before any
    server is involved: a closed port must fail with "couldn't
    connect" (7); "unsupported protocol" (1) means the protocol
@@ -710,6 +777,7 @@ int main(int argc, char **argv) {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa)) { printf("WSAStartup failed\n"); return 1; }
 #endif
+    (void)tinyc_ws_handler_refs;
     if (check_ws_scheme()) return 1;
     /* The CA the HTTPS check verifies against, as a file for
        CURLOPT_CAINFO. */

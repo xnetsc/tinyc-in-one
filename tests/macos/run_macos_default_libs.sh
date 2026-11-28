@@ -34,7 +34,16 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); }
 # ws handler even though libcurl.a does). Pulling the whole
 # archive makes every handler present; the -no-whole-archive
 # after -lcurl keeps mbedTLS on the normal pull.
-"$TC" "$ROOT/tests/default_libs_net.c" \
+# Echo the link command: whether -Wl,-whole-archive actually
+# reaches the link is itself evidence (earlier rounds had no
+# link command in any log, so the flag's effect could not be
+# confirmed). -vv lists every archive member the link loads,
+# which is the decisive next datum: if ws.o/url.o load but the
+# binary still lacks them, the fault is in the Mach-O output;
+# if they never load, it is in the archive loading on the
+# mac-host compiler.
+echo "link battery2: $TC $ROOT/tests/default_libs_net.c -Wl,-whole-archive -lcurl -Wl,-no-whole-archive -lmbedtls -lmbedx509 -lmbedcrypto -o $TMP/battery2"
+"$TC" -vv "$ROOT/tests/default_libs_net.c" \
     -Wl,-whole-archive -lcurl -Wl,-no-whole-archive \
     -lmbedtls -lmbedx509 -lmbedcrypto \
     -o "$TMP/battery2" || { fail "battery2 build"; exit 1; }
