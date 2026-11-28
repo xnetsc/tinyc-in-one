@@ -32,17 +32,11 @@ build)
     tar -xzf "$TARBALL" -C "$WORK/dist"
     TC=$WORK/dist/$TRIPLE/bin/tinyc
     [ -x "$TC" ] || { echo "FAIL: no $TRIPLE compiler in $TARBALL"; exit 1; }
-    # The dist tarball's compiler bakes an absolute CONFIG_TCCDIR
-    # (the linux-x64 build machine's build/dist path), so from an
-    # extracted tarball on another runner it cannot find its own
-    # sysroot - headers, crt objects, libtcc1.a - and the link
-    # fails with `file 'crtbegin_dynamic.o' not found`. Point it
-    # at the extracted lib/tcc with -B, the same mechanism the npm
-    # package uses for a relocated compiler.
-    BFLAG="-B$WORK/dist/$TRIPLE/lib/tcc"
-    "$TC" "$BFLAG" "$ROOT/tests/default_libs.c" -lpcre2 -lmbedcrypto \
+    # No -B: the packaged compiler resolves its lib/tcc from its
+    # own location inside the extracted dist.
+    "$TC" "$ROOT/tests/default_libs.c" -lpcre2 -lmbedcrypto \
         -o "$WORK/battery1" || { echo "FAIL: battery1 build"; exit 1; }
-    "$TC" "$BFLAG" "$ROOT/tests/default_libs_net.c" \
+    "$TC" "$ROOT/tests/default_libs_net.c" \
         -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
         -o "$WORK/battery2" || { echo "FAIL: battery2 build"; exit 1; }
     echo "android emulator libs battery: built for $TRIPLE"

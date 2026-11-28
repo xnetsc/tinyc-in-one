@@ -709,17 +709,25 @@ PYEOF
         -DTCC_TARGET_X86_64 -DTCC_TARGET_PE \
         "$SRC/tinyc.def" -lm
     ln -sf tinyc.exe "$DIST/bin/tcc.exe"
+    # Stage the default libraries before the companions below
+    # are copied: the companions mirror the staged win32 tree,
+    # so anything staged afterwards (the three libraries'
+    # headers and archives, the bcrypt compat header and .def)
+    # would be missing from the exe's own search paths.
+    add_default_libs "$TRIPLE" "$DIST"
     # Companions next to the exe, in the places libtcc actually
     # searches with CONFIG_TCCDIR undefined: the runtime tccdir {B}
     # is the exe's own directory, and the PE defaults (tcc.h) put
-    # the library path at {B}/lib - libtcc1.a and runmain.o are
-    # looked up there by tcc_add_support, the .def files there by
-    # tcc_add_library - and the include paths at {B}/include and
+    # the library path at {B}/lib - libtcc1.a and the default
+    # libraries' archives are looked up there by tcc_add_library,
+    # runmain.o there by tcc_add_support, the .def files there
+    # too (the staged set, which adds bcrypt.def to the vendored
+    # files) - and the include paths at {B}/include and
     # {B}/include/winapi.
     mkdir -p "$DIST/bin/lib"
-    cp "$DIST/lib/tcc/win32/lib/libtcc1.a" "$DIST/bin/lib/"
+    cp "$DIST/lib/tcc/win32/lib/"*.a "$DIST/bin/lib/"
     cp "$DIST/lib/tcc/win32/lib/runmain.o" "$DIST/bin/lib/"
-    cp "$SRC"/win32/lib/*.def "$DIST/bin/lib/"
+    cp "$DIST/lib/tcc/win32/lib/"*.def "$DIST/bin/lib/"
     cp -r "$DIST/lib/tcc/win32/include" "$DIST/bin/include"
 
     cat > "$DIST/manifest.json" <<EOF
@@ -737,7 +745,6 @@ $(print_outputs pe)
   "verification": "PE format and export table checked with objdump; execution and the LoadLibrary path are exercised on the Windows CI runner (tests/consumer/win_host_test.c)"
 }
 EOF
-    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }
@@ -933,6 +940,11 @@ PYEOF
         "$SRC/tinyc.def" -lm
     ln -sf tinyc.exe "$DIST/bin/tcc.exe"
 
+    # Stage the default libraries before the companions below
+    # are mirrored: the mirror copies the staged lib/tcc trees,
+    # so anything staged afterwards would be missing from the
+    # exe's own search paths (same ordering as build_host_mingw).
+    add_default_libs "$TRIPLE" "$DIST"
     # Companions next to the exe, in the places libtcc actually
     # searches with CONFIG_TCCDIR undefined: the runtime tccdir {B}
     # is the exe's own directory, and the baked paths are
@@ -969,7 +981,6 @@ $LIBTCC1_LINE
   "verification": "PE format and export table checked with objdump; per-target compile smoke is exercised on the Windows CI runner (see HOST-CROSS-BUILDS.md)"
 }
 EOF
-    add_default_libs "$TRIPLE" "$DIST"
     echo "built: $DIST"
     file "$DIST/bin/tinyc.exe" | sed 's/^/  /'
 }

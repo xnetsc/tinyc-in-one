@@ -103,8 +103,16 @@ rm -rf "$WORK"
 mkdir -p "$WORK" "$INCDIR" "$LIBDIR"
 
 # compile_list <logfile> <objdir> <src...> -- <flags...>
-# Compiles each source with $TCC in parallel; fails on the first
-# error, naming the file. Objects land in <objdir> by basename.
+# Compiles each source with $TCC, up to $JOBS in parallel; on
+# any failure, names the file in the log and fails. Objects land
+# in <objdir> by basename.
+#
+# The parallelism is a plain shell job pool, not xargs: BSD
+# xargs (macOS) will not assemble a -I command line once the
+# argument carrying the replacement string - here the inline
+# sh -c script with the build tree's absolute paths inlined -
+# passes its 255-byte limit, and fails with "command line
+# cannot be assembled, too long" before compiling anything.
 compile_list() {
     local log=$1 objdir=$2
     shift 2
@@ -113,14 +121,30 @@ compile_list() {
     shift
     mkdir -p "$objdir"
     : > "$log"
-    printf '%s\n' "${srcs[@]}" | xargs -P"$JOBS" -I{} sh -c '
-        src={}
-        obj="'"$objdir"'"/$(basename "${src%.*}").o
-        if ! "'"$TCC"'" -c "$src" -o "$obj" "$@" >>"'"$log"'" 2>&1; then
-            echo "COMPILE FAILED: $src" >>"'"$log"'"
-            exit 1
+    local src obj pid failed=0
+    local running=()
+    for src in "${srcs[@]}"; do
+        obj="$objdir/$(basename "${src%.*}").o"
+        (
+            if ! "$TCC" -c "$src" -o "$obj" "$@" >>"$log" 2>&1; then
+                echo "COMPILE FAILED: $src" >>"$log"
+                exit 1
+            fi
+        ) &
+        running+=($!)
+        if [ "${#running[@]}" -ge "$JOBS" ]; then
+            if ! wait "${running[0]}"; then failed=1; fi
+            running=("${running[@]:1}")
         fi
-    ' _ "$@" || { tail -40 "$log"; echo "library build failed (see $log)" >&2; exit 1; }
+    done
+    for pid in "${running[@]}"; do
+        if ! wait "$pid"; then failed=1; fi
+    done
+    if [ "$failed" -ne 0 ]; then
+        tail -40 "$log"
+        echo "library build failed (see $log)" >&2
+        exit 1
+    fi
 }
 
 archive() { # archive <out.a> <objdir>

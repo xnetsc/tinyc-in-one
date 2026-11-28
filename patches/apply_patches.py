@@ -162,6 +162,163 @@ static HMODULE tinyc_self_module(void)
 }
 /* on win32, we suppose the lib and includes are at the location of 'tcc.exe' */""")
 
+# ---- libtcc.c: default tccdir from this binary's own location ------
+# configure bakes an absolute CONFIG_TCCDIR (the build machine's dist
+# path) into config.h; a dist copied or extracted anywhere else finds
+# none of its own files through it (builtin headers, crt objects and
+# libtcc1.a all hang off {B}). The default therefore resolves at
+# runtime from the binary itself: the executable's own path in
+# process form (/proc/self/exe on Linux/Android hosts,
+# _NSGetExecutablePath on macOS hosts), the containing file's path
+# from dladdr in library form. The tccdir is <own dir>/../lib/tcc
+# (the win32-target layout <own dir>/../lib/tcc/win32 is tried as
+# well); a candidate is adopted only if it carries the layout
+# markers (the builtin headers, or a libtcc1.a in either archive
+# spot the layouts use). A binary that does not sit in a dist - an
+# in-tree build, the Android AAR .so, whose host sets the path
+# through the API - falls back to the baked CONFIG_TCCDIR. Windows
+# keeps the upstream runtime resolution (config_tccdir_w32 over
+# tinyc_self_module(), which already names this image in both
+# forms) and Emscripten keeps the baked path; both take the macro
+# branch. An explicit -B or tcc_set_lib_path() still overrides the
+# default afterwards, as before: only the tcc_new() default changes.
+# Allocator discipline inside the resolver: libtcc.c poisons the
+# bare free/realloc names below its allocator section, so own
+# buffers go through tcc_malloc/tcc_free and realpath() results
+# through libc_free().
+patch("libtcc.c",
+      "LIBTCCAPI TCCState *tcc_new(void)\n",
+      """/* tinyc: the default tccdir, resolved from this binary's own
+ * location (see the note in patches/apply_patches.py). */
+#if defined _WIN32 || defined __EMSCRIPTEN__ || defined CONFIG_TCC_STATIC
+# define tinyc_default_tccdir() CONFIG_TCCDIR
+#else
+# include <limits.h>
+# include <sys/stat.h>
+# ifdef __APPLE__
+#  include <mach-o/dyld.h>
+# endif
+
+static int tinyc_layout_file(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+/* The process executable's canonical path, or NULL. */
+static const char *tinyc_exe_path(char *buf, size_t bufsz)
+{
+# ifdef __APPLE__
+    uint32_t size = (uint32_t)bufsz;
+    char *rp;
+    if (_NSGetExecutablePath(buf, &size) == -1) {
+        /* buf too small: size now holds the required size */
+        char *tmp = (char *)tcc_malloc(size);
+        if (!tmp)
+            return NULL;
+        if (_NSGetExecutablePath(tmp, &size) != 0) {
+            tcc_free(tmp);
+            return NULL;
+        }
+        rp = realpath(tmp, NULL);
+        tcc_free(tmp);
+        if (!rp || strlen(rp) + 1 > bufsz) {
+            libc_free(rp);
+            return NULL;
+        }
+        strcpy(buf, rp);
+        libc_free(rp);
+        return buf;
+    }
+    rp = realpath(buf, NULL);
+    if (rp) {
+        if (strlen(rp) + 1 <= bufsz)
+            strcpy(buf, rp);
+        libc_free(rp);
+    }
+    return buf;
+# else
+    ssize_t n = readlink("/proc/self/exe", buf, bufsz - 1);
+    if (n <= 0)
+        return NULL;
+    buf[n] = 0;
+    return buf;
+# endif
+}
+
+/* Derive the tccdir from one own-file path: the canonical tccdir
+ * goes to out and 1 is returned; 0 when the path does not sit in
+ * a dist layout. */
+static int tinyc_derive_tccdir(const char *own, char *out, size_t outsz)
+{
+    static const char * const subs[] = { "/../lib/tcc", "/../lib/tcc/win32" };
+    char cand[PATH_MAX], marker[PATH_MAX];
+    const char *slash = strrchr(own, '/');
+    size_t dirlen, i;
+    if (!slash)
+        return 0;
+    dirlen = (size_t)(slash - own);
+    for (i = 0; i < sizeof subs / sizeof subs[0]; ++i) {
+        char *rp;
+        if (dirlen + strlen(subs[i]) + 1 > sizeof cand)
+            continue;
+        memcpy(cand, own, dirlen);
+        strcpy(cand + dirlen, subs[i]);
+        snprintf(marker, sizeof marker, "%s/include/stdarg.h", cand);
+        if (!tinyc_layout_file(marker)) {
+            snprintf(marker, sizeof marker, "%s/libtcc1.a", cand);
+            if (!tinyc_layout_file(marker)) {
+                snprintf(marker, sizeof marker, "%s/lib/libtcc1.a", cand);
+                if (!tinyc_layout_file(marker))
+                    continue;
+            }
+        }
+        rp = realpath(cand, NULL);
+        if (!rp || strlen(rp) + 1 > outsz) {
+            libc_free(rp);
+            continue;
+        }
+        strcpy(out, rp);
+        libc_free(rp);
+        return 1;
+    }
+    return 0;
+}
+
+static const char *tinyc_default_tccdir(void)
+{
+    static char resolved[PATH_MAX];
+    char exe[PATH_MAX], lib[PATH_MAX];
+    const char *exe_p, *lib_p = NULL;
+    Dl_info info;
+    exe_p = tinyc_exe_path(exe, sizeof exe);
+    /* Library form: the file containing this code. When it is not
+     * the process executable, this image was loaded as a library
+     * and its own location - not the host's - is the base. */
+    if (dladdr((const void *)&tinyc_default_tccdir, &info) && info.dli_fname) {
+        char *rp = realpath(info.dli_fname, NULL);
+        const char *abs = rp ? rp : info.dli_fname;
+        if (!exe_p || strcmp(abs, exe_p) != 0) {
+            strncpy(lib, abs, sizeof lib - 1);
+            lib[sizeof lib - 1] = 0;
+            lib_p = lib;
+        }
+        libc_free(rp);
+    }
+    if (lib_p && tinyc_derive_tccdir(lib_p, resolved, sizeof resolved))
+        return resolved;
+    if (exe_p && tinyc_derive_tccdir(exe_p, resolved, sizeof resolved))
+        return resolved;
+    return CONFIG_TCCDIR;
+}
+#endif
+
+LIBTCCAPI TCCState *tcc_new(void)
+""")
+patch("libtcc.c",
+      "    tcc_set_lib_path(s, CONFIG_TCCDIR);\n",
+      "    tcc_set_lib_path(s, tinyc_default_tccdir());\n")
+
 # ---- Makefile: the IO unit is its own object in every build ---------
 patch("Makefile",
       "# native tcc always made from tcc.o and libtcc.[so|a]",

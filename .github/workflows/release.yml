@@ -617,6 +617,28 @@ jobs:
           echo "win_host_test exit code: $RC" >> "$LOG"
           exit $RC
 
+      # Relocated smoke: a full copy of the host dist in a fresh
+      # directory must still find its own files - the compiler
+      # resolves its directory from its own image location
+      # (GetModuleHandleEx over the code's own address), in the
+      # CLI form and in the LoadLibrary form alike, with no -B.
+      - name: Relocated smoke - copied dist compiles with no -B
+        shell: msys2 {0}
+        run: |
+          export PATH=/mingw64/bin:$PATH
+          LOG=$PWD/test-outputs/win-relocated-host-test.log
+          HOSTSRC=$PWD/tests/consumer/win_host_test.c
+          rm -rf /tmp/relocated && mkdir -p /tmp/relocated/work
+          cp -r build/dist-host/x86_64-w64-mingw32 /tmp/relocated/dist
+          EXE=/tmp/relocated/dist/bin/tinyc.exe
+          cd /tmp/relocated/work
+          printf '#include <stdio.h>\nint main(void) { printf("hello from relocated tinyc\\n"); return 0; }\n' > hello.c
+          "$EXE" hello.c -o hello.exe
+          ./hello.exe > hello.out 2>&1
+          grep -q "hello from relocated tinyc" hello.out
+          gcc -O2 -o /tmp/win_host_test.exe "$HOSTSRC"
+          /tmp/win_host_test.exe "$EXE" > "$LOG" 2>&1
+
       # Cross-target evidence for the Windows host build: each of
       # the 8 non-native dists compiles a hello for its own target
       # and the output format magic is checked per family (ELF
@@ -832,6 +854,21 @@ jobs:
             echo "test failures:"; grep '^FAIL: ' test-outputs/mac-tests.log; exit 1
           fi
           grep -c '^PASS: ' test-outputs/mac-tests.log
+
+      # Relocated smoke: a full copy of this job's bundle dist in
+      # a fresh directory must still find its own lib/tcc - the
+      # compiler resolves it from its own executable path
+      # (_NSGetExecutablePath / dladdr), with no -B. The compiled
+      # Mach-O runs natively.
+      - name: Relocated smoke - copied dist compiles with no -B
+        run: |
+          rm -rf /tmp/relocated && mkdir -p /tmp/relocated/work
+          cp -R mac-test-bundle/dist/${{ matrix.triple }} /tmp/relocated/dist
+          cd /tmp/relocated/work
+          printf '#include <stdio.h>\nint main(void) { printf("hello from relocated tinyc\\n"); return 0; }\n' > hello.c
+          /tmp/relocated/dist/bin/tinyc hello.c -o hello
+          ./hello > hello.out 2>&1
+          grep -q "hello from relocated tinyc" hello.out
 
       # SDK-free verification of the bundled Darwin headers: the
       # battery and the ABI probe build and run with the SDK

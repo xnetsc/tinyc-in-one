@@ -3227,6 +3227,18 @@ LIBTCCAPI int tcc_output_file(TCCState *s, const char *filename)
         tcc_tcov_add_file(s, filename);
     if (s->output_type == TCC_OUTPUT_OBJ)
         return elf_output_obj(s, filename);
+#if TARGETOS_ANDROID
+    /* Android executables must be position independent: the
+       system linker refuses to run ET_EXEC binaries.  An
+       executable therefore gets the dynamic (PIE) link
+       treatment by default - load base 0, ET_DYN, dynamic
+       relocations - while keeping the interpreter section and
+       entry point of an executable.  An explicit -static keeps
+       producing a static executable; shared-library output
+       already is ET_DYN and is unchanged. */
+    if (s->output_type == TCC_OUTPUT_EXE && !s->static_link)
+        s->output_type |= TCC_OUTPUT_DYN;
+#endif
 #ifdef TCC_TARGET_PE
     return  pe_output_file(s, filename);
 #elif defined TCC_TARGET_MACHO
