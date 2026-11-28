@@ -61,6 +61,23 @@ with tinyc.State() as s:
 
 编译错误抛 `tinyc.TinyCError`，同时收集在 `s.errors` 里，不打印。
 
+## 宿主函数
+
+`add_symbol` 把一个 Python 可调用对象注册成编译产物可按名字直接
+调用的宿主函数（`tcc_add_symbol`）；签名写法与 `State.function`
+一致：
+
+```python
+s.add_symbol("host_mul", lambda a, b: a * b,
+             ctypes.c_int, ctypes.c_int, ctypes.c_int)
+s.compile_string("extern int host_mul(int, int);\n"
+                 "int use_host(void){ return host_mul(6, 7); }")
+```
+
+作用域：注册的是本进程的地址，只在进程内运行成立——MEMORY 输出，
+经 `run()` 或 `function()` 触达。文件输出不支持：注册过宿主符号
+后，`output_file()` 直接报错，不会产出把本进程地址写死的文件。
+
 ## 输出（IO）
 
 编译器输出走 TCCIO 接口。缺省是进程的真实 stdout/stderr。其它

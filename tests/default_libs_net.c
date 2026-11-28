@@ -94,6 +94,23 @@ static sock_t listen_on(int port) {
         exit(1);
     }
     fprintf(stderr, "listening on 127.0.0.1:%d\n", port);
+    /* Report the address the socket actually bound to, not just
+       the requested one: if the bind landed elsewhere (wrong
+       byte order, wrong address family) the log line above
+       would still claim the requested port. */
+    {
+        struct sockaddr_in actual;
+#ifdef _WIN32
+        int alen = sizeof(actual);
+#else
+        socklen_t alen = sizeof(actual);
+#endif
+        if (getsockname(fd, (struct sockaddr *)&actual, &alen) == 0) {
+            const unsigned char *b = (const unsigned char *)&actual.sin_addr;
+            fprintf(stderr, "listening actual %u.%u.%u.%u:%d\n",
+                    b[0], b[1], b[2], b[3], ntohs(actual.sin_port));
+        }
+    }
     return fd;
 }
 
@@ -435,12 +452,71 @@ static int check_ws(void) {
     return 0;
 }
 
+/* A plain socket connect to the HTTP port, run only after the
+   libcurl GET has failed: it separates "the server is not
+   reachable on this port" from "libcurl's connect path is
+   broken". A minimal well-formed GET is sent so the server's
+   read path sees a complete request (a bare connect-and-close
+   would leave it parsing an empty buffer). */
+static void probe_raw_connect(void) {
+    sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!sock_valid(fd)) { printf("raw connect: socket failed\n"); return; }
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons((unsigned short)base_port);
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+#ifdef _WIN32
+        printf("raw connect: failed, WSA error %d\n", WSAGetLastError());
+#else
+        printf("raw connect: failed, errno %d (%s)\n", errno, strerror(errno));
+#endif
+        sock_close(fd);
+        return;
+    }
+    static const char req[] = "GET /probe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    send(fd, req, (int)sizeof(req) - 1, 0);
+    char rbuf[256];
+    int rn = (int)recv(fd, rbuf, sizeof(rbuf) - 1, 0);
+    if (rn > 0) {
+        rbuf[rn] = 0;
+        printf("raw connect: ok, server replied: %.40s\n", rbuf);
+    } else {
+        printf("raw connect: ok, no reply\n");
+    }
+    sock_close(fd);
+}
+
+/* Probe whether the ws scheme is recognised at all, before any
+   server is involved: a closed port must fail with "couldn't
+   connect" (7); "unsupported protocol" (1) means the protocol
+   table lost the ws handler, which is a different defect from
+   any network failure. */
+static int check_ws_scheme(void) {
+    CURL *c = curl_easy_init();
+    if (!c) { printf("curl: init failed\n"); return 1; }
+    curl_easy_setopt(c, CURLOPT_URL, "ws://127.0.0.1:1/");
+    curl_easy_setopt(c, CURLOPT_CONNECT_ONLY, 2L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 2000L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 5000L);
+    CURLcode rc = curl_easy_perform(c);
+    curl_easy_cleanup(c);
+    if (rc == CURLE_UNSUPPORTED_PROTOCOL) {
+        printf("curl: ws scheme NOT supported (protocol table)\n");
+        return 1;
+    }
+    printf("curl: ws scheme recognised (probe rc=%d)\n", (int)rc);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     base_port = argc > 1 ? atoi(argv[1]) : 18231;
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa)) { printf("WSAStartup failed\n"); return 1; }
 #endif
+    if (check_ws_scheme()) return 1;
     /* The CA the HTTPS check verifies against, as a file for
        CURLOPT_CAINFO. */
     const char *cafile = "default_libs_ca.pem";
@@ -453,7 +529,7 @@ int main(int argc, char **argv) {
     thread_create(&th_http, http_server);
     thread_create(&th_ws, ws_server);
     if (!wait_ready(&ready_http, "http", base_port)) return 1;
-    if (check_http()) return 1;
+    if (check_http()) { probe_raw_connect(); return 1; }
     if (!wait_ready(&ready_ws, "ws", base_port + 2)) return 1;
     if (check_ws()) return 1;
     thread_join(th_http);

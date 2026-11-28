@@ -74,6 +74,19 @@ static jmethodID g_io_read_in = NULL;
 static jmethodID g_io_flush = NULL;
 static jclass g_listener_class = NULL;  /* com/tinyc/Tinyc$ErrorListener */
 static jmethodID g_listener_on_error = NULL;
+static jclass g_hostfn_class = NULL;    /* com/tinyc/Tinyc$HostFunction */
+static jmethodID g_hostfn_invoke = NULL;
+static jclass g_object_class = NULL;    /* java/lang/Object */
+static jclass g_integer_class = NULL;
+static jmethodID g_integer_value_of = NULL;
+static jclass g_long_class = NULL;
+static jmethodID g_long_value_of = NULL;
+static jclass g_double_class = NULL;
+static jmethodID g_double_value_of = NULL;
+static jclass g_number_class = NULL;    /* java/lang/Number */
+static jmethodID g_number_int_value = NULL;
+static jmethodID g_number_long_value = NULL;
+static jmethodID g_number_double_value = NULL;
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     JNIEnv *env = NULL;
@@ -102,6 +115,42 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_listener_on_error = (*env)->GetMethodID(env, g_listener_class,
                                               "onError", "(Ljava/lang/String;)V");
     if (!g_listener_on_error) return JNI_ERR;
+
+    jclass hostfn = (*env)->FindClass(env, "com/tinyc/Tinyc$HostFunction");
+    if (hostfn == NULL) return JNI_ERR;
+    g_hostfn_class = (*env)->NewGlobalRef(env, hostfn);
+    (*env)->DeleteLocalRef(env, hostfn);
+    g_hostfn_invoke = (*env)->GetMethodID(env, g_hostfn_class, "invoke",
+                                          "([Ljava/lang/Object;)Ljava/lang/Object;");
+    if (!g_hostfn_invoke) return JNI_ERR;
+
+    /* Boxing helpers for the host symbol trampolines. */
+    struct { const char *name; jclass *slot; } classes[] = {
+        { "java/lang/Object", &g_object_class },
+        { "java/lang/Integer", &g_integer_class },
+        { "java/lang/Long", &g_long_class },
+        { "java/lang/Double", &g_double_class },
+        { "java/lang/Number", &g_number_class },
+    };
+    for (size_t i = 0; i < sizeof(classes) / sizeof(classes[0]); i++) {
+        jclass c = (*env)->FindClass(env, classes[i].name);
+        if (c == NULL) return JNI_ERR;
+        *classes[i].slot = (*env)->NewGlobalRef(env, c);
+        (*env)->DeleteLocalRef(env, c);
+    }
+    g_integer_value_of = (*env)->GetStaticMethodID(env, g_integer_class,
+                                                   "valueOf", "(I)Ljava/lang/Integer;");
+    g_long_value_of = (*env)->GetStaticMethodID(env, g_long_class,
+                                                "valueOf", "(J)Ljava/lang/Long;");
+    g_double_value_of = (*env)->GetStaticMethodID(env, g_double_class,
+                                                  "valueOf", "(D)Ljava/lang/Double;");
+    g_number_int_value = (*env)->GetMethodID(env, g_number_class, "intValue", "()I");
+    g_number_long_value = (*env)->GetMethodID(env, g_number_class, "longValue", "()J");
+    g_number_double_value = (*env)->GetMethodID(env, g_number_class, "doubleValue", "()D");
+    if (!g_integer_value_of || !g_long_value_of || !g_double_value_of
+            || !g_number_int_value || !g_number_long_value || !g_number_double_value) {
+        return JNI_ERR;
+    }
 
     return JNI_VERSION_1_6;
 }
@@ -351,6 +400,495 @@ static void error_trampoline(void *opaque, const char *msg) {
 }
 
 /* ------------------------------------------------------------------ */
+/* host symbol trampolines: Java methods as C function pointers        */
+/*                                                                     */
+/* tcc_add_symbol registers a raw address in this process, so a Java   */
+/* method needs a real C function to point at. For every supported     */
+/* signature shape there is one trampoline per slot (16 slots,         */
+/* shared by all states); a trampoline packs its scalar arguments      */
+/* and calls host_dispatch, which boxes them into an Object[] and      */
+/* invokes the registered Tinyc.HostFunction. Supported shapes:        */
+/* return void / int / long / double; 0 to 3 parameters, each int /    */
+/* long / double. Anything else is rejected at registration time       */
+/* (nativeAddSymbol returns -2), never silently misaligned.            */
+/*                                                                     */
+/* Exceptions follow spec 6.5 rule 1: a throwing HostFunction is       */
+/* captured into the owning state's pending slot (the same channel     */
+/* the IO callbacks use) and rethrown by the JNI entry point after     */
+/* the native call returns; the compiled code sees a zero return.      */
+/* ------------------------------------------------------------------ */
+
+#define TINYC_HOST_SLOTS 16   /* matches Tinyc.MAX_HOST_SYMBOLS */
+
+enum { RK_VOID = 0, RK_INT = 1, RK_LONG = 2, RK_DOUBLE = 3 };
+enum { PK_INT = 0, PK_LONG = 1, PK_DOUBLE = 2 };
+
+typedef union HostArg {
+    int64_t i;
+    double d;
+} HostArg;
+
+typedef struct HostSlot {
+    int used;
+    TCCState *state;
+    jobject fn;              /* global ref, Tinyc$HostFunction */
+    int ret_kind;            /* RK_* */
+    int param_kinds[3];      /* PK_* */
+    int nparams;
+} HostSlot;
+
+static HostSlot g_host_slots[TINYC_HOST_SLOTS];
+static pthread_mutex_t g_host_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Capture a pending exception into the owning state's pending slot
+ * (the IO callbacks' channel), so the current JNI entry point
+ * rethrows it after the native call returns. */
+static void host_capture_pending(JNIEnv *env, TCCState *s) {
+    StateCtx *c = ctx_find(s, 1);
+    if (c != NULL) {
+        capture_exception(env, &c->io_ctx.pending);
+    } else {
+        (*env)->ExceptionClear(env);
+    }
+}
+
+static void host_dispatch(int slot, int nargs, const HostArg *args, HostArg *ret) {
+    HostSlot rec;
+    ret->i = 0;
+    pthread_mutex_lock(&g_host_lock);
+    if (slot < 0 || slot >= TINYC_HOST_SLOTS || !g_host_slots[slot].used) {
+        pthread_mutex_unlock(&g_host_lock);
+        return;
+    }
+    rec = g_host_slots[slot];
+    pthread_mutex_unlock(&g_host_lock);
+
+    int attached = 0;
+    JNIEnv *env = get_env(&attached);
+    if (env == NULL) return;
+
+    jobjectArray arr = (*env)->NewObjectArray(env, (jsize)nargs, g_object_class, NULL);
+    if (arr == NULL) {
+        host_capture_pending(env, rec.state);
+        put_env(attached);
+        return;
+    }
+    for (int k = 0; k < nargs; k++) {
+        jobject box = NULL;
+        switch (rec.param_kinds[k]) {
+        case PK_INT:
+            box = (*env)->CallStaticObjectMethod(env, g_integer_class,
+                                                 g_integer_value_of,
+                                                 (jint)args[k].i);
+            break;
+        case PK_LONG:
+            box = (*env)->CallStaticObjectMethod(env, g_long_class,
+                                                 g_long_value_of,
+                                                 (jlong)args[k].i);
+            break;
+        case PK_DOUBLE:
+            box = (*env)->CallStaticObjectMethod(env, g_double_class,
+                                                 g_double_value_of,
+                                                 args[k].d);
+            break;
+        }
+        if (box != NULL) {
+            (*env)->SetObjectArrayElement(env, arr, k, box);
+            (*env)->DeleteLocalRef(env, box);
+        }
+    }
+    jobject res = (*env)->CallObjectMethod(env, rec.fn, g_hostfn_invoke, arr);
+    (*env)->DeleteLocalRef(env, arr);
+    if ((*env)->ExceptionCheck(env)) {
+        host_capture_pending(env, rec.state);
+        put_env(attached);
+        return;
+    }
+    if (res != NULL) {
+        switch (rec.ret_kind) {
+        case RK_INT:
+            ret->i = (*env)->CallIntMethod(env, res, g_number_int_value);
+            break;
+        case RK_LONG:
+            ret->i = (*env)->CallLongMethod(env, res, g_number_long_value);
+            break;
+        case RK_DOUBLE:
+            ret->d = (*env)->CallDoubleMethod(env, res, g_number_double_value);
+            break;
+        default:
+            break;
+        }
+        if ((*env)->ExceptionCheck(env)) {
+            host_capture_pending(env, rec.state);
+            ret->i = 0;
+        }
+        (*env)->DeleteLocalRef(env, res);
+    }
+    put_env(attached);
+}
+
+/* Per-shape trampoline generators. HT_<k> is the C type of kind k,
+ * HF_<k> the HostArg field a parameter of kind k travels in, RF_<k>
+ * the field a return value of kind k is read back from. */
+#define HT_i int
+#define HT_l long
+#define HT_d double
+#define HF_i i
+#define HF_l i
+#define HF_d d
+#define RF_i i
+#define RF_l i
+#define RF_d d
+
+#define DEF_TRAMP_0(S, R) \
+    static HT_##R tramp_##S##_##R(void) { \
+        HostArg r; host_dispatch(S, 0, NULL, &r); \
+        return (HT_##R)(r.RF_##R); \
+    }
+#define DEF_TRAMP_0V(S) \
+    static void tramp_##S##_v(void) { \
+        HostArg r; host_dispatch(S, 0, NULL, &r); \
+    }
+#define DEF_TRAMP_1(S, R, P1) \
+    static HT_##R tramp_##S##_##R##_##P1(HT_##P1 a0) { \
+        HostArg a[1], r; a[0].HF_##P1 = a0; \
+        host_dispatch(S, 1, a, &r); \
+        return (HT_##R)(r.RF_##R); \
+    }
+#define DEF_TRAMP_1V(S, P1) \
+    static void tramp_##S##_v_##P1(HT_##P1 a0) { \
+        HostArg a[1], r; a[0].HF_##P1 = a0; \
+        host_dispatch(S, 1, a, &r); \
+    }
+#define DEF_TRAMP_2(S, R, P1, P2) \
+    static HT_##R tramp_##S##_##R##_##P1##_##P2(HT_##P1 a0, HT_##P2 a1) { \
+        HostArg a[2], r; a[0].HF_##P1 = a0; a[1].HF_##P2 = a1; \
+        host_dispatch(S, 2, a, &r); \
+        return (HT_##R)(r.RF_##R); \
+    }
+#define DEF_TRAMP_2V(S, P1, P2) \
+    static void tramp_##S##_v_##P1##_##P2(HT_##P1 a0, HT_##P2 a1) { \
+        HostArg a[2], r; a[0].HF_##P1 = a0; a[1].HF_##P2 = a1; \
+        host_dispatch(S, 2, a, &r); \
+    }
+#define DEF_TRAMP_3(S, R, P1, P2, P3) \
+    static HT_##R tramp_##S##_##R##_##P1##_##P2##_##P3( \
+            HT_##P1 a0, HT_##P2 a1, HT_##P3 a2) { \
+        HostArg a[3], r; \
+        a[0].HF_##P1 = a0; a[1].HF_##P2 = a1; a[2].HF_##P3 = a2; \
+        host_dispatch(S, 3, a, &r); \
+        return (HT_##R)(r.RF_##R); \
+    }
+#define DEF_TRAMP_3V(S, P1, P2, P3) \
+    static void tramp_##S##_v_##P1##_##P2##_##P3( \
+            HT_##P1 a0, HT_##P2 a1, HT_##P3 a2) { \
+        HostArg a[3], r; \
+        a[0].HF_##P1 = a0; a[1].HF_##P2 = a1; a[2].HF_##P3 = a2; \
+        host_dispatch(S, 3, a, &r); \
+    }
+
+/* One shape = the 16 slot trampolines + a solver picking one by slot. */
+#define DEF_SHAPE_0(R) \
+    DEF_TRAMP_0(0, R) DEF_TRAMP_0(1, R) DEF_TRAMP_0(2, R) DEF_TRAMP_0(3, R) \
+    DEF_TRAMP_0(4, R) DEF_TRAMP_0(5, R) DEF_TRAMP_0(6, R) DEF_TRAMP_0(7, R) \
+    DEF_TRAMP_0(8, R) DEF_TRAMP_0(9, R) DEF_TRAMP_0(10, R) DEF_TRAMP_0(11, R) \
+    DEF_TRAMP_0(12, R) DEF_TRAMP_0(13, R) DEF_TRAMP_0(14, R) DEF_TRAMP_0(15, R) \
+    static void *solve_##R(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_##R, tramp_1_##R, tramp_2_##R, tramp_3_##R, \
+            tramp_4_##R, tramp_5_##R, tramp_6_##R, tramp_7_##R, \
+            tramp_8_##R, tramp_9_##R, tramp_10_##R, tramp_11_##R, \
+            tramp_12_##R, tramp_13_##R, tramp_14_##R, tramp_15_##R }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_0V() \
+    DEF_TRAMP_0V(0) DEF_TRAMP_0V(1) DEF_TRAMP_0V(2) DEF_TRAMP_0V(3) \
+    DEF_TRAMP_0V(4) DEF_TRAMP_0V(5) DEF_TRAMP_0V(6) DEF_TRAMP_0V(7) \
+    DEF_TRAMP_0V(8) DEF_TRAMP_0V(9) DEF_TRAMP_0V(10) DEF_TRAMP_0V(11) \
+    DEF_TRAMP_0V(12) DEF_TRAMP_0V(13) DEF_TRAMP_0V(14) DEF_TRAMP_0V(15) \
+    static void *solve_v(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_v, tramp_1_v, tramp_2_v, tramp_3_v, \
+            tramp_4_v, tramp_5_v, tramp_6_v, tramp_7_v, \
+            tramp_8_v, tramp_9_v, tramp_10_v, tramp_11_v, \
+            tramp_12_v, tramp_13_v, tramp_14_v, tramp_15_v }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_1(R, P1) \
+    DEF_TRAMP_1(0, R, P1) DEF_TRAMP_1(1, R, P1) DEF_TRAMP_1(2, R, P1) \
+    DEF_TRAMP_1(3, R, P1) DEF_TRAMP_1(4, R, P1) DEF_TRAMP_1(5, R, P1) \
+    DEF_TRAMP_1(6, R, P1) DEF_TRAMP_1(7, R, P1) DEF_TRAMP_1(8, R, P1) \
+    DEF_TRAMP_1(9, R, P1) DEF_TRAMP_1(10, R, P1) DEF_TRAMP_1(11, R, P1) \
+    DEF_TRAMP_1(12, R, P1) DEF_TRAMP_1(13, R, P1) DEF_TRAMP_1(14, R, P1) \
+    DEF_TRAMP_1(15, R, P1) \
+    static void *solve_##R##_##P1(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_##R##_##P1, tramp_1_##R##_##P1, tramp_2_##R##_##P1, \
+            tramp_3_##R##_##P1, tramp_4_##R##_##P1, tramp_5_##R##_##P1, \
+            tramp_6_##R##_##P1, tramp_7_##R##_##P1, tramp_8_##R##_##P1, \
+            tramp_9_##R##_##P1, tramp_10_##R##_##P1, tramp_11_##R##_##P1, \
+            tramp_12_##R##_##P1, tramp_13_##R##_##P1, tramp_14_##R##_##P1, \
+            tramp_15_##R##_##P1 }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_1V(P1) \
+    DEF_TRAMP_1V(0, P1) DEF_TRAMP_1V(1, P1) DEF_TRAMP_1V(2, P1) \
+    DEF_TRAMP_1V(3, P1) DEF_TRAMP_1V(4, P1) DEF_TRAMP_1V(5, P1) \
+    DEF_TRAMP_1V(6, P1) DEF_TRAMP_1V(7, P1) DEF_TRAMP_1V(8, P1) \
+    DEF_TRAMP_1V(9, P1) DEF_TRAMP_1V(10, P1) DEF_TRAMP_1V(11, P1) \
+    DEF_TRAMP_1V(12, P1) DEF_TRAMP_1V(13, P1) DEF_TRAMP_1V(14, P1) \
+    DEF_TRAMP_1V(15, P1) \
+    static void *solve_v_##P1(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_v_##P1, tramp_1_v_##P1, tramp_2_v_##P1, \
+            tramp_3_v_##P1, tramp_4_v_##P1, tramp_5_v_##P1, \
+            tramp_6_v_##P1, tramp_7_v_##P1, tramp_8_v_##P1, \
+            tramp_9_v_##P1, tramp_10_v_##P1, tramp_11_v_##P1, \
+            tramp_12_v_##P1, tramp_13_v_##P1, tramp_14_v_##P1, \
+            tramp_15_v_##P1 }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_2(R, P1, P2) \
+    DEF_TRAMP_2(0, R, P1, P2) DEF_TRAMP_2(1, R, P1, P2) \
+    DEF_TRAMP_2(2, R, P1, P2) DEF_TRAMP_2(3, R, P1, P2) \
+    DEF_TRAMP_2(4, R, P1, P2) DEF_TRAMP_2(5, R, P1, P2) \
+    DEF_TRAMP_2(6, R, P1, P2) DEF_TRAMP_2(7, R, P1, P2) \
+    DEF_TRAMP_2(8, R, P1, P2) DEF_TRAMP_2(9, R, P1, P2) \
+    DEF_TRAMP_2(10, R, P1, P2) DEF_TRAMP_2(11, R, P1, P2) \
+    DEF_TRAMP_2(12, R, P1, P2) DEF_TRAMP_2(13, R, P1, P2) \
+    DEF_TRAMP_2(14, R, P1, P2) DEF_TRAMP_2(15, R, P1, P2) \
+    static void *solve_##R##_##P1##_##P2(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_##R##_##P1##_##P2, tramp_1_##R##_##P1##_##P2, \
+            tramp_2_##R##_##P1##_##P2, tramp_3_##R##_##P1##_##P2, \
+            tramp_4_##R##_##P1##_##P2, tramp_5_##R##_##P1##_##P2, \
+            tramp_6_##R##_##P1##_##P2, tramp_7_##R##_##P1##_##P2, \
+            tramp_8_##R##_##P1##_##P2, tramp_9_##R##_##P1##_##P2, \
+            tramp_10_##R##_##P1##_##P2, tramp_11_##R##_##P1##_##P2, \
+            tramp_12_##R##_##P1##_##P2, tramp_13_##R##_##P1##_##P2, \
+            tramp_14_##R##_##P1##_##P2, tramp_15_##R##_##P1##_##P2 }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_2V(P1, P2) \
+    DEF_TRAMP_2V(0, P1, P2) DEF_TRAMP_2V(1, P1, P2) \
+    DEF_TRAMP_2V(2, P1, P2) DEF_TRAMP_2V(3, P1, P2) \
+    DEF_TRAMP_2V(4, P1, P2) DEF_TRAMP_2V(5, P1, P2) \
+    DEF_TRAMP_2V(6, P1, P2) DEF_TRAMP_2V(7, P1, P2) \
+    DEF_TRAMP_2V(8, P1, P2) DEF_TRAMP_2V(9, P1, P2) \
+    DEF_TRAMP_2V(10, P1, P2) DEF_TRAMP_2V(11, P1, P2) \
+    DEF_TRAMP_2V(12, P1, P2) DEF_TRAMP_2V(13, P1, P2) \
+    DEF_TRAMP_2V(14, P1, P2) DEF_TRAMP_2V(15, P1, P2) \
+    static void *solve_v_##P1##_##P2(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_v_##P1##_##P2, tramp_1_v_##P1##_##P2, \
+            tramp_2_v_##P1##_##P2, tramp_3_v_##P1##_##P2, \
+            tramp_4_v_##P1##_##P2, tramp_5_v_##P1##_##P2, \
+            tramp_6_v_##P1##_##P2, tramp_7_v_##P1##_##P2, \
+            tramp_8_v_##P1##_##P2, tramp_9_v_##P1##_##P2, \
+            tramp_10_v_##P1##_##P2, tramp_11_v_##P1##_##P2, \
+            tramp_12_v_##P1##_##P2, tramp_13_v_##P1##_##P2, \
+            tramp_14_v_##P1##_##P2, tramp_15_v_##P1##_##P2 }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_3(R, P1, P2, P3) \
+    DEF_TRAMP_3(0, R, P1, P2, P3) DEF_TRAMP_3(1, R, P1, P2, P3) \
+    DEF_TRAMP_3(2, R, P1, P2, P3) DEF_TRAMP_3(3, R, P1, P2, P3) \
+    DEF_TRAMP_3(4, R, P1, P2, P3) DEF_TRAMP_3(5, R, P1, P2, P3) \
+    DEF_TRAMP_3(6, R, P1, P2, P3) DEF_TRAMP_3(7, R, P1, P2, P3) \
+    DEF_TRAMP_3(8, R, P1, P2, P3) DEF_TRAMP_3(9, R, P1, P2, P3) \
+    DEF_TRAMP_3(10, R, P1, P2, P3) DEF_TRAMP_3(11, R, P1, P2, P3) \
+    DEF_TRAMP_3(12, R, P1, P2, P3) DEF_TRAMP_3(13, R, P1, P2, P3) \
+    DEF_TRAMP_3(14, R, P1, P2, P3) DEF_TRAMP_3(15, R, P1, P2, P3) \
+    static void *solve_##R##_##P1##_##P2##_##P3(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_##R##_##P1##_##P2##_##P3, \
+            tramp_1_##R##_##P1##_##P2##_##P3, \
+            tramp_2_##R##_##P1##_##P2##_##P3, \
+            tramp_3_##R##_##P1##_##P2##_##P3, \
+            tramp_4_##R##_##P1##_##P2##_##P3, \
+            tramp_5_##R##_##P1##_##P2##_##P3, \
+            tramp_6_##R##_##P1##_##P2##_##P3, \
+            tramp_7_##R##_##P1##_##P2##_##P3, \
+            tramp_8_##R##_##P1##_##P2##_##P3, \
+            tramp_9_##R##_##P1##_##P2##_##P3, \
+            tramp_10_##R##_##P1##_##P2##_##P3, \
+            tramp_11_##R##_##P1##_##P2##_##P3, \
+            tramp_12_##R##_##P1##_##P2##_##P3, \
+            tramp_13_##R##_##P1##_##P2##_##P3, \
+            tramp_14_##R##_##P1##_##P2##_##P3, \
+            tramp_15_##R##_##P1##_##P2##_##P3 }; \
+        return tab[slot]; \
+    }
+#define DEF_SHAPE_3V(P1, P2, P3) \
+    DEF_TRAMP_3V(0, P1, P2, P3) DEF_TRAMP_3V(1, P1, P2, P3) \
+    DEF_TRAMP_3V(2, P1, P2, P3) DEF_TRAMP_3V(3, P1, P2, P3) \
+    DEF_TRAMP_3V(4, P1, P2, P3) DEF_TRAMP_3V(5, P1, P2, P3) \
+    DEF_TRAMP_3V(6, P1, P2, P3) DEF_TRAMP_3V(7, P1, P2, P3) \
+    DEF_TRAMP_3V(8, P1, P2, P3) DEF_TRAMP_3V(9, P1, P2, P3) \
+    DEF_TRAMP_3V(10, P1, P2, P3) DEF_TRAMP_3V(11, P1, P2, P3) \
+    DEF_TRAMP_3V(12, P1, P2, P3) DEF_TRAMP_3V(13, P1, P2, P3) \
+    DEF_TRAMP_3V(14, P1, P2, P3) DEF_TRAMP_3V(15, P1, P2, P3) \
+    static void *solve_v_##P1##_##P2##_##P3(int slot) { \
+        static void *const tab[TINYC_HOST_SLOTS] = { \
+            tramp_0_v_##P1##_##P2##_##P3, \
+            tramp_1_v_##P1##_##P2##_##P3, \
+            tramp_2_v_##P1##_##P2##_##P3, \
+            tramp_3_v_##P1##_##P2##_##P3, \
+            tramp_4_v_##P1##_##P2##_##P3, \
+            tramp_5_v_##P1##_##P2##_##P3, \
+            tramp_6_v_##P1##_##P2##_##P3, \
+            tramp_7_v_##P1##_##P2##_##P3, \
+            tramp_8_v_##P1##_##P2##_##P3, \
+            tramp_9_v_##P1##_##P2##_##P3, \
+            tramp_10_v_##P1##_##P2##_##P3, \
+            tramp_11_v_##P1##_##P2##_##P3, \
+            tramp_12_v_##P1##_##P2##_##P3, \
+            tramp_13_v_##P1##_##P2##_##P3, \
+            tramp_14_v_##P1##_##P2##_##P3, \
+            tramp_15_v_##P1##_##P2##_##P3 }; \
+        return tab[slot]; \
+    }
+
+/* The supported signature shapes. X is applied twice below: once to
+ * define the trampolines (DEF_SHAPE_*), once to resolve a signature
+ * string to its solver (FIND_*). */
+#define SHAPES_0(X) X(i) X(l) X(d)
+#define SHAPES_0V(X) X()
+#define SHAPES_1(X) X(i,i) X(i,l) X(i,d) X(l,i) X(l,l) X(l,d) X(d,i) X(d,l) \
+    X(d,d)
+#define SHAPES_1V(X) X(i) X(l) X(d)
+#define SHAPES_2(X) X(i,i,i) X(i,i,l) X(i,i,d) X(i,l,i) X(i,l,l) X(i,l,d) \
+    X(i,d,i) X(i,d,l) X(i,d,d) X(l,i,i) X(l,i,l) X(l,i,d) X(l,l,i) X(l,l,l) \
+    X(l,l,d) X(l,d,i) X(l,d,l) X(l,d,d) X(d,i,i) X(d,i,l) X(d,i,d) X(d,l,i) \
+    X(d,l,l) X(d,l,d) X(d,d,i) X(d,d,l) X(d,d,d)
+#define SHAPES_2V(X) X(i,i) X(i,l) X(i,d) X(l,i) X(l,l) X(l,d) X(d,i) \
+    X(d,l) X(d,d)
+#define SHAPES_3(X) X(i,i,i,i) X(i,i,i,l) X(i,i,i,d) X(i,i,l,i) X(i,i,l,l) \
+    X(i,i,l,d) X(i,i,d,i) X(i,i,d,l) X(i,i,d,d) X(i,l,i,i) X(i,l,i,l) \
+    X(i,l,i,d) X(i,l,l,i) X(i,l,l,l) X(i,l,l,d) X(i,l,d,i) X(i,l,d,l) \
+    X(i,l,d,d) X(i,d,i,i) X(i,d,i,l) X(i,d,i,d) X(i,d,l,i) X(i,d,l,l) \
+    X(i,d,l,d) X(i,d,d,i) X(i,d,d,l) X(i,d,d,d) X(l,i,i,i) X(l,i,i,l) \
+    X(l,i,i,d) X(l,i,l,i) X(l,i,l,l) X(l,i,l,d) X(l,i,d,i) X(l,i,d,l) \
+    X(l,i,d,d) X(l,l,i,i) X(l,l,i,l) X(l,l,i,d) X(l,l,l,i) X(l,l,l,l) \
+    X(l,l,l,d) X(l,l,d,i) X(l,l,d,l) X(l,l,d,d) X(l,d,i,i) X(l,d,i,l) \
+    X(l,d,i,d) X(l,d,l,i) X(l,d,l,l) X(l,d,l,d) X(l,d,d,i) X(l,d,d,l) \
+    X(l,d,d,d) X(d,i,i,i) X(d,i,i,l) X(d,i,i,d) X(d,i,l,i) X(d,i,l,l) \
+    X(d,i,l,d) X(d,i,d,i) X(d,i,d,l) X(d,i,d,d) X(d,l,i,i) X(d,l,i,l) \
+    X(d,l,i,d) X(d,l,l,i) X(d,l,l,l) X(d,l,l,d) X(d,l,d,i) X(d,l,d,l) \
+    X(d,l,d,d) X(d,d,i,i) X(d,d,i,l) X(d,d,i,d) X(d,d,l,i) X(d,d,l,l) \
+    X(d,d,l,d) X(d,d,d,i) X(d,d,d,l) X(d,d,d,d)
+#define SHAPES_3V(X) X(i,i,i) X(i,i,l) X(i,i,d) X(i,l,i) X(i,l,l) X(i,l,d) \
+    X(i,d,i) X(i,d,l) X(i,d,d) X(l,i,i) X(l,i,l) X(l,i,d) X(l,l,i) X(l,l,l) \
+    X(l,l,d) X(l,d,i) X(l,d,l) X(l,d,d) X(d,i,i) X(d,i,l) X(d,i,d) X(d,l,i) \
+    X(d,l,l) X(d,l,d) X(d,d,i) X(d,d,l) X(d,d,d)
+
+SHAPES_0(DEF_SHAPE_0)
+SHAPES_0V(DEF_SHAPE_0V)
+SHAPES_1(DEF_SHAPE_1)
+SHAPES_1V(DEF_SHAPE_1V)
+SHAPES_2(DEF_SHAPE_2)
+SHAPES_2V(DEF_SHAPE_2V)
+SHAPES_3(DEF_SHAPE_3)
+SHAPES_3V(DEF_SHAPE_3V)
+
+#define FIND_0(R) \
+    if (strcmp(sig, #R "()") == 0) return solve_##R(slot);
+#define FIND_0V() \
+    if (strcmp(sig, "v()") == 0) return solve_v(slot);
+#define FIND_1(R, P1) \
+    if (strcmp(sig, #R "(" #P1 ")") == 0) return solve_##R##_##P1(slot);
+#define FIND_1V(P1) \
+    if (strcmp(sig, "v(" #P1 ")") == 0) return solve_v_##P1(slot);
+#define FIND_2(R, P1, P2) \
+    if (strcmp(sig, #R "(" #P1 #P2 ")") == 0) \
+        return solve_##R##_##P1##_##P2(slot);
+#define FIND_2V(P1, P2) \
+    if (strcmp(sig, "v(" #P1 #P2 ")") == 0) \
+        return solve_v_##P1##_##P2(slot);
+#define FIND_3(R, P1, P2, P3) \
+    if (strcmp(sig, #R "(" #P1 #P2 #P3 ")") == 0) \
+        return solve_##R##_##P1##_##P2##_##P3(slot);
+#define FIND_3V(P1, P2, P3) \
+    if (strcmp(sig, "v(" #P1 #P2 #P3 ")") == 0) \
+        return solve_v_##P1##_##P2##_##P3(slot);
+
+static void *host_trampoline_for(const char *sig, int slot) {
+    SHAPES_0(FIND_0)
+    SHAPES_0V(FIND_0V)
+    SHAPES_1(FIND_1)
+    SHAPES_1V(FIND_1V)
+    SHAPES_2(FIND_2)
+    SHAPES_2V(FIND_2V)
+    SHAPES_3(FIND_3)
+    SHAPES_3V(FIND_3V)
+    return NULL;
+}
+
+/* Parse "<ret>(<params>)": ret v/i/l/d, params up to 3 of i/l/d.
+ * Returns 0 on success. Any accepted string is already in the
+ * canonical form host_trampoline_for compares against. */
+static int host_parse_signature(const char *sig, int *ret_kind,
+                                int *param_kinds, int *nparams) {
+    if (sig == NULL) return -1;
+    size_t len = strlen(sig);
+    if (len < 3 || len > 6 || sig[1] != '(' || sig[len - 1] != ')') {
+        return -1;
+    }
+    switch (sig[0]) {
+    case 'v': *ret_kind = RK_VOID; break;
+    case 'i': *ret_kind = RK_INT; break;
+    case 'l': *ret_kind = RK_LONG; break;
+    case 'd': *ret_kind = RK_DOUBLE; break;
+    default: return -1;
+    }
+    int n = 0;
+    for (size_t k = 2; k + 1 < len; k++) {
+        switch (sig[k]) {
+        case 'i': param_kinds[n++] = PK_INT; break;
+        case 'l': param_kinds[n++] = PK_LONG; break;
+        case 'd': param_kinds[n++] = PK_DOUBLE; break;
+        default: return -1;
+        }
+    }
+    *nparams = n;
+    return 0;
+}
+
+static void host_slot_clear(JNIEnv *env, int slot) {
+    jobject fn = NULL;
+    pthread_mutex_lock(&g_host_lock);
+    if (slot >= 0 && slot < TINYC_HOST_SLOTS && g_host_slots[slot].used) {
+        fn = g_host_slots[slot].fn;
+        memset(&g_host_slots[slot], 0, sizeof(HostSlot));
+    }
+    pthread_mutex_unlock(&g_host_lock);
+    if (fn != NULL && env != NULL) {
+        (*env)->DeleteGlobalRef(env, fn);
+    }
+}
+
+/* Free every slot owned by a state (called from nativeDelete before
+ * the state itself is deleted). */
+static void host_slots_clear_state(JNIEnv *env, TCCState *s) {
+    jobject refs[TINYC_HOST_SLOTS];
+    int n = 0;
+    pthread_mutex_lock(&g_host_lock);
+    for (int i = 0; i < TINYC_HOST_SLOTS; i++) {
+        if (g_host_slots[i].used && g_host_slots[i].state == s) {
+            refs[n++] = g_host_slots[i].fn;
+            memset(&g_host_slots[i], 0, sizeof(HostSlot));
+        }
+    }
+    pthread_mutex_unlock(&g_host_lock);
+    if (env != NULL) {
+        for (int i = 0; i < n; i++) {
+            if (refs[i] != NULL) (*env)->DeleteGlobalRef(env, refs[i]);
+        }
+    }
+}
+
+
+/* ------------------------------------------------------------------ */
 /* argv marshalling                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -394,6 +932,7 @@ Java_com_tinyc_TinycNative_nativeDelete(JNIEnv *env, jclass cls, jlong jstate) {
     (void)cls;
     TCCState *s = STATE(env, jstate);
     if (s == NULL) return;
+    host_slots_clear_state(env, s);
     ctx_remove(env, s);
     tcc_delete(s);
 }
@@ -613,6 +1152,59 @@ Java_com_tinyc_TinycNative_nativeGetSymbol(JNIEnv *env, jclass cls,
     void *sym = tcc_get_symbol(STATE(env, jstate), n);
     free(n);
     return (jlong)(uintptr_t)sym;
+}
+
+/* Register a Java HostFunction as a host symbol (tcc_add_symbol).
+ * Returns 0 on success, -2 for an unsupported signature, -3 when the
+ * trampoline slot table is full; any other nonzero value is
+ * tcc_add_symbol's own failure code. */
+JNIEXPORT jint JNICALL
+Java_com_tinyc_TinycNative_nativeAddSymbol(JNIEnv *env, jclass cls,
+                                           jlong jstate, jstring name,
+                                           jstring signature, jobject fn) {
+    (void)cls;
+    TCCState *s = STATE(env, jstate);
+    char *n = dup_jstring(env, name);
+    char *sig = dup_jstring(env, signature);
+    int ret_kind = RK_VOID, pk[3] = {0, 0, 0}, np = 0;
+    if (n == NULL || sig == NULL
+            || host_parse_signature(sig, &ret_kind, pk, &np) != 0) {
+        free(n);
+        free(sig);
+        return -2;
+    }
+    pthread_mutex_lock(&g_host_lock);
+    int slot = -1;
+    for (int i = 0; i < TINYC_HOST_SLOTS; i++) {
+        if (!g_host_slots[i].used) { slot = i; break; }
+    }
+    if (slot >= 0) {
+        HostSlot *r = &g_host_slots[slot];
+        r->used = 1;
+        r->state = s;
+        r->fn = (*env)->NewGlobalRef(env, fn);
+        r->ret_kind = ret_kind;
+        r->nparams = np;
+        for (int k = 0; k < np; k++) r->param_kinds[k] = pk[k];
+    }
+    pthread_mutex_unlock(&g_host_lock);
+    if (slot < 0) {
+        free(n);
+        free(sig);
+        return -3;
+    }
+    void *ptr = host_trampoline_for(sig, slot);
+    jint rc = -2;
+    if (ptr != NULL) {
+        rc = (jint)tcc_add_symbol(s, n, ptr);
+    }
+    if (ptr == NULL || rc != 0) {
+        host_slot_clear(env, slot);
+        if (ptr == NULL) rc = -2;
+    }
+    free(n);
+    free(sig);
+    return rc;
 }
 
 JNIEXPORT jint JNICALL

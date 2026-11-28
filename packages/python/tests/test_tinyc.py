@@ -120,6 +120,51 @@ class ApiModeTests(unittest.TestCase):
             magic = s.function("magic", ctypes.c_int)
             self.assertEqual(magic(), 123)
 
+    def test_add_symbol_called_from_compiled_function(self):
+        calls = []
+
+        def host_mul(a, b):
+            calls.append((a, b))
+            return a * b
+
+        with tinyc.State() as s:
+            s.add_symbol("host_mul", host_mul, ctypes.c_int,
+                         ctypes.c_int, ctypes.c_int)
+            s.compile_string("extern int host_mul(int, int);\n"
+                             "int use_host(void){ return host_mul(6, 7); }")
+            use_host = s.function("use_host", ctypes.c_int)
+            self.assertEqual(use_host(), 42)
+            self.assertEqual(calls, [(6, 7)])
+
+    def test_add_symbol_called_from_run(self):
+        calls = []
+
+        def host_add(a, b):
+            calls.append((a, b))
+            return a + b
+
+        with tinyc.State() as s:
+            s.add_symbol("host_add", host_add, ctypes.c_int,
+                         ctypes.c_int, ctypes.c_int)
+            s.compile_string("extern int host_add(int, int);\n"
+                             "int main(void){ return host_add(19, 23) == 42"
+                             " ? 0 : 1; }")
+            self.assertEqual(s.run(), 0)
+            self.assertEqual(calls, [(19, 23)])
+
+    def test_add_symbol_blocks_output_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            obj = os.path.join(d, "x.o")
+            with tinyc.State(output_type=tinyc.TCC_OUTPUT_OBJ) as s:
+                s.add_symbol("host_mul", lambda a, b: a * b,
+                             ctypes.c_int, ctypes.c_int, ctypes.c_int)
+                s.compile_string("extern int host_mul(int, int);\n"
+                                 "int xf(void){ return host_mul(2, 3); }")
+                with self.assertRaises(tinyc.TinyCError) as cm:
+                    s.output_file(obj)
+                self.assertIn("add_symbol", str(cm.exception))
+            self.assertFalse(os.path.exists(obj))
+
     def test_output_object_file(self):
         with tempfile.TemporaryDirectory() as d:
             obj = os.path.join(d, "x.o")

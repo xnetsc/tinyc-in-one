@@ -77,6 +77,21 @@ so a user header wins on a name clash: the sysroot paths bound by
 `Tinyc.create(paths)` are registered only just before the first
 compile action, so user paths added earlier are naturally in front.
 
+Host functions: `addSymbol(name, signature, fn)` registers a Java
+method the compiled code can call by name (`tcc_add_symbol`).
+The signature is `<ret>(<params>)` with type letters i (int),
+l (long), d (double) and v (void return); at most 3 parameters —
+anything outside that surface is rejected with an exception, not
+silently misaligned. Arguments arrive boxed (Integer / Long /
+Double) in `fn.invoke(...)`, which returns the boxed result. The
+JNI layer bridges through a fixed trampoline table: 16 slots
+shared by all sessions (`Tinyc.MAX_HOST_SYMBOLS`). Scope: the
+registered address lives in this process, so the symbol resolves
+only for in-process execution (MEMORY output, via `run(...)`).
+File output is not supported: once a host symbol is registered,
+`outputFile` throws instead of writing a file with this process's
+addresses baked in.
+
 Notes:
 
 - `Tinyc.run(...)` and `-run` inside `runCli` run the compiled code
@@ -101,7 +116,7 @@ src/main/
 │  ├─ TinycArgs.java      argv assembly (pure logic)
 │  └─ TinycException.java
 ├─ jni/
-│  ├─ tinyc_jni.c         JNI glue: forwards tcc_* / tinyc_main, IO callback trampoline
+│  ├─ tinyc_jni.c         JNI glue: forwards tcc_* / tinyc_main, IO callback and host-symbol trampolines
 │  ├─ tinyc_kernel_adapter.c  kernel adapter layer, compiled into libtinyc.so together with the JNI glue
 │  ├─ tinyc_kernel.h      the kernel's added declarations (TCCIO, tinyc_main)
 │  ├─ CMakeLists.txt      used when the kernel build compiles the JNI glue into libtinyc.so

@@ -73,6 +73,9 @@ final class TinycNative {
     // ---- 链接与输出 ----
     static native int nativeAddLibraryPath(long state, String pathname);
     static native int nativeAddLibrary(long state, String libraryName);
+    // 返回 0 成功；-2 签名不支持；-3 跳板槽位已满；其余非 0 为 tcc_add_symbol 失败。
+    static native int nativeAddSymbol(long state, String name, String signature,
+                                      Tinyc.HostFunction fn);
     static native int nativeOutputFile(long state, String filename);
     static native int nativeRelocate(long state);
     static native long nativeGetSymbol(long state, String name);

@@ -37,6 +37,13 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); }
     -o "$TMP/httpsget" || { fail "httpsget build"; exit 1; }
 pass "battery programs build"
 
+# The ws handler lives in a perfect-hash table emitted as
+# chained fixups; dump it so a "ws not supported" failure
+# shows whether the table itself lost the handler.
+if command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT/tests/macos/check_protocols_table.py" "$TMP/battery2" || true
+fi
+
 "$TMP/battery1" && pass "battery1 run" || fail "battery1 run"
 "$TMP/battery2" && pass "battery2 run" || fail "battery2 run"
 
@@ -62,6 +69,10 @@ if [ -f "$CERT/ca.crt" ]; then
         pass "interop system-curl -> guest mbedTLS"
     else
         fail "interop system-curl -> guest mbedTLS"
+        echo "--- tlsserve.log ---"
+        cat "$TMP/tlsserve.log" 2>/dev/null || echo "(no tlsserve.log)"
+        echo "--- curl -v ---"
+        curl -v --cacert "$CERT/ca.crt" https://127.0.0.1:18241/ 2>&1 | head -40 || true
     fi
     cat > "$TMP/pytls.py" <<'EOF'
 import socket, ssl, sys

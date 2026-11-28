@@ -1,5 +1,5 @@
 == javac version ==
-javac 25.0.5.1
+javac 17.0.21.1
 android.jar: /home/hatch/workspace/envs/android-toolchain/sdk/platforms/android-35/android.jar
 == compile Java (all main sources, against android.jar) ==
 OK
@@ -31,11 +31,45 @@ PASS OUTPUT_PREPROCESS == 5
 passed=21 failed=0
 == javac -h: generate JNI header ==
 total 8
-drwxrws--- 1 root nogroup   46 Nov 23 17:47 .
-drwxrws--- 1 root nogroup   34 Nov 23 17:46 ..
--rw-rw---- 1 root nogroup 4796 Nov 23 17:47 com_tinyc_TinycNative.h
-21
+drwxrws--- 1 root nogroup   46 Nov 28 08:13 .
+drwxrws--- 1 root nogroup   34 Nov 28 08:13 ..
+-rw-rw---- 1 root nogroup 5077 Nov 28 08:13 com_tinyc_TinycNative.h
+22
 == check JNI glue implements every generated prototype ==
 all native methods implemented
-== NDK not found, skipping JNI glue compile-check ==
+== NDK compile-check of JNI glue (arm64-v8a, x86_64) ==
+src/main/jni/tinyc_jni.c:351:23: warning: call to undeclared function 'tcc_get_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    if (io != NULL && tcc_get_io(s) == io) {
+                      ^
+src/main/jni/tinyc_jni.c:351:37: warning: comparison between pointer and integer ('int' and 'TCCIO *' (aka 'struct TCCIO *')) [-Wpointer-integer-compare]
+    if (io != NULL && tcc_get_io(s) == io) {
+                      ~~~~~~~~~~~~~ ^  ~~
+src/main/jni/tinyc_jni.c:352:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, NULL);
+        ^
+src/main/jni/tinyc_jni.c:1005:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, NULL);
+        ^
+src/main/jni/tinyc_jni.c:1011:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, c->tcc_io);
+        ^
+5 warnings generated.
+OK aarch64-linux-android
+src/main/jni/tinyc_jni.c:351:23: warning: call to undeclared function 'tcc_get_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+    if (io != NULL && tcc_get_io(s) == io) {
+                      ^
+src/main/jni/tinyc_jni.c:351:37: warning: comparison between pointer and integer ('int' and 'TCCIO *' (aka 'struct TCCIO *')) [-Wpointer-integer-compare]
+    if (io != NULL && tcc_get_io(s) == io) {
+                      ~~~~~~~~~~~~~ ^  ~~
+src/main/jni/tinyc_jni.c:352:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, NULL);
+        ^
+src/main/jni/tinyc_jni.c:1005:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, NULL);
+        ^
+src/main/jni/tinyc_jni.c:1011:9: warning: call to undeclared function 'tcc_set_io'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+        tcc_set_io(s, c->tcc_io);
+        ^
+5 warnings generated.
+OK x86_64-linux-android
 == jvm-test done ==

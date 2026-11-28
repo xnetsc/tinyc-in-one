@@ -214,6 +214,7 @@ function load() {
     tcc_add_file: _lib.func('int tcc_add_file(void *s, const char *path)'),
     tcc_define_symbol: _lib.func('void tcc_define_symbol(void *s, const char *name, const char *value)'),
     tcc_undefine_symbol: _lib.func('void tcc_undefine_symbol(void *s, const char *name)'),
+    tcc_add_symbol: _lib.func('int tcc_add_symbol(void *s, const char *name, void *val)'),
     // Cross builds (host != target) have no tcc_relocate/tcc_run:
     // relocating target code into this process is native-only.
     tcc_relocate: (() => {
@@ -361,6 +362,10 @@ class State {
     if (outputType !== null) f.tcc_set_output_type(this._s, outputType);
     this._relocated = false;
     this._io = null;
+    // koffi registrations of host functions added with addSymbol;
+    // the compiled code holds the bare callback pointers, so they
+    // stay registered until close() unregisters them.
+    this._hostSymbols = [];
     if (io !== null && io !== undefined) this.setIO(io);
   }
   /* Install an IO on this state only (an IO instance, 'capture', a
@@ -384,6 +389,8 @@ class State {
     }
     this._io = null;
     if (this._errCb) { koffi.unregister(this._errCb); this._errCb = null; }
+    for (const r of this._hostSymbols) koffi.unregister(r);
+    this._hostSymbols = [];
   }
   _check(ret, what) {
     if (ret !== 0) {
@@ -399,9 +406,44 @@ class State {
   compileFile(p) { return this.addFile(p); }
   defineSymbol(name, value = '1') { this._f.tcc_define_symbol(this._s, String(name), String(value)); }
   undefineSymbol(name) { this._f.tcc_undefine_symbol(this._s, String(name)); }
+  /* Register a JS function as a host function the compiled code
+   * can call by name (tcc_add_symbol). The C code declares it
+   * extern with a matching signature, e.g.
+   * addSymbol('host_mul', (a, b) => a * b, 'int', ['int', 'int'])
+   * serves `extern int host_mul(int, int);`.
+   *
+   * Scope: the registered pointer is a callback into this process,
+   * so the symbol resolves only for in-process execution - MEMORY
+   * output after relocate(), reached via function(). It is
+   * meaningless in a written file: once any host symbol is
+   * registered, outputFile() throws (see there). The registration
+   * is held by the state until close(). */
+  addSymbol(name, fn, restype, argtypes) {
+    const proto = koffi.proto(
+      `${restype} TinycHostFn_${name}_${State._fnSeq++}(${argtypes.join(', ')})`);
+    const reg = koffi.register(fn, koffi.pointer(proto));
+    try {
+      this._check(this._f.tcc_add_symbol(this._s, String(name), reg), 'addSymbol');
+    } catch (e) {
+      koffi.unregister(reg);
+      throw e;
+    }
+    this._hostSymbols.push(reg);
+    return this;
+  }
   compileString(src) { return this._check(this._f.tcc_compile_string(this._s, String(src)), 'compileString'); }
   setOutputType(t) { this._f.tcc_set_output_type(this._s, t); }
-  outputFile(p) { return this._check(this._f.tcc_output_file(this._s, String(p)), 'outputFile'); }
+  outputFile(p) {
+    if (this._hostSymbols.length > 0) {
+      throw new TinyCError(
+        'outputFile is not supported after addSymbol: host symbols ' +
+        'are addresses in this process and resolve only for ' +
+        'in-process execution (MEMORY output, relocate/run); a ' +
+        'written file would bake this process\'s addresses into ' +
+        'the output');
+    }
+    return this._check(this._f.tcc_output_file(this._s, String(p)), 'outputFile');
+  }
   relocate() {
     if (!this._f.tcc_relocate) {
       const r = resolveNative();

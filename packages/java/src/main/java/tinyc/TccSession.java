@@ -26,6 +26,8 @@ public final class TccSession implements AutoCloseable {
     /** setIO 经 tcc_io_callback 建的 TCCIO，已用 tcc_set_io 装在本会话的
      * state 上；由本类持有，close 时在 tcc_delete 之后释放。 */
     private MemorySegment stateIoPtr;
+    /** 是否经 addSymbol 成功注册过宿主符号；注册过则 outputFile 拒绝。 */
+    private boolean hostSymbolRegistered;
     private boolean closed;
 
     TccSession(MemorySegment state) {
@@ -153,13 +155,26 @@ public final class TccSession implements AutoCloseable {
         checkCallbackError();
     }
 
-    /** 给编译产物加一个宿主符号。对应 {@code tcc_add_symbol}。 */
+    /**
+     * 给编译产物加一个宿主符号。对应 {@code tcc_add_symbol}。
+     *
+     * <p>作用域：注册的是本进程的裸地址，只在进程内运行成立——MEMORY
+     * 输出 relocate 之后，经 {@link #run} 或取符号调用解析。写成文件
+     * 没有意义：地址会被当绝对值写进产物，离开本进程即失效。所以本
+     * 会话一旦注册过宿主符号，{@link #outputFile} 直接报错拒绝。
+     * value 指向的内存（upcall stub、数据段）的生命周期由调用方负责，
+     * 必须活到本会话 close 之后。
+     */
     public int addSymbol(String name, MemorySegment value) {
-        return invokeInt(() -> {
+        int rc = invokeInt(() -> {
             try (Arena a = Arena.ofConfined()) {
                 return (int) Native.TCC_ADD_SYMBOL.invokeExact(state, Native.cstr(a, name), value);
             }
         }, "tcc_add_symbol");
+        if (rc == 0) {
+            hostSymbolRegistered = true;
+        }
+        return rc;
     }
 
     // ---- 编译与输出 ----
@@ -187,8 +202,18 @@ public final class TccSession implements AutoCloseable {
         return addFile(filename);
     }
 
-    /** 输出可执行文件、库或目标文件。调用前不要 relocate。对应 {@code tcc_output_file}。 */
+    /** 输出可执行文件、库或目标文件。调用前不要 relocate。对应 {@code tcc_output_file}。
+     * 本会话注册过宿主符号（{@link #addSymbol}）时拒绝：宿主符号是本
+     * 进程的地址，只在进程内运行成立，写进文件即成写死的失效地址。 */
     public int outputFile(String filename) {
+        ensureOpen();
+        if (hostSymbolRegistered) {
+            throw new TccException("outputFile is not supported after addSymbol: "
+                    + "host symbols are addresses in this process and resolve only "
+                    + "for in-process execution (MEMORY output, relocate/run); "
+                    + "a written file would bake this process's addresses into "
+                    + "the output");
+        }
         return invokeInt(() -> {
             try (Arena a = Arena.ofConfined()) {
                 return (int) Native.TCC_OUTPUT_FILE.invokeExact(state, Native.cstr(a, filename));

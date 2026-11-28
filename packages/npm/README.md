@@ -70,6 +70,26 @@ s.close();
 Compile errors throw `tcc.TinyCError` and are also collected in
 `s.errors`; they are not printed.
 
+## Host functions
+
+`addSymbol` registers a JS function the compiled code can call
+by name (`tcc_add_symbol`); the signature mirrors
+`State#function`:
+
+```js
+s.addSymbol('host_mul', (a, b) => a * b, 'int', ['int', 'int']);
+s.compileString('extern int host_mul(int, int);\n' +
+  'int use_host(void){ return host_mul(6, 7); }');
+```
+
+Scope: the registered pointer is a callback into this process,
+so the symbol resolves only for in-process execution — MEMORY
+output after `relocate()`, reached via `function()`. File output
+is not supported: once a host symbol is registered,
+`outputFile()` throws instead of writing a file with this
+process's addresses baked in. Registrations are held until
+`close()`.
+
 ## Output (IO)
 
 Compiler output goes through the TCCIO interface. Default is the

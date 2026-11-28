@@ -62,6 +62,10 @@ if [ -f "$CERT/ca.crt" ]; then
         note "windows: interop system-curl -> guest mbedTLS ok"
     else
         fail "windows: interop system-curl -> guest mbedTLS"
+        echo "--- tlsserve.log ---"
+        cat "$TMP/tlsserve.log" 2>/dev/null || echo "(no tlsserve.log)"
+        echo "--- curl -v ---"
+        curl -v --cacert "$CERT/ca.crt" https://127.0.0.1:18241/ 2>&1 | head -40 || true
     fi
     cat > "$TMP/pytls.py" <<'EOF'
 import socket, ssl, sys

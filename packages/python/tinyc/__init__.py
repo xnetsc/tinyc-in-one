@@ -208,6 +208,9 @@ def _load():
         lib.tcc_relocate.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     lib.tcc_get_symbol.restype = ctypes.c_void_p
     lib.tcc_get_symbol.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    lib.tcc_add_symbol.restype = ctypes.c_int
+    lib.tcc_add_symbol.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                   ctypes.c_void_p]
     lib.tcc_add_include_path.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
     lib.tcc_add_sysinclude_path.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
     lib.tcc_add_library_path.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -472,6 +475,10 @@ class State:
             lib.tcc_set_output_type(self._s, output_type)
         self._relocated = False
         self._io = None
+        # CFUNCTYPE trampolines of host functions registered with
+        # add_symbol; kept alive for the state's lifetime, because
+        # the compiled code holds the bare trampoline addresses.
+        self._host_symbols = []
         if io is not None:
             self.set_io(io)
 
@@ -496,6 +503,7 @@ class State:
             self._lib.tcc_delete(ctypes.c_void_p(self._s))
             self._s = None
         self._io = None
+        self._host_symbols = []
 
     def __enter__(self):
         return self
@@ -534,6 +542,27 @@ class State:
     def undefine_symbol(self, name):
         self._lib.tcc_undefine_symbol(self._s, str(name).encode())
 
+    def add_symbol(self, name, func, restype, *argtypes):
+        """Register a Python callable as a host function the compiled
+        code can call by name (tcc_add_symbol). The C code declares
+        it extern with a matching signature, e.g.
+        add_symbol("host_mul", mul, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int) serves `extern int host_mul(int, int);`.
+
+        Scope: the registered address is a trampoline into this
+        process, so the symbol resolves only for in-process
+        execution - MEMORY output after relocate(), reached via
+        run() or function(). It is meaningless in a written file:
+        once any host symbol is registered, output_file() refuses
+        (see there). The trampoline is kept alive by the state until
+        close()."""
+        cb = ctypes.CFUNCTYPE(restype, *argtypes)(func)
+        addr = ctypes.cast(cb, ctypes.c_void_p).value
+        ret = self._lib.tcc_add_symbol(self._s, str(name).encode(),
+                                       ctypes.c_void_p(addr))
+        self._check(ret, f"add_symbol({name})")
+        self._host_symbols.append(cb)
+
     # compilation
     def compile_string(self, source):
         if isinstance(source, str):
@@ -550,6 +579,13 @@ class State:
         self._lib.tcc_set_output_type(self._s, output_type)
 
     def output_file(self, path):
+        if self._host_symbols:
+            raise TinyCError(
+                "output_file is not supported after add_symbol: host "
+                "symbols are addresses in this process and resolve "
+                "only for in-process execution (MEMORY output, "
+                "relocate/run); a written file would bake this "
+                "process's addresses into the output")
         return self._check(self._lib.tcc_output_file(
             self._s, str(path).encode()), f"output_file({path})")
 

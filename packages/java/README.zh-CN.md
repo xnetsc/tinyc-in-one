@@ -107,6 +107,15 @@ s.addFile("/home/user/mylib/libfoo.a");             // 单个库文件，不走 
 | `run` | `tcc_run`（目标程序在宿主进程内运行，其 exit 与崩溃归宿主） |
 | `relocate` / `getSymbol` | `tcc_relocate` / `tcc_get_symbol` |
 
+## 宿主符号
+
+`TccSession.addSymbol(name, segment)` 注册一个宿主地址——Java
+方法的 Panama upcall stub，或一段数据段——编译产物可按名字调用
+或引用。作用域：注册的是本进程的地址，只在进程内运行成立
+（MEMORY 输出 relocate 之后，经 `run` 或取符号调用）。文件输出
+不支持：会话注册过宿主符号后，它的 `outputFile` 直接报错，不会
+产出把本进程地址写死的文件。segment 的生命周期必须长于会话。
+
 ## IO
 
 `TccIO` 是三个通道的接口：`writeOut`、`writeErr`、`readIn`，数据以字节传递。

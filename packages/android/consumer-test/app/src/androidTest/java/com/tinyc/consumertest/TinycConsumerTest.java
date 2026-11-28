@@ -1,6 +1,7 @@
 package com.tinyc.consumertest;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -10,6 +11,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 
 import com.tinyc.Tinyc;
 import com.tinyc.TinycAssets;
+import com.tinyc.TinycException;
 import com.tinyc.TinycIO;
 
 import org.junit.Test;
@@ -17,6 +19,7 @@ import org.junit.runner.RunWith;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * AAR consumer test: the AAR is a plain file dependency of this app;
@@ -171,6 +174,78 @@ public class TinycConsumerTest {
     public void runCliVersionSucceeds() throws Exception {
         TinycAssets.init(ctx());
         assertEquals(0, Tinyc.runCli("--version"));
+    }
+
+    /**
+     * Host function injection: a Java method registered with
+     * addSymbol is called by name from the compiled code; the run
+     * result and the Java-side call counter both prove the call
+     * crossed into Java and back.
+     */
+    @Test
+    public void addSymbolHostFunctionCallableFromCompiledCode() throws Exception {
+        TinycAssets.Paths paths = TinycAssets.init(ctx());
+        AtomicInteger calls = new AtomicInteger();
+        try (Tinyc t = Tinyc.create(paths)) {
+            t.setOutputType(Tinyc.OUTPUT_MEMORY);
+            t.addSymbol("host_mul", "i(ii)", args -> {
+                calls.incrementAndGet();
+                return (Integer) args[0] * (Integer) args[1];
+            });
+            t.compileString("extern int host_mul(int, int);\n"
+                    + "int main(void) { return host_mul(6, 7); }");
+            assertEquals(42, t.run("prog"));
+            assertEquals(1, calls.get());
+        }
+    }
+
+    /**
+     * A throwing host function does not cross the C boundary: the
+     * JNI layer stores it and rethrows it on the Java side after
+     * the native run call returns.
+     */
+    @Test
+    public void addSymbolThrowingHostFunctionRethrown() throws Exception {
+        TinycAssets.Paths paths = TinycAssets.init(ctx());
+        try (Tinyc t = Tinyc.create(paths)) {
+            t.setOutputType(Tinyc.OUTPUT_MEMORY);
+            t.addSymbol("host_boom", "i(i)", args -> {
+                throw new IllegalStateException("boom-host");
+            });
+            t.compileString("extern int host_boom(int);\n"
+                    + "int main(void) { return host_boom(1); }");
+            IllegalStateException e = assertThrows(IllegalStateException.class,
+                    () -> t.run("prog"));
+            assertEquals("boom-host", e.getMessage());
+        }
+    }
+
+    @Test
+    public void addSymbolBlocksOutputFile() throws Exception {
+        TinycAssets.Paths paths = TinycAssets.init(ctx());
+        File obj = new File(ctx().getCacheDir(), "hostsym.o");
+        try (Tinyc t = Tinyc.create(paths)) {
+            t.setOutputType(Tinyc.OUTPUT_OBJ);
+            t.addSymbol("host_mul", "i(ii)",
+                    args -> (Integer) args[0] * (Integer) args[1]);
+            t.compileString("extern int host_mul(int, int);\n"
+                    + "int xf(void) { return host_mul(2, 3); }");
+            TinycException e = assertThrows(TinycException.class,
+                    () -> t.outputFile(obj.getAbsolutePath()));
+            assertTrue(e.getMessage(), e.getMessage().contains("addSymbol"));
+        }
+    }
+
+    @Test
+    public void addSymbolRejectsUnsupportedSignature() throws Exception {
+        TinycAssets.Paths paths = TinycAssets.init(ctx());
+        try (Tinyc t = Tinyc.create(paths)) {
+            // 'f' is not a supported type; 4 params exceed the limit.
+            assertThrows(IllegalArgumentException.class,
+                    () -> t.addSymbol("f1", "i(f)", args -> null));
+            assertThrows(IllegalArgumentException.class,
+                    () -> t.addSymbol("f2", "i(iiii)", args -> null));
+        }
     }
 
     @Test

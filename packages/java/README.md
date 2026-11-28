@@ -126,6 +126,18 @@ is set automatically.
 | `run` | `tcc_run` (the target program runs inside the host process; its exit and crashes belong to the host) |
 | `relocate` / `getSymbol` | `tcc_relocate` / `tcc_get_symbol` |
 
+## Host symbols
+
+`TccSession.addSymbol(name, segment)` registers a host address —
+a Panama upcall stub for a Java method, or a data segment — that
+the compiled code can call or reference by name. Scope: the
+address lives in this process, so the symbol resolves only for
+in-process execution (MEMORY output after relocate, via `run` or
+a symbol call). File output is not supported: once a host symbol
+is registered on a session, its `outputFile` throws instead of
+writing a file with this process's addresses baked in. The
+segment must outlive the session.
+
 ## IO
 
 `TccIO` is a three-channel interface: `writeOut`, `writeErr`,

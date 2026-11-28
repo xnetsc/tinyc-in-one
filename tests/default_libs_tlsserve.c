@@ -4,7 +4,14 @@
    certificate and connects with the system TLS tools (the
    system curl / openssl), and the other way around, so the
    bundled stack is verified against an independent one.
-   Usage: default_libs_tlsserve <port> <cert-file> <key-file> */
+   Usage: default_libs_tlsserve <port> <cert-file> <key-file>
+   The server binds the loopback address explicitly: binding the
+   wildcard (NULL) asks getaddrinfo for AF_UNSPEC, which on
+   macOS returns the IPv6 wildcard first, and a macOS IPv6
+   socket defaults to IPV6_V6ONLY, so an IPv4 client to
+   127.0.0.1 is refused while Linux (V6ONLY off by default)
+   accepts it. The interop client connects to 127.0.0.1, so
+   the server binds 127.0.0.1. */
 #include <stdio.h>
 #include <string.h>
 #include "mbedtls/net_sockets.h"
@@ -47,7 +54,7 @@ int main(int argc, char **argv) {
     if (load_file(certf, certbuf, sizeof(certbuf), &clen) || load_file(keyf, keybuf, sizeof(keybuf), &klen)) { printf("file load fail\n"); return 1; }
     if ((ret = mbedtls_x509_crt_parse(&srvcert, certbuf, clen)) != 0) { printf("crt parse %d\n", ret); return 1; }
     if ((ret = mbedtls_pk_parse_key(&pkey, keybuf, klen, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) { printf("key parse %d\n", ret); return 1; }
-    if ((ret = mbedtls_net_bind(&listen_fd, NULL, port, MBEDTLS_NET_PROTO_TCP)) != 0) { printf("bind %d\n", ret); return 1; }
+    if ((ret = mbedtls_net_bind(&listen_fd, "127.0.0.1", port, MBEDTLS_NET_PROTO_TCP)) != 0) { printf("bind %d\n", ret); return 1; }
     if ((ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_SERVER, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT)) != 0) { printf("conf %d\n", ret); return 1; }
     mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
     mbedtls_ssl_conf_ca_chain(&conf, srvcert.next, NULL);

@@ -105,6 +105,30 @@ test('api: defineSymbol', () => {
   s.close();
 });
 
+test('api: addSymbol injects a JS function callable from compiled code', () => {
+  const calls = [];
+  const s = new tcc.State();
+  s.addSymbol('host_mul', (a, b) => { calls.push([a, b]); return a * b; },
+    'int', ['int', 'int']);
+  s.compileString('extern int host_mul(int, int);\n' +
+    'int use_host(void){ return host_mul(6, 7); }');
+  assert.strictEqual(s.function('use_host', 'int', [])(), 42);
+  assert.deepStrictEqual(calls, [[6, 7]]);
+  s.close();
+});
+
+test('api: outputFile after addSymbol throws', () => {
+  const d = tmpdir();
+  const obj = path.join(d, 'x.o');
+  const s = new tcc.State(tcc.TCC_OUTPUT_OBJ);
+  s.addSymbol('host_mul', (a, b) => a * b, 'int', ['int', 'int']);
+  s.compileString('extern int host_mul(int, int);\n' +
+    'int xf(void){ return host_mul(2, 3); }');
+  assert.throws(() => s.outputFile(obj), /addSymbol/);
+  s.close();
+  assert.strictEqual(fs.existsSync(obj), false);
+});
+
 test('io: JS callback receives compiler output', () => {
   const chunks = [];
   const io = tcc.IO.callback({ out: (b) => chunks.push(b), err: (b) => chunks.push(b) });

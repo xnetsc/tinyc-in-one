@@ -37,12 +37,28 @@ public final class Tinyc implements AutoCloseable {
         void onError(String msg);
     }
 
+    /**
+     * 宿主函数，经 {@link #addSymbol} 注入后可被编译产物按名字直接调用。
+     * args 按注册签名的参数顺序装箱（Integer / Long / Double），返回装箱
+     * 后的值；签名返回为 v（void）时返回值被忽略，返回 null 即可。
+     * 签名为数值类型而返回 null 时原生侧按 0 处理。
+     */
+    public interface HostFunction {
+        Object invoke(Object... args);
+    }
+
+    /** addSymbol 的跳板槽位上限：全进程所有会话合计（JNI 层固定表）。 */
+    public static final int MAX_HOST_SYMBOLS = 16;
+
     private static final Object CLI_LOCK = new Object();
     private static volatile String kernelPath; // 双形态文件真实路径，runCli 用作 argv[0]
 
     private long state;
     private TinycIO io;              // 强引用钉住回调，直到 close（规格 6.5 第 3 条）
     private ErrorListener errorListener; // 同上
+    private final java.util.List<HostFunction> hostFunctions =
+            new java.util.ArrayList<>(); // 同上：钉住注入的宿主函数
+    private boolean hostSymbolRegistered; // 注册过宿主符号则 outputFile 拒绝
     private TinycAssets.Paths bundledPaths;
     private boolean sysrootApplied;
 
@@ -210,6 +226,74 @@ public final class Tinyc implements AutoCloseable {
         TinycNative.nativeUndefineSymbol(state, sym);
     }
 
+    /**
+     * 对应 tcc_add_symbol：把一个 Java 方法注册为宿主函数，编译产物在
+     * 源码里声明 extern 后可按名字直接调用，如 signature "i(ii)" 服务
+     * {@code extern int host_mul(int, int);}。
+     *
+     * <p>签名格式 {@code <ret>(<params>)}：ret 与 params 的类型字母为
+     * i（int）、l（long）、d（double），ret 另可为 v（void）；参数至多
+     * 3 个。签名不在此支持面内直接抛 IllegalArgumentException，不会
+     * 静默错位。跳板槽位全进程合计 {@link #MAX_HOST_SYMBOLS} 个，
+     * 用满抛 TinycException。</p>
+     *
+     * <p>作用域：注册的是本进程的地址，只在进程内运行成立——MEMORY
+     * 输出 relocate 之后，经 {@link #run} 解析。写成文件没有意义：
+     * 地址会被当绝对值写进产物，离开本进程即失效。所以本会话一旦
+     * 注册过宿主符号，{@link #outputFile} 直接报错拒绝。</p>
+     *
+     * <p>回调在调用编译产物的线程上同步执行；fn 抛出的异常不穿 C
+     * 边界，由 JNI 层存下、在当前原生调用返回后在 Java 侧原样重抛
+     * （与 IO 回调同一条规矩，规格 6.5 第 1 条）。封装层持有 fn 的强
+     * 引用直到 close。</p>
+     */
+    public void addSymbol(String name, String signature, HostFunction fn) {
+        checkOpen();
+        if (name == null || name.isEmpty()) {
+            throw new IllegalArgumentException("symbol name is null or empty");
+        }
+        if (fn == null) {
+            throw new NullPointerException("host function is null");
+        }
+        checkHostSignature(signature);
+        int rc = TinycNative.nativeAddSymbol(state, name, signature, fn);
+        if (rc == -3) {
+            throw new TinycException("addSymbol(" + name + "): host symbol table is full ("
+                    + MAX_HOST_SYMBOLS + " slots, shared by all sessions)");
+        }
+        if (rc == -2) {
+            throw new TinycException("addSymbol(" + name + "): unsupported signature "
+                    + signature);
+        }
+        checkResult("addSymbol(" + name + ")", rc == 0 ? 0 : -1);
+        hostFunctions.add(fn);
+        hostSymbolRegistered = true;
+    }
+
+    private static void checkHostSignature(String signature) {
+        String bad = "unsupported host signature: " + signature
+                + " (format <ret>(<params>); types i=int, l=long, d=double,"
+                + " ret may also be v=void; at most 3 params)";
+        if (signature == null) {
+            throw new IllegalArgumentException(bad);
+        }
+        int open = signature.indexOf('(');
+        if (open != 1 || !signature.endsWith(")")
+                || signature.length() > 6) {
+            throw new IllegalArgumentException(bad);
+        }
+        char ret = signature.charAt(0);
+        if (ret != 'v' && ret != 'i' && ret != 'l' && ret != 'd') {
+            throw new IllegalArgumentException(bad);
+        }
+        for (int i = 2; i < signature.length() - 1; i++) {
+            char p = signature.charAt(i);
+            if (p != 'i' && p != 'l' && p != 'd') {
+                throw new IllegalArgumentException(bad);
+            }
+        }
+    }
+
     // ---- 编译 ----
 
     /** 对应 tcc_compile_string：直接编译内存中的源码。失败抛 TinycException。 */
@@ -228,9 +312,19 @@ public final class Tinyc implements AutoCloseable {
 
     // ---- 链接与输出 ----
 
-    /** 对应 tcc_output_file：把产物（exe / dll / obj）落成文件。调用前不要 relocate。 */
+    /**
+     * 对应 tcc_output_file：把产物（exe / dll / obj）落成文件。调用前不要 relocate。
+     * 本会话注册过宿主符号（{@link #addSymbol}）时拒绝：宿主符号是本
+     * 进程的地址，只在进程内运行成立，写进文件即成写死的失效地址。
+     */
     public void outputFile(String filename) {
         checkOpen();
+        if (hostSymbolRegistered) {
+            throw new TinycException("outputFile is not supported after addSymbol: "
+                    + "host symbols are addresses in this process and resolve only "
+                    + "for in-process execution (relocate/run); a written file "
+                    + "would bake this process's addresses into the output");
+        }
         applySysrootIfNeeded();
         checkResult("tcc_output_file", TinycNative.nativeOutputFile(state, filename));
     }
@@ -310,6 +404,7 @@ public final class Tinyc implements AutoCloseable {
             TinycNative.nativeDelete(s);
             io = null;
             errorListener = null;
+            hostFunctions.clear();
         }
     }
 }

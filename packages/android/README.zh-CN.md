@@ -68,6 +68,17 @@ Tinyc.runCli(io, "-E", sourcePath);   // 命令行式
 `Tinyc.create(paths)` 绑定的 sysroot 路径在第一次编译动作前才注册，
 此前加的用户路径天然在前。
 
+宿主函数：`addSymbol(name, signature, fn)` 把一个 Java 方法注册
+成编译产物可按名字直接调用的宿主函数（`tcc_add_symbol`）。签名
+是 `<ret>(<params>)`，类型字母 i（int）、l（long）、d（double），
+ret 另可为 v（void）；参数至多 3 个——超出此支持面直接抛异常，
+不静默错位。参数以装箱形式（Integer / Long / Double）进
+`fn.invoke(...)`，返回装箱后的结果。JNI 层经一张固定跳板表桥接：
+全进程所有会话合计 16 个槽位（`Tinyc.MAX_HOST_SYMBOLS`）。作用
+域：注册的是本进程的地址，只在进程内运行成立（MEMORY 输出，经
+`run(...)`）。文件输出不支持：注册过宿主符号后，`outputFile`
+直接报错，不会产出把本进程地址写死的文件。
+
 注意事项：
 
 - `Tinyc.run(...)` 与 `runCli` 里的 `-run` 是把编译出的代码在本
@@ -89,7 +100,7 @@ src/main/
 │  ├─ TinycArgs.java      argv 组装（纯逻辑）
 │  └─ TinycException.java
 ├─ jni/
-│  ├─ tinyc_jni.c         JNI 胶水：转发 tcc_* / tinyc_main，IO 回调跳板
+│  ├─ tinyc_jni.c         JNI 胶水：转发 tcc_* / tinyc_main，IO 回调与宿主符号跳板
 │  ├─ tinyc_kernel_adapter.c  内核适配层，与 JNI 胶水一同编入 libtinyc.so
 │  ├─ tinyc_kernel.h      内核新增声明（TCCIO、tinyc_main）
 │  ├─ CMakeLists.txt      内核构建把 JNI 胶水编入 libtinyc.so 时用

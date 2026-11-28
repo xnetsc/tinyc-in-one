@@ -2,13 +2,17 @@ package tinyc;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.io.ByteArrayOutputStream;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.foreign.ValueLayout.JAVA_INT;
@@ -40,6 +44,7 @@ public final class TinyCTest {
         testIoCaptureAndUpcall();
         testCliWithIo();
         testCliRunStdioThroughIo();
+        testAddSymbol();
 
         System.out.println("ALL TESTS PASSED (" + passed + " checks)");
     }
@@ -192,6 +197,70 @@ public final class TinyCTest {
             check(n == -1, "io: read upcall exception returns -1 (got " + n + ")");
             check(sink3.get() instanceof IllegalStateException,
                     "io: read exception stored in sink");
+        }
+    }
+
+    private static final AtomicInteger HOST_CALLS = new AtomicInteger();
+
+    private static int hostMul(int a, int b) {
+        HOST_CALLS.incrementAndGet();
+        return a * b;
+    }
+
+    /**
+     * 用例 7：addSymbol——Java 方法经 Panama upcall stub 做成函数指针
+     * 注册为宿主函数，编译产物在源码里按名字直接调用：取符号调用与
+     * run 两条路线都断言结果与 Java 侧副作用（调用计数）。注册过宿主
+     * 符号的会话再 outputFile 必须被守卫拒绝。注意顺序：先设输出
+     * 类型再 addSymbol——符号表由设输出类型时建立。
+     */
+    private static void testAddSymbol() throws Throwable {
+        MethodHandle mh = MethodHandles.lookup().findStatic(TinyCTest.class, "hostMul",
+                MethodType.methodType(int.class, int.class, int.class));
+        FunctionDescriptor desc = FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT);
+        HOST_CALLS.set(0);
+
+        // 取符号调用路线
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment stub = Linker.nativeLinker().upcallStub(mh, desc, arena);
+            try (TccSession s = TinyC.newSession()) {
+                check(s.setOutputType(TinyC.TCC_OUTPUT_MEMORY) == 0, "symbol: setOutputType(MEMORY)");
+                check(s.addSymbol("host_mul", stub) == 0, "symbol: addSymbol rc==0");
+                int rc = s.compileString("extern int host_mul(int, int);\n"
+                        + "int use_host(void) { return host_mul(6, 7); }\n");
+                check(rc == 0, "symbol: compileString rc==0 (got " + rc + ")");
+                check(s.relocate() == 0, "symbol: relocate rc==0");
+                MemorySegment fn = s.getSymbol("use_host");
+                check(fn != null, "symbol: getSymbol(use_host) found");
+                MethodHandle call = TinyC.functionHandle(fn, FunctionDescriptor.of(JAVA_INT));
+                int v = (int) call.invokeExact();
+                check(v == 42, "symbol: use_host() == 42 (got " + v + ")");
+                check(HOST_CALLS.get() == 1,
+                        "symbol: host method called once (got " + HOST_CALLS.get() + ")");
+                boolean refused = false;
+                try {
+                    s.outputFile("/tmp/tinyc-addsymbol-never.o");
+                } catch (TccException e) {
+                    refused = e.getMessage() != null && e.getMessage().contains("addSymbol");
+                }
+                check(refused, "symbol: outputFile refused after addSymbol");
+            }
+        }
+
+        // run 路线
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment stub = Linker.nativeLinker().upcallStub(mh, desc, arena);
+            try (TccSession s = TinyC.newSession()) {
+                check(s.setOutputType(TinyC.TCC_OUTPUT_MEMORY) == 0,
+                        "symbol-run: setOutputType(MEMORY)");
+                check(s.addSymbol("host_mul", stub) == 0, "symbol-run: addSymbol rc==0");
+                int rc = s.compileString("extern int host_mul(int, int);\n"
+                        + "int main(void) { return host_mul(6, 7) == 42 ? 0 : 1; }\n");
+                check(rc == 0, "symbol-run: compileString rc==0 (got " + rc + ")");
+                check(s.run("prog") == 0, "symbol-run: run rc==0");
+                check(HOST_CALLS.get() == 2,
+                        "symbol-run: host method called again (got " + HOST_CALLS.get() + ")");
+            }
         }
     }
 
