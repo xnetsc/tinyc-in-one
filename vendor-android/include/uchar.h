@@ -40,6 +40,15 @@
 __BEGIN_DECLS
 
 #if !defined(__cplusplus)
+/* __CHAR16_TYPE__/__CHAR32_TYPE__ are predefined by some
+ * compilers; where they are absent the types are the fixed
+ * UTF-16/UTF-32 units below. */
+#ifndef __CHAR16_TYPE__
+#define __CHAR16_TYPE__ unsigned short
+#endif
+#ifndef __CHAR32_TYPE__
+#define __CHAR32_TYPE__ unsigned int
+#endif
 /** The UTF-16 character type. */
 typedef __CHAR16_TYPE__ char16_t;
 /** The UTF-32 character type. */

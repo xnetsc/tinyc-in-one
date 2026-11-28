@@ -260,6 +260,21 @@ add_win32_pthread() {
         -c "$SRC/win32/lib/pthread.c" -o "$SRC/tinyc-win32-pthread.o"
     (cd "$SRC" && ar r "x86_64-win32-libtcc1.a" \
         "tinyc-win32-pthread.o")
+    # The C11 threads surface (win32/include/threads.h) is
+    # implemented over that pthread by win32/lib/threads.c and
+    # ships in the same archive, for the same reason.
+    "$XTCC" -B"$SRC/win32" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/win32/lib/threads.c" -o "$SRC/tinyc-win32-threads.o"
+    (cd "$SRC" && ar r "x86_64-win32-libtcc1.a" \
+        "tinyc-win32-threads.o")
+    # The <uchar.h> conversion functions (win32/include/
+    # uchar.h) are implemented by win32/lib/uchar.c with its
+    # own UTF-8 codec: the target runtime exports none of
+    # them.  Same archive, same reason.
+    "$XTCC" -B"$SRC/win32" -I"$SRC/include" -I"$SRC" \
+        -c "$SRC/win32/lib/uchar.c" -o "$SRC/tinyc-win32-uchar.o"
+    (cd "$SRC" && ar r "x86_64-win32-libtcc1.a" \
+        "tinyc-win32-uchar.o")
 }
 
 # add_default_libs <triple> <dist>
@@ -445,6 +460,23 @@ build_darwin() {
     cp "$SRC/libtcc.h" "$DIST/include/"
     python3 "$ROOT/mac-test-bundle/darwin-dist.py" stage \
         "$ROOT/vendor-darwin" "$DIST" >/dev/null
+
+    # The C11 threads and uchar surfaces (include/threads.h,
+    # include/uchar.h in vendor-darwin): libSystem provides
+    # neither, so vendor-darwin/lib/threads.c implements the
+    # threads surface over pthread and lib/uchar.c implements
+    # the conversion functions directly.  Both objects merge
+    # into libtcc1.a, which every program links.
+    "$SRC/$CT-tcc" -I"$DIST/lib/tcc/include-libc" \
+        -I"$DIST/lib/tcc/include" \
+        -c "$ROOT/vendor-darwin/lib/threads.c" \
+        -o "$SRC/tinyc-darwin-threads.o"
+    "$SRC/$CT-tcc" -I"$DIST/lib/tcc/include-libc" \
+        -I"$DIST/lib/tcc/include" \
+        -c "$ROOT/vendor-darwin/lib/uchar.c" \
+        -o "$SRC/tinyc-darwin-uchar.o"
+    (cd "$SRC" && ar r "$DIST/lib/tcc/libtcc1.a" \
+        "tinyc-darwin-threads.o" "tinyc-darwin-uchar.o")
 
     gcc -O2 -fPIC -pie -Wl,--export-dynamic \
         -o "$DIST/bin/tinyc" "$SRC/tcc.c" "$ROOT/core/tcc_io.c" \

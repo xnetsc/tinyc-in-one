@@ -30,18 +30,11 @@ typedef HANDLE thread_t;
 #define thread_join(th) (WaitForSingleObject((th), INFINITE), CloseHandle(th))
 #else
 #include <unistd.h>
-/* Not on Android: bionic's fcntl.h references
-   __builtin_object_size, which TCC does not implement. */
-#ifndef __ANDROID__
 #include <fcntl.h>
-#endif
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#if !defined(__APPLE__)
-#include <poll.h>
-#endif
 #include <pthread.h>
 typedef int sock_t;
 #define sock_close close
@@ -76,6 +69,25 @@ static int wait_ready(volatile int *flag, const char *name, int port) {
         return 0;
     }
     return 1;
+}
+
+/* Millisecond clock for probe sequencing: the CI log merges
+   stdout and stderr, so log order alone cannot sequence events
+   (the servers print to stderr, the probes to stdout); the
+   timestamps can. */
+static unsigned long long now_ms(void) {
+#ifdef _WIN32
+    /* GetTickCount, not GetTickCount64: the bundled headers do
+       not declare the 64-bit one. 32-bit milliseconds wrap
+       every ~49 days, which cannot matter for ordering events
+       inside one battery run. */
+    return (unsigned long long)GetTickCount();
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (unsigned long long)tv.tv_sec * 1000ull +
+           (unsigned long long)tv.tv_usec / 1000ull;
+#endif
 }
 
 /* ---------------- raw HTTP server ---------------- */
@@ -146,6 +158,13 @@ static void *http_server(void *arg) {
 #endif
             return NULL;
         }
+        /* Connection count and time: the nb probe's connect is
+           refused (SO_ERROR 10061) only if this listener is
+           already closed, which happens after 2 served
+           connections -- so the count at probe time decides
+           whether the probe hit a live or a closed listener. */
+        fprintf(stderr, "http server: accepted conn #%d at t=%llu ms\n",
+                i + 1, now_ms());
         static char buf[8192];
         int n = read_until(fd, buf, sizeof(buf), "\r\n\r\n");
         int clen = 0;
@@ -171,6 +190,8 @@ static void *http_server(void *arg) {
         send(fd, resp, rn, 0);
         sock_close(fd);
     }
+    fprintf(stderr, "http server: served 2, closing listener at t=%llu ms\n",
+            now_ms());
     sock_close(lfd);
     return NULL;
 }
@@ -194,6 +215,7 @@ static void *ws_server(void *arg) {
 #endif
         return NULL;
     }
+    fprintf(stderr, "ws server: accepted conn at t=%llu ms\n", now_ms());
     static char buf[8192];
     read_until(fd, buf, sizeof(buf), "\r\n\r\n");
     char key[128] = { 0 };
@@ -432,22 +454,12 @@ static int check_ws(void) {
     const struct curl_ws_frame *meta = NULL;
     CURLcode rc = CURLE_AGAIN;
     for (int i = 0; i < 100 && rc == CURLE_AGAIN; i++) {
-        /* Wait for readability: poll where the header set has
-           it, select on darwin (whose bundled headers declare
-           select in <sys/time.h> and have no <poll.h>) and on
-           Windows. Bionic's fortified FD_SET is not usable
-           with the bundled compiler, so android takes the
-           poll path too. */
-#if defined(__APPLE__) || defined(_WIN32)
+        /* Wait briefly for readability between recv retries. */
         fd_set rfds;
         struct timeval tv = { 0, 100000 };
         FD_ZERO(&rfds);
         FD_SET((int)sock, &rfds);
         select((int)sock + 1, &rfds, NULL, NULL, &tv);
-#else
-        struct pollfd pfd = { .fd = (int)sock, .events = POLLIN };
-        poll(&pfd, 1, 100);
-#endif
         rc = curl_ws_recv(c, buf, sizeof(buf) - 1, &nread, &meta);
     }
     if (rc != CURLE_OK) {
@@ -550,6 +562,17 @@ static void probe_nb_connect(void) {
         return;
     }
 #ifdef _WIN32
+    /* The WSAPoll event constants are the Winsock numbering, not
+       the BSD poll(2) numbering: print what this binary was built
+       with so the revents decode below is self-evidencing and no
+       reader has to guess which numbering applies. */
+    printf("nb connect: WSAPoll constants: POLLIN=0x%x POLLPRI=0x%x "
+           "POLLOUT=0x%x POLLERR=0x%x POLLHUP=0x%x POLLNVAL=0x%x\n",
+           (unsigned)POLLIN, (unsigned)POLLPRI, (unsigned)POLLOUT,
+           (unsigned)POLLERR, (unsigned)POLLHUP, (unsigned)POLLNVAL);
+    fflush(stdout);
+#endif
+#ifdef _WIN32
     u_long nb = 1;
     if (ioctlsocket(fd, FIONBIO, &nb) != 0) {
         printf("nb connect: ioctlsocket failed, WSA error %d\n",
@@ -557,11 +580,6 @@ static void probe_nb_connect(void) {
         sock_close(fd);
         return;
     }
-#elif defined(__ANDROID__)
-    /* No non-blocking step here: bionic's fcntl.h references
-       __builtin_object_size, which TCC does not implement, so
-       the socket stays blocking and connect() returns at once
-       below. The probe still reports the connect outcome. */
 #else
     int fl = fcntl(fd, F_GETFL, 0);
     if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) != 0) {
@@ -598,46 +616,48 @@ static void probe_nb_connect(void) {
     }
 #endif
 #ifdef _WIN32
-    printf("nb connect: connect in progress (WSAEWOULDBLOCK)\n");
+    printf("nb connect: connect in progress (WSAEWOULDBLOCK), t=%llu ms\n",
+           now_ms());
 #else
-    printf("nb connect: connect in progress (EINPROGRESS)\n");
+    printf("nb connect: connect in progress (EINPROGRESS), t=%llu ms\n",
+           now_ms());
 #endif
     fflush(stdout);
-    /* Same three-way split as the ws wait loop: select on
-       Windows and darwin (whose bundled headers declare select
-       in <sys/time.h> and have no <poll.h>), poll elsewhere --
-       bionic's FD_SET is a fortified macro referencing
-       __builtin_object_size, which TCC does not implement, so
-       select() cannot be used here on Android. */
-#if defined(__APPLE__) || defined(_WIN32)
+    /* Wait for writability with select; on a timeout the
+       pending connect error (print_so_error) is the authority
+       on whether the connect is merely slow or already
+       failed. */
     fd_set wfds;
     struct timeval tv = { 5, 0 };
     FD_ZERO(&wfds);
     FD_SET(fd, &wfds);
 #ifdef _WIN32
     /* Winsock select reads the socket handles out of the
-       fd_set, so print the set itself: a fd_count of 0 here
-       means the macro never registered the socket, and the
-       WSAPoll comparison after a timeout tells whether the
-       socket or the select call is the broken step. */
-    printf("nb connect: socket=%lld fd_count=%u\n",
-           (long long)fd, wfds.fd_count);
+       fd_set: this pre-select fd_count is the authority on
+       whether the macro registered the socket. select()
+       rewrites the sets in place and empties them on a
+       timeout, so a fd_count read after it returns is 0 by
+       design and says nothing about FD_SET. */
+    printf("nb connect: socket=%lld fd_count=%u t=%llu ms\n",
+           (long long)fd, wfds.fd_count, now_ms());
     fflush(stdout);
 #endif
     rc = select((int)fd + 1, NULL, &wfds, NULL, &tv);
     if (rc == 0) {
 #ifdef _WIN32
         printf("nb connect: select timed out after 5s (not writable), "
-               "WSA error %d, FD_ISSET=%d fd_count=%u\n",
-               WSAGetLastError(), FD_ISSET(fd, &wfds) != 0, wfds.fd_count);
+               "WSA error %d, FD_ISSET=%d, t=%llu ms\n",
+               WSAGetLastError(), FD_ISSET(fd, &wfds) != 0, now_ms());
         /* Same socket, other wait primitive: if WSAPoll reports
            it writable, select itself is the broken step; if it
            also times out, the non-blocking connect never
            completes and the fault is below select. The revents
-           bits are decoded in the log: 0x01 POLLIN, 0x02
-           POLLPRI, 0x04 POLLOUT, 0x08 POLLERR, 0x10 POLLHUP,
-           0x20 POLLNVAL -- a value without POLLOUT/POLLERR is
-           not a completed or refused connect. */
+           bits are decoded with the Winsock values (not the
+           BSD poll(2) numbering): POLLERR 0x0001, POLLHUP
+           0x0002, POLLOUT 0x0010, POLLIN 0x0300, POLLPRI
+           0x0400, POLLNVAL 0x0004 -- so 0x13 is
+           POLLOUT|POLLERR|POLLHUP, a refused connect, not a
+           readable one. */
         {
             WSAPOLLFD pfd;
             pfd.fd = fd;
@@ -645,8 +665,8 @@ static void probe_nb_connect(void) {
             pfd.revents = 0;
             int prc = WSAPoll(&pfd, 1, 5000);
             printf("nb connect: WSAPoll on same socket: rc=%d revents=0x%x, "
-                   "WSA error %d\n", prc, (unsigned)pfd.revents,
-                   WSAGetLastError());
+                   "WSA error %d, t=%llu ms\n", prc, (unsigned)pfd.revents,
+                   WSAGetLastError(), now_ms());
             printf("nb connect: WSAPoll revents 0x%x:",
                    (unsigned)pfd.revents);
             if (pfd.revents & POLLIN) printf(" POLLIN");
@@ -684,25 +704,6 @@ static void probe_nb_connect(void) {
     printf("nb connect: select rc=%d FD_ISSET=%d\n",
            rc, FD_ISSET(fd, &wfds) != 0);
     fflush(stdout);
-#endif
-#else
-    struct pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = POLLOUT;
-    pfd.revents = 0;
-    rc = poll(&pfd, 1, 5000);
-    if (rc == 0) {
-        printf("nb connect: poll timed out after 5s (not writable)\n");
-        print_so_error(fd);
-        sock_close(fd);
-        return;
-    }
-    if (rc < 0) {
-        printf("nb connect: poll failed, errno %d (%s)\n",
-               errno, strerror(errno));
-        sock_close(fd);
-        return;
-    }
 #endif
     int soerr = 0;
 #ifdef _WIN32

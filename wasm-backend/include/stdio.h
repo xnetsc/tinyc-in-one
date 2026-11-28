@@ -27,10 +27,11 @@
  * setbuf and setvbuf record the requested mode and report
  * success, and output is visible to other readers immediately
  * in all modes.  The scanf family is provided.  Failed calls
- * record an error number in the layer, which perror reports;
- * there is no errno variable (a data symbol cannot be supplied
- * by the layer — the same reason the standard streams are
- * macros above). */
+ * record an error number, which <errno.h>'s errno reads back
+ * and perror reports; errno there is a macro over the layer's
+ * accessor function (a data symbol cannot be supplied by the
+ * layer — the same reason the standard streams are macros
+ * above). */
 
 #include <stddef.h>
 #include <stdarg.h>
@@ -60,9 +61,23 @@ typedef long long fpos_t;
 #define _IOLBF		1
 #define _IONBF		2
 
+/* tmpnam: the size a caller-provided buffer must have, and a
+   lower bound on the number of distinct names it generates.
+   Generated names live in the process's file space, in the
+   same generated-name space tmpfile's backing entries use. */
+#define L_tmpnam	64
+#define TMP_MAX		10000
+
 #define stdin	((FILE *)0)
 #define stdout	((FILE *)1)
 #define stderr	((FILE *)2)
+
+/* tmpnam: the layer generates names under / that collide with
+   no existing backing entry (the tmpfile naming discipline);
+   L_tmpnam bounds the generated names, TMP_MAX is the count
+   the layer guarantees unique names for. */
+#define L_tmpnam	64
+#define TMP_MAX		1000000
 
 /* File operations */
 FILE *fopen(const char *path, const char *mode);
@@ -76,6 +91,7 @@ int rename(const char *oldpath, const char *newpath);
    stream.  tmpfile's backing entry is unlinked at fclose. */
 FILE *fdopen(int fd, const char *mode);
 FILE *tmpfile(void);
+char *tmpnam(char *s);
 
 /* Buffering control and error reporting */
 int setvbuf(FILE *stream, char *buf, int mode, size_t size);

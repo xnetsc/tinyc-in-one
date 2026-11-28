@@ -54,25 +54,12 @@ Current patches:
   `<sys/syscall.h>` getrandom probe in entropy_poll.c with
   `__has_include`; the bundled header sets do not ship that
   header, and the code falls back to /dev/urandom without it.
-- `mbedtls-platform-util-tinyc-win32.patch`: on the TCC win32
-  target, use the gmtime() fallback (no gmtime_s in the
-  bundled import set) and the volatile-memset zeroize
-  (SecureZeroMemory's header inline needs the __stosb
-  compiler intrinsic, which TCC does not provide).
-- `curl-easy-lock-tinyc-spin.patch`: keep TCC away from the
-  aarch64 `yield` asm and the x86_64 ia32_pause builtin in
-  the spin lock; sched_yield is the fallback branch.
 - `curl-setup-targetconditionals.patch`: guard the Apple SDK
   <TargetConditionals.h> include with `__has_include`; the
   bundled darwin header set does not ship it.
 - `curl-system-h-tinyc-win32.patch`: give curl/system.h's
   __TINYC__ branch a _WIN32 case (winsock length type int,
   no <sys/socket.h> pull).
-- `curl-strerror-tinyc-win32.patch`: in Curl_strerror, read
-  CRT messages with strerror() under __TINYC__ on Windows;
-  the bundled headers declare no dllimport sys_errlist/
-  sys_nerr for the direct table walk the upstream code uses,
-  and TCC's PE linker rejects the undeclared import.
 
 The builder is `tools/build_default_libs.sh`; `build.sh` calls it
 for every native dist it produces.

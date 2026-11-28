@@ -49,18 +49,20 @@ fi
 TARGET="${TARGET:-x86_64-linux-gnu}"
 
 if [ "$TARGET" != "wasm32-wasi" ]; then
-    # The eight general targets compile the unpatched upstream
-    # tree, and tcc.h includes two files that only a configure +
-    # native make run generates: config.h and tccdefs_.h. Prepare
-    # a copy of the tree the same way the wasm32 branch below
-    # prepares its own: copy (dropping any build leftovers the
-    # source tree may carry), configure, and a native make, which
-    # regenerates both files. No project patches are applied to
-    # this tree. The preparation is target-independent - the
-    # emcc compile picks the target through the -DTCC_TARGET_*
-    # macros, and config.h's target guard names every general
-    # target's arch macro, so the command-line macro wins - so
-    # every general-target run prepares the same tree.
+    # The eight general targets compile the project-patched
+    # tree: a copy of upstream with the project's core IO files
+    # added and patches/apply_patches.py applied, the same
+    # preparation the native builds use, so the packaged
+    # compilers carry the same compiler behavior as the native
+    # ones. tcc.h includes two files that only a configure +
+    # native make run generates: config.h and tccdefs_.h, so
+    # the preparation continues with configure and a native
+    # make, which regenerates both files. The preparation is
+    # target-independent - the emcc compile picks the target
+    # through the -DTCC_TARGET_* macros, and config.h's target
+    # guard names every general target's arch macro, so the
+    # command-line macro wins - so every general-target run
+    # prepares the same tree.
     GSRC=build/general-src
     rm -rf "$GSRC"
     mkdir -p "$GSRC"
@@ -71,10 +73,13 @@ if [ "$TARGET" != "wasm32-wasi" ]; then
         --exclude='./config.h' --exclude='./config.mak' \
         --exclude='./tccdefs_.h' \
         -C "$UPSTREAM" . | tar xf - --no-same-owner -C "$GSRC"
+    cp ../../core/tinyc_io.h ../../core/tcc_io.c "$GSRC/"
+    python3 ../../patches/apply_patches.py "$GSRC" >/dev/null
     ABS_GSRC=$PWD/$GSRC
     (cd "$GSRC" && ./configure --prefix="$ABS_GSRC/install" >/dev/null)
     (cd "$GSRC" && make -j"$(nproc)" >/dev/null)
     UPSTREAM=$GSRC
+    EXTRA_SRC="$GSRC/tcc_io.c"
 fi
 
 # Target file lists follow upstream's Makefile (*_FILES): the
@@ -89,8 +94,8 @@ case "$TARGET" in
     # Android targets use the same ELF backends and target macros as
     # the Linux targets; they differ only in the sysroot they are
     # paired with (bionic, see sysroot-manifests/<target>.json).
-    aarch64-linux-android) TARGET_DEFS="-DTCC_TARGET_ARM64";   TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c" ;;
-    x86_64-linux-android)  TARGET_DEFS="-DTCC_TARGET_X86_64";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c" ;;
+    aarch64-linux-android) TARGET_DEFS="-DTCC_TARGET_ARM64 -DTARGETOS_ANDROID=1 -DCONFIG_TCC_ELFINTERP=\"/system/bin/linker64\"";   TARGET_SRC="$UPSTREAM/arm64-gen.c $UPSTREAM/arm64-link.c $UPSTREAM/arm64-asm.c" ;;
+    x86_64-linux-android)  TARGET_DEFS="-DTCC_TARGET_X86_64 -DTARGETOS_ANDROID=1 -DCONFIG_TCC_ELFINTERP=\"/system/bin/linker64\"";  TARGET_SRC="$UPSTREAM/x86_64-gen.c $UPSTREAM/x86_64-link.c $UPSTREAM/i386-asm.c" ;;
     # Darwin targets follow upstream's Makefile: DEF-x86_64-osx is
     # "-DTCC_TARGET_X86_64 -DTCC_TARGET_MACHO", DEF-arm64-osx adds
     # -DTCC_TARGET_MACHO to the arm64 defines, and the *-osx file
@@ -145,7 +150,7 @@ esac
 # the emcc invocation below passes -DONE_SOURCE=0, the same define
 # the Makefile uses for its per-file objects.
 CORE_SRC="$UPSTREAM/tcc.c $UPSTREAM/libtcc.c $UPSTREAM/tccpp.c $UPSTREAM/tccgen.c \
-$UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TARGET_SRC"
+$UPSTREAM/tccdbg.c $UPSTREAM/tccelf.c $UPSTREAM/tccasm.c $UPSTREAM/tccrun.c $TARGET_SRC $EXTRA_SRC"
 
 # Export list: the LIBTCCAPI functions in upstream libtcc.h that
 # this build defines (tcc_set_realloc, tcc_new, tcc_delete,

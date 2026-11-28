@@ -54,8 +54,15 @@ INCLUDE_DIRS = [
 ]
 
 
-def find_include(name):
-    for d in INCLUDE_DIRS:
+def find_include(name, libc_root=None, builtin_first=False):
+    vendor = os.path.join(REPO, "vendor-tinycc", "include")
+    wasm = INCLUDE_DIRS[0]
+    if libc_root:
+        libc = os.path.join(REPO, libc_root)
+        roots = [vendor, libc, wasm] if builtin_first else [libc, vendor, wasm]
+    else:
+        roots = INCLUDE_DIRS
+    for d in roots:
         p = os.path.join(d, name)
         if os.path.exists(p):
             return p
@@ -98,7 +105,9 @@ def stage_sysroot(stage, target, manifest, libtcc1_override=None):
     for entry in entries:
         source = entry["source"]
         if source.startswith("include/"):
-            found = find_include(source[len("include/"):])
+            found = find_include(source[len("include/"):],
+                                 manifest.get("libcIncludeRoot"),
+                                 manifest.get("builtinHeadersFirst", False))
         elif source == "tcclib.h":
             p = os.path.join(REPO, "vendor-tinycc", "tcclib.h")
             found = p if os.path.exists(p) else None

@@ -241,7 +241,8 @@ static int wasm_sig_intern(WSig *sig)
 {
     int i, j;
     for (i = 0; i < nb_wsigs; i++) {
-        if (wsigs[i].nparams == sig->nparams && wsigs[i].ret == sig->ret) {
+        if (wsigs[i].nparams == sig->nparams && wsigs[i].ret == sig->ret &&
+            wsigs[i].ret2 == sig->ret2) {
             for (j = 0; j < sig->nparams; j++)
                 if (wsigs[i].params[j] != sig->params[j]) break;
             if (j == sig->nparams) return i;
@@ -258,24 +259,70 @@ int wasm_intern_sig(int nparams, const int *params, int ret)
     int i;
     sig.nparams = nparams;
     sig.ret = ret;
+    sig.ret2 = -1;
     for (i = 0; i < nparams; i++) sig.params[i] = params[i];
     return wasm_sig_intern(&sig);
 }
 
-/* Build a WSig from a TCC function type.  Returns 0 on success. */
+/* Append the wasm parameters carrying one C argument of the
+ * given type to sig.  A struct argument travels by value under
+ * the mirror of the return convention: up to 4 bytes as one i32,
+ * 5..8 bytes as two i32s (the memory image, low word first),
+ * anything larger as one i32 pointer to the caller's value,
+ * which the callee's prolog copies into its own frame (see
+ * gfunc_prolog).  Returns 0 on success. */
+static int wasm_sig_arg(WSig *sig, CType *at)
+{
+    if ((at->t & VT_BTYPE) == VT_STRUCT) {
+        int align, size = type_size(at, &align);
+        int n = size <= 4 ? 1 : size <= 8 ? 2 : 1, k;
+        for (k = 0; k < n; k++) {
+            if (sig->nparams >= 16) return -1;
+            sig->params[sig->nparams++] = WT_I32;
+        }
+        return 0;
+    }
+    {
+        int wt = wasm_type_of(at);
+        if (wt < 0 || sig->nparams >= 16) return -1;
+        sig->params[sig->nparams++] = wt;
+        return 0;
+    }
+}
+
+/* Build a WSig from a TCC function type.  Returns 0 on success.
+ *
+ * A struct return follows the generic TCC convention (gfunc_sret):
+ * up to 4 bytes travel as one i32 result, 5..8 bytes as two i32
+ * results, and anything larger is returned through a hidden pointer
+ * the caller passes as an extra first argument (sret) with a void
+ * result.  The hidden parameter is part of the signature built
+ * here, so callers, callees and imports all agree on it.  A struct
+ * argument follows the mirror convention (wasm_sig_arg above). */
 static int wasm_sig_from_ftype(CType *ft, WSig *sig)
 {
     Sym *s;
     sig->nparams = 0;
+    sig->ret2 = -1;
     /* the return type lives in the prototype sym (tccgen.c:8819:
        func_vt = sym->type.ref->type), not in the VT_FUNC type itself */
-    sig->ret = ft->ref ? wasm_type_of(&ft->ref->type) : WT_I32;
-    if (sig->ret == -2) return -1;
+    if (ft->ref && (ft->ref->type.t & VT_BTYPE) == VT_STRUCT) {
+        int align, size = type_size(&ft->ref->type, &align);
+        if (size <= 4) {
+            sig->ret = WT_I32;
+        } else if (size <= 8) {
+            sig->ret = WT_I32;
+            sig->ret2 = WT_I32;
+        } else {
+            sig->ret = -1;
+            sig->params[sig->nparams++] = WT_I32; /* hidden sret pointer */
+        }
+    } else {
+        sig->ret = ft->ref ? wasm_type_of(&ft->ref->type) : WT_I32;
+        if (sig->ret == -2) return -1;
+    }
     for (s = ft->ref; (s = s->next) != NULL; ) {
-        int wt;
-        wt = wasm_type_of(&s->type);
-        if (wt < 0 || sig->nparams >= 16) return -1;
-        sig->params[sig->nparams++] = wt;
+        if (wasm_sig_arg(sig, &s->type) != 0) return -1;
     }
     if (ft->ref && ft->ref->f.func_type == FUNC_ELLIPSIS) {
         /* variadic: the wasm signature carries the fixed
@@ -294,7 +341,8 @@ static int wasm_sig_from_ftype(CType *ft, WSig *sig)
 static int wasm_sig_equal(const WSig *a, const WSig *b)
 {
     int i;
-    if (a->nparams != b->nparams || a->ret != b->ret) return 0;
+    if (a->nparams != b->nparams || a->ret != b->ret ||
+        a->ret2 != b->ret2) return 0;
     for (i = 0; i < a->nparams; i++)
         if (a->params[i] != b->params[i]) return 0;
     return 1;
@@ -324,6 +372,7 @@ static WFunc *wasm_func_intern_sig(Sym *sym, WSig *sig, int from_call)
             f->sig = wasm_sig_intern(sig);
             f->nparams = sig->nparams;
             f->rettype = sig->ret;
+            f->rettype2 = sig->ret2;
             f->sig_from_call = 0;
         } else if (f->sig_from_call && from_call &&
                    !wasm_sig_equal(&wsigs[f->sig], sig))
@@ -340,6 +389,7 @@ static WFunc *wasm_func_intern_sig(Sym *sym, WSig *sig, int from_call)
     f->sig_from_call = from_call;
     f->nparams = sig->nparams;
     f->rettype = sig->ret;
+    f->rettype2 = sig->ret2;
     f->final_index = -1;
     wb_init(&f->final_body);
     return f;
@@ -357,6 +407,10 @@ static WFunc *wasm_func_intern(Sym *sym, CType *ftype)
 static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
 {
     WFix *x;
+    /* A fixup patches a byte position in the body; under
+       nocode_wanted no bytes were emitted, so there is nothing
+       to patch and the position would be stale. */
+    if (nocode_wanted) return;
     if (f->nfixs >= f->fixcap) {
         f->fixcap = f->fixcap ? f->fixcap * 2 : 16;
         f->fixs = tcc_realloc(f->fixs, f->fixcap * sizeof(WFix));
@@ -366,6 +420,7 @@ static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
     x->name = tcc_strdup(get_tok_str(sym->v, NULL));
     x->kind = kind; x->addend = addend;
     x->shndx = -1; x->value = 0;
+    x->dead_local = 0;
     x->sym_func = (sym->type.t & VT_BTYPE) == VT_FUNC;
     x->sym_tls = (sym->type.t & VT_TLS) != 0;
     {
@@ -395,6 +450,19 @@ static void wasm_add_fix(WFunc *f, int kind, int pos, Sym *sym, int addend)
                 x->value = es->st_value;
             }
         }
+        /* An anonymous or static symbol with no ELF entry at all was
+           never defined for output: put_extern_sym is a no-op while
+           the frontend parses with code generation suppressed, and
+           a compile-time-dead branch (if (0), a folded ?: arm, the
+           untaken side of a constant || or &&) is the only place an
+           anonymous or static symbol is both defined and referenced
+           under that suppression - a live definition always creates
+           the entry, and a named extern keeps name resolution so it
+           can bind to another module.  Mark the fixup so output
+           resolves it locally instead of importing it. */
+        if (!es && (sym->v >= SYM_FIRST_ANOM ||
+                    (sym->type.t & VT_STATIC)))
+            x->dead_local = 1;
     }
 }
 
@@ -417,6 +485,16 @@ static int wloc_fscratch(int i) { return wcur_func->nparams + 66 + i; } /* f64 c
 static void we(int c) /* emit one byte, mirrored into the ELF text section */
 {
     int ind1;
+    /* The emission sink: under nocode_wanted nothing is recorded,
+       exactly like the native backends' g()/o().  The frontend
+       parses compile-time dead branches (a constant-folded &&, ||
+       or ?: arm, code after an unconditional jump) with
+       nocode_wanted set and still drives the value machinery
+       through the gen entry points; every byte of those sequences
+       funnels through here, so suppressing the sink keeps dead
+       code out of the body.  Composite points that record
+       non-byte state (jump sites, fixups) guard themselves. */
+    if (nocode_wanted) return;
     wb_putc(&wcur, c);
     ind1 = ind + 1;
     if (ind1 > cur_text_section->data_allocated)
@@ -637,6 +715,24 @@ static void wasm_add_spfix(WFunc *f, int pos)
    a defined function, an imported function or an imported variable. */
 static void wasm_emit_sym_addr(Sym *sym, int addend)
 {
+    if ((sym->type.t & VT_BTYPE) == VT_FUNC) {
+        /* A function symbol's address is its index in the
+           module's function table, so the function must be in
+           the registry — intern it here, from its declaration,
+           the way a direct call would.  A function that is only
+           ever addressed (never called) enters the module
+           through this path alone.  Standalone output needs the
+           entry for the index itself.  Dylink output resolves
+           the address through the GOT instead, but the entry
+           still matters: an undefined function becomes an import
+           of the module, and the import declaration is the
+           signature the loader reads when it wraps a
+           host-provided function into the process table for the
+           GOT — with no declaration it can only guess, and a
+           call through the pointer traps on the mismatch. */
+        WFunc *f = wasm_func_intern(sym, &sym->type);
+        if (!f->defined) f->is_import = 1;
+    }
     if (tcc_state->wasm_dylink_flavor) {
         int gpos = wcur.len;
         we(0x23); we_uleb5(0); /* global.get <patched> */
@@ -654,6 +750,25 @@ static void wasm_emit_sym_addr(Sym *sym, int addend)
         we(0x41); we_sleb5(0);
         wasm_add_fix(wcur_func, WFIX_ADDR, pos + 1, sym, addend);
     }
+}
+
+/* Called from greloca (tccgen.c) for every relocation the
+ * frontend records against a symbol.  A function named by a
+ * data relocation — a function-pointer initializer — needs a
+ * registry entry (an import slot and a table index) even when
+ * nothing calls it directly, so intern it here, from its
+ * declaration, while the symbol is at hand.  Dylink output
+ * resolves the data slot through the GOT by name at load time,
+ * but the entry still matters there: it makes the function an
+ * import of the module, whose declaration carries the
+ * signature the loader wraps a host-provided definition with
+ * (see wasm_emit_sym_addr). */
+ST_FUNC void wasm_greloca_hook(Sym *sym)
+{
+    WFunc *f;
+    if (!sym || (sym->type.t & VT_BTYPE) != VT_FUNC) return;
+    f = wasm_func_intern(sym, &sym->type);
+    if (!f->defined) f->is_import = 1;
 }
 
 /* push the address described by an lvalue SValue onto the wasm stack */
@@ -1389,13 +1504,11 @@ ST_FUNC void load(int r, SValue *sv)
             we(0x43); we(u & 0xff); we((u >> 8) & 0xff); we((u >> 16) & 0xff); we((u >> 24) & 0xff);
             break; }
         case VT_DOUBLE: case VT_LDOUBLE: {
-            /* a long double constant lives in c.ld (the frontend
-               parses and folds with the host long double); this
-               target's long double is f64, so convert - reading
-               c.d instead would take the low half of the host's
-               80-bit representation */
-            double d = (sv->type.t & VT_BTYPE) == VT_LDOUBLE
-                       ? (double)sv->c.ld : sv->c.d;
+            /* a long double constant lives in c.ld, stored in the
+               target format; this target's long double is f64, so
+               the stored words are the f64 bits themselves (the
+               same bits as c.d) */
+            double d = sv->c.d;
             uint64_t u; int i; memcpy(&u, &d, 8);
             we(0x44); for (i = 0; i < 8; i++) we((u >> (8 * i)) & 0xff);
             break; }
@@ -1438,8 +1551,12 @@ ST_FUNC void load(int r, SValue *sv)
             /* a conditional value with pending jump chains (from
                &&/||): fall through with one truth value, resolve the
                chain to the other assignment, hop over it (the same
-               shape as riscv64-gen.c's load of VT_JMP) */
+               shape as riscv64-gen.c's load of VT_JMP).  Under
+               nocode_wanted the value is dead: recording the hop
+               or resolving the chain from here would rewrite live
+               jump state for code that is never emitted. */
             int t = v & 1, hop;
+            if (nocode_wanted) return;
             we_i32_const(t);
             we_local_set(wloc_reg(r));
             hop = wasm_jmp_record(ind, 0, 0, -1);
@@ -1546,7 +1663,9 @@ ST_FUNC void gjmp_addr(int a)
 {
     /* Jump to an already-emitted address (loop back-edges, defined
        labels): the target is known here, no chain is involved. */
-    int site = ind;
+    int site;
+    if (nocode_wanted) return;
+    site = ind;
     wasm_jmp_record(site, 0, 0, a);
     wasm_jmp_placeholders();
 }
@@ -1557,8 +1676,12 @@ ST_FUNC int gjmp_cond(int op, int t)
        comparison, and inside an `if` a placeholder site that the
        epilog turns into the dispatch branch taken when the
        comparison (op, already inverted by the caller as needed)
-       is true.  False falls through to the next stream position. */
+       is true.  False falls through to the next stream position.
+       Under nocode_wanted the condition belongs to a dead branch:
+       no site is recorded and the chain passes through unchanged,
+       as in gjmp. */
     int site, a, b;
+    if (nocode_wanted) return t;
     /* the operands come from vtop's cmp_r, the condition from the
        'op' argument (gvtst passes cmp_op ^ inv) */
     wasm_cmp_operands(vtop, &a, &b);
@@ -1971,8 +2094,9 @@ ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret,
     }
     if (size <= 4) { *regsize = 4; ret->t = VT_INT; ret->ref = NULL; return 1; }
     if (size <= 8) { *regsize = 4; ret->t = VT_INT; ret->ref = NULL; return 2; }
-    return 0; /* returned via hidden pointer; prolog rejects >8-byte
-                 struct returns for the skeleton */
+    return 0; /* returned via hidden pointer: the signature carries
+                 it as an extra first parameter (wasm_sig_from_ftype)
+                 and the prolog parks it at func_vc */
 }
 
 /* Push an i32 SValue (a function pointer, for an indirect call) onto
@@ -2395,6 +2519,125 @@ static void wasm_emit_atomic(int op, int size, SValue *func_sv,
     }
 }
 
+/* Stage one by-value struct argument: push the wasm operand(s)
+ * its signature carries (see wasm_sig_arg).  A struct of up to 8
+ * bytes travels as its memory image, one or two i32 words; the
+ * second word of a 5..7 byte struct carries only the struct's
+ * own tail bytes, zero above them, so neither side ever moves
+ * bytes outside the value.  A larger struct travels as the
+ * address of the caller's value; the callee copies it in its
+ * prolog. */
+static void wasm_stage_struct_arg(SValue *sv)
+{
+    int align, size = type_size(&sv->type, &align);
+    if (size > 8) {
+        if (sv->r & VT_LVAL) {
+            wasm_push_addr(sv);
+        } else if ((sv->r & VT_VALMASK) == REG_IRET) {
+            /* a large struct just returned by a call: the
+               register holds the sret pointer the callee wrote
+               through */
+            we_local_get(wloc_reg(REG_IRET));
+        } else {
+            tcc_error("wasm: cannot stage a large struct argument");
+        }
+        return;
+    }
+    if (sv->r & VT_LVAL) {
+        wasm_push_addr(sv);
+        we(0x28); we(0x00); we(0x00); /* i32.load: word 0 */
+        if (size == 8) {
+            wasm_push_addr(sv);
+            we_i32_const(4); we(0x6a); /* i32.add */
+            we(0x28); we(0x00); we(0x00); /* i32.load: word 1 */
+        } else if (size == 7) {
+            wasm_push_addr(sv);
+            we_i32_const(4); we(0x6a);
+            we(0x2f); we(0x00); we(0x00); /* i32.load16_u: bytes 4..5 */
+            wasm_push_addr(sv);
+            we_i32_const(6); we(0x6a);
+            we(0x2d); we(0x00); we(0x00); /* i32.load8_u: byte 6 */
+            we_i32_const(16); we(0x74); /* i32.shl */
+            we(0x72); /* i32.or */
+        } else if (size == 6) {
+            wasm_push_addr(sv);
+            we_i32_const(4); we(0x6a);
+            we(0x2f); we(0x00); we(0x00); /* i32.load16_u */
+        } else if (size == 5) {
+            wasm_push_addr(sv);
+            we_i32_const(4); we(0x6a);
+            we(0x2d); we(0x00); we(0x00); /* i32.load8_u */
+        }
+    } else if ((sv->r & VT_VALMASK) == REG_IRET) {
+        /* a struct value just returned by a call: its words are
+           the REG_IRET / REG_IRE2 pair */
+        we_local_get(wloc_reg(REG_IRET));
+        if (size > 4) we_local_get(wloc_reg(REG_IRE2));
+    } else {
+        tcc_error("wasm: cannot stage a struct argument");
+    }
+}
+
+/* The compiler's own runtime helpers — the libtcc1 division,
+ * shift and float-conversion families — are called by the
+ * frontend through vpush_helper_func, which carries func_old_type:
+ * no prototype, and a nominal int return.  A signature
+ * synthesized from the call site would therefore type a
+ * long long result as i32, and the call could never bind to the
+ * runtime library's real export.  These names are the compiler's
+ * own runtime ABI with one fixed signature each (the libgcc
+ * convention the libtcc1 sources implement), so the backend
+ * takes the signature from this table instead.  Long double is
+ * double in this target's ABI, so the xf forms carry the df
+ * signature. */
+static const struct {
+    const char *name;
+    int8_t nparams;
+    int8_t params[2];
+    int8_t ret;
+} wasm_helper_sigs[] = {
+    { "__divdi3",     2, { WT_I64, WT_I64 }, WT_I64 },
+    { "__moddi3",     2, { WT_I64, WT_I64 }, WT_I64 },
+    { "__udivdi3",    2, { WT_I64, WT_I64 }, WT_I64 },
+    { "__umoddi3",    2, { WT_I64, WT_I64 }, WT_I64 },
+    { "__ashldi3",    2, { WT_I64, WT_I32 }, WT_I64 },
+    { "__ashrdi3",    2, { WT_I64, WT_I32 }, WT_I64 },
+    { "__lshrdi3",    2, { WT_I64, WT_I32 }, WT_I64 },
+    { "__floatdisf",  1, { WT_I64 }, WT_F32 },
+    { "__floatdidf",  1, { WT_I64 }, WT_F64 },
+    { "__floatdixf",  1, { WT_I64 }, WT_F64 },
+    { "__floatundisf", 1, { WT_I64 }, WT_F32 },
+    { "__floatundidf", 1, { WT_I64 }, WT_F64 },
+    { "__floatundixf", 1, { WT_I64 }, WT_F64 },
+    { "__fixsfdi",    1, { WT_F32 }, WT_I64 },
+    { "__fixdfdi",    1, { WT_F64 }, WT_I64 },
+    { "__fixxfdi",    1, { WT_F64 }, WT_I64 },
+    { "__fixunssfdi", 1, { WT_F32 }, WT_I64 },
+    { "__fixunsdfdi", 1, { WT_F64 }, WT_I64 },
+    { "__fixunsxfdi", 1, { WT_F64 }, WT_I64 },
+    { "__fixunssfsi", 1, { WT_F32 }, WT_I32 },
+    { "__fixunsdfsi", 1, { WT_F64 }, WT_I32 },
+    { "__fixunsxfsi", 1, { WT_F64 }, WT_I32 },
+};
+
+/* Fill sig with the fixed runtime signature of the helper
+ * named name.  Returns 0 when name is not a runtime helper. */
+static int wasm_helper_sig(const char *name, WSig *sig)
+{
+    size_t i;
+    int k;
+    for (i = 0; i < sizeof wasm_helper_sigs / sizeof *wasm_helper_sigs; i++) {
+        if (strcmp(name, wasm_helper_sigs[i].name)) continue;
+        sig->nparams = wasm_helper_sigs[i].nparams;
+        for (k = 0; k < sig->nparams; k++)
+            sig->params[k] = wasm_helper_sigs[i].params[k];
+        sig->ret = wasm_helper_sigs[i].ret;
+        sig->ret2 = -1;
+        return 1;
+    }
+    return 0;
+}
+
 ST_FUNC void gfunc_call(int nb_args)
 {
     SValue *func_sv = &vtop[-nb_args];
@@ -2409,6 +2652,7 @@ ST_FUNC void gfunc_call(int nb_args)
        would call whatever function bears the CELL's name instead. */
     int indirect = !(func_sv->r & VT_SYM) || (func_sv->r & VT_LVAL);
     int rettype = -2;
+    int rettype2 = -1;
     int i;
     int variadic = 0, nfixed = 0, va_ofs = 0;
     int va_slot[40], va_wt[40];
@@ -2450,19 +2694,19 @@ ST_FUNC void gfunc_call(int nb_args)
                 tcc_error("wasm: too many arguments in indirect call");
             isig.nparams = 0;
             isig.ret = wasm_type_of(&ft->ref->type);
+            isig.ret2 = -1;
             if (isig.ret == -2)
                 tcc_error("wasm: unsupported return type in indirect call");
             for (i2 = 0; i2 < nb_args; i2++) {
-                int wt = wasm_type_of(&vtop[1 + i2 - nb_args].type);
-                if (wt < 0)
+                if (wasm_sig_arg(&isig, &vtop[1 + i2 - nb_args].type) != 0)
                     tcc_error("wasm: unsupported argument type in "
                               "indirect call");
-                isig.params[isig.nparams++] = wt;
             }
         } else if (wasm_sig_from_ftype(ft, &isig) != 0)
             tcc_error("wasm: unsupported function-pointer signature in "
                       "indirect call");
         rettype = isig.ret;
+        rettype2 = isig.ret2;
     } else if ((func_sv->sym->type.t & VT_INLINE) && !func_sv->sym->c) {
         /* A static inline callee has no out-of-line body unless it is
            marked used.  Native backends mark it in greloca() when
@@ -2489,25 +2733,38 @@ ST_FUNC void gfunc_call(int nb_args)
             if (nb_args > 16)
                 tcc_error("wasm: too many arguments in call to undeclared "
                           "function '%s'", get_tok_str(func_sv->sym->v, NULL));
-            sig.nparams = 0;
-            sig.ret = wasm_type_of(&func_sv->type.ref->type);
-            if (sig.ret == -2)
-                tcc_error("wasm: unsupported return type in call to "
-                          "undeclared function '%s'",
-                          get_tok_str(func_sv->sym->v, NULL));
-            for (i2 = 0; i2 < nb_args; i2++) {
-                int wt = wasm_type_of(&vtop[1 + i2 - nb_args].type);
-                if (wt < 0)
-                    tcc_error("wasm: unsupported argument type in call to "
+            if (wasm_helper_sig(get_tok_str(func_sv->sym->v, NULL), &sig)) {
+                /* A compiler runtime helper: its signature is
+                   fixed by the runtime ABI (wasm_helper_sigs),
+                   not by this call site — the nominal int return
+                   of func_old_type would mis-type a long long or
+                   float result.  The frontend emits exactly the
+                   table's arguments for these calls. */
+                if (sig.nparams != nb_args)
+                    tcc_error("wasm: argument count mismatch in call to "
+                              "runtime helper '%s'",
+                              get_tok_str(func_sv->sym->v, NULL));
+            } else {
+                sig.nparams = 0;
+                sig.ret = wasm_type_of(&func_sv->type.ref->type);
+                sig.ret2 = -1;
+                if (sig.ret == -2)
+                    tcc_error("wasm: unsupported return type in call to "
                               "undeclared function '%s'",
                               get_tok_str(func_sv->sym->v, NULL));
-                sig.params[sig.nparams++] = wt;
+                for (i2 = 0; i2 < nb_args; i2++) {
+                    if (wasm_sig_arg(&sig, &vtop[1 + i2 - nb_args].type) != 0)
+                        tcc_error("wasm: unsupported argument type in call to "
+                                  "undeclared function '%s'",
+                                  get_tok_str(func_sv->sym->v, NULL));
+                }
             }
             callee = wasm_func_intern_sig(func_sv->sym, &sig, 1);
         } else
             callee = wasm_func_intern(func_sv->sym, &func_sv->type);
         if (!callee->defined) callee->is_import = 1;
         rettype = callee->rettype;
+        rettype2 = callee->rettype2;
     }
     if (nb_args > 40)
         tcc_error("wasm: more than 40 call arguments not implemented in skeleton");
@@ -2615,6 +2872,8 @@ ST_FUNC void gfunc_call(int nb_args)
                 we_i64_const(32); we(0x86); /* i64.shl */
                 we(0x84); /* i64.or */
             }
+        } else if ((sv->type.t & VT_BTYPE) == VT_STRUCT) {
+            wasm_stage_struct_arg(sv);
         } else if ((sv->type.t & VT_BTYPE) == VT_FLOAT ||
                    (sv->type.t & VT_BTYPE) == VT_DOUBLE ||
                    (sv->type.t & VT_BTYPE) == VT_LDOUBLE) {
@@ -2674,7 +2933,16 @@ ST_FUNC void gfunc_call(int nb_args)
        consume function + args; tccgen then pushes the return value
        itself, expecting it in REG_IRET / REG_FRET. */
     vtop -= nb_args + 1;
-    if (rettype == WT_V128)
+    if (rettype2 >= 0) {
+        /* two-result struct return (5..8 bytes): the second i32
+           result sits on top of the operand stack; it is the
+           struct's second word (REG_IRE2), the first result under
+           it is the first word (REG_IRET) - the same register pair
+           tccgen reassembles the struct from */
+        we_local_set(wloc_reg(REG_IRE2));
+        we_local_set(wloc_reg(REG_IRET));
+    }
+    else if (rettype == WT_V128)
         we_local_set(wloc_vec(0)); /* vector return value: slot 0 */
     else if (rettype == WT_I64) {
         /* split the i64 result into the REG_IRET/REG_IRE2 pair */
@@ -2713,10 +2981,14 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     CType *func_type = &func_sym->type;
     Sym *sym;
     int param_addr = 0, i = 0;
+    /* A struct return larger than 8 bytes travels through the
+       hidden pointer the signature carries as its first parameter
+       (see wasm_sig_from_ftype); the prolog parks that pointer in
+       the frame slot tccgen's return path reads through func_vc. */
+    int sret = 0;
     if ((func_vt.t & VT_BTYPE) == VT_STRUCT) {
         int al, sz = type_size(&func_vt, &al);
-        if (sz > 8)
-            tcc_error("wasm: struct return > 8 bytes not implemented in skeleton");
+        if (sz > 8) sret = 1;
     }
     wcur_func = wasm_func_intern(func_sym, func_type);
     wcur_func->defined = 1;
@@ -2728,18 +3000,60 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     nb_wjmps = 0;     /* jump records are per-function */
     amb_cmp_valid = 0;
     loc = 0;
+    if (sret) {
+        /* wasm argument 0 is the hidden struct-return pointer;
+           the declared parameters follow from argument 1 */
+        loc -= 4;
+        func_vc = loc;
+        we_local_get(wloc_fp());
+        we_i32_const(loc);
+        we(0x6a); /* i32.add */
+        we_local_get(0);
+        we(0x36); we(0x00); we(0x00); /* i32.store */
+        i = 1;
+    }
     /* define parameters: each gets a frame slot at a negative offset
        from $fp; the incoming wasm argument is stored there */
     for (sym = func_type->ref; (sym = sym->next) != NULL; i++) {
         int align, size = type_size(&sym->type, &align);
         int is_vec = (sym->type.t & VT_VECTOR) != 0;
+        int is_struct = (sym->type.t & VT_BTYPE) == VT_STRUCT;
         if (is_vec) {
             if (size != 8 && size != 16)
                 tcc_error("wasm: vector parameter of %d bytes not supported "
                           "(only 64/128-bit)", size);
-        } else if (size > 8 || ((sym->type.t & VT_BTYPE) == VT_STRUCT && size > 4))
+        } else if (!is_struct && size > 8)
             tcc_error("wasm: parameter type not implemented in skeleton ('%s')",
                       get_tok_str(func_sym->v, NULL));
+        if (is_struct) {
+            /* The frame slot holds the struct itself.  The wasm
+               arguments are its words (up to 8 bytes, stored in
+               order) or, for a larger struct, one pointer to the
+               caller's value, copied into the slot here (see
+               wasm_sig_arg). */
+            int fsize = size <= 4 ? 4 : size <= 8 ? 8 : size;
+            loc -= fsize;
+            param_addr = loc;
+            gfunc_set_param(sym, param_addr, 0);
+            we_local_get(wloc_fp());
+            if (param_addr) { we_i32_const(param_addr); we(0x6a); }
+            if (size > 8) {
+                we_local_get(i);
+                we_i32_const(size);
+                we(0xfc); we_uleb(10); we(0x00); we(0x00); /* memory.copy */
+            } else {
+                we_local_get(i);
+                we(0x36); we(0x00); we(0x00); /* i32.store */
+                if (size > 4) {
+                    we_local_get(wloc_fp());
+                    we_i32_const(param_addr + 4); we(0x6a);
+                    we_local_get(i + 1);
+                    we(0x36); we(0x00); we(0x00); /* i32.store */
+                    i++; /* a second wasm argument consumed */
+                }
+            }
+            continue;
+        }
         if (size < 4) size = 4;
         loc -= size;
         param_addr = loc;
@@ -2939,7 +3253,11 @@ ST_FUNC void gfunc_epilog(void)
             wasm_add_spfix(wcur_func, final.len);
             wb_uleb5(&final, 0);
         } else wb_uleb(&final, 0);
-        if (wcur_func->rettype == WT_V128) {
+        if (wcur_func->rettype2 >= 0) {
+            /* two-result struct return: first word, then second */
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_IRET));
+            wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_IRE2));
+        } else if (wcur_func->rettype == WT_V128) {
             wb_putc(&final, 0x20); wb_uleb(&final, wloc_vec(0));
         } else if (wcur_func->rettype == WT_F32) {
             wb_putc(&final, 0x20); wb_uleb(&final, wloc_reg(REG_FRET));

@@ -204,24 +204,6 @@ export const TARGETS = Object.freeze({
 
 export const SUPPORTED_TARGETS = Object.freeze(Object.keys(TARGETS));
 
-/** The ELF targets: their sysroots carry the platform's crt
- *  objects and stub shared libraries, and a hosted link is a
- *  dynamic link against the platform's own libc/libm. */
-const ELF_TARGETS = new Set([
-  'x86_64-linux-gnu',
-  'aarch64-linux-gnu',
-  'riscv64-linux-gnu',
-  'aarch64-linux-android',
-  'x86_64-linux-android',
-]);
-
-/** The Android targets (bionic): the dl* functions live in libdl
- *  there, not in libc. */
-const ANDROID_TARGETS = new Set([
-  'aarch64-linux-android',
-  'x86_64-linux-android',
-]);
-
 export function isRunnableTarget(target) {
   return Boolean(TARGETS[target]?.runnable);
 }
@@ -1236,6 +1218,14 @@ function buildWasmImports(options, holder) {
   for (const [name, fn] of Object.entries(wasi)) {
     put('wasi_snapshot_preview1', name, fn);
   }
+  // Layer 1.5: the libtcc1 unit's exports, when the instance
+  // pre-instantiated it (the compiler's runtime helpers:
+  // __divdi3 and family).  Every later layer overrides them.
+  if (options._libtcc1) {
+    for (const [name, fn] of Object.entries(options._libtcc1)) {
+      if (typeof fn === 'function') put('env', name, fn);
+    }
+  }
   // Layer 2: default libc shims (module "env").
   const defaultShims = createDefaultShims({
     io: byteIO,
@@ -1659,25 +1649,14 @@ export class TinycState {
    *  inside the module FS (at bridge.modulePath(path)); exportFile
    *  reads it back from there into the virtual FS. */
   outputFile(path) {
-    // A hosted ELF link resolves the C library through the
-    // runtime's own -lc addition at output time; libm is the one
-    // library TCC leaves to the driver, and the sysroot's stub
-    // carries the full math surface, so an executable or shared
-    // library link adds it here -- at output time, when the
-    // state's library paths are populated and the sysroot's files
-    // are in place. Android keeps the dl* functions in a separate
-    // libdl, also stubbed in the sysroot; glibc targets resolve
-    // them from libc itself.
-    if (!this._driverLibsAdded &&
-        ELF_TARGETS.has(this._instance.target) &&
-        (this._outputType === TCC_OUTPUT.EXE ||
-         this._outputType === TCC_OUTPUT.DLL)) {
-      this._driverLibsAdded = true;
-      this.addLibrary('m');
-      if (ANDROID_TARGETS.has(this._instance.target)) {
-        this.addLibrary('dl');
-      }
-    }
+    // The link uses exactly the libraries the state was given:
+    // like the tcc command line, this API adds none of its own
+    // (a program that uses math or dl functions names libm or
+    // libdl through addLibrary, the way a command line names
+    // -lm or -ldl). Adding libraries here would make a hosted
+    // link through this package produce a different product
+    // -- extra DT_NEEDED entries -- than the same compilation
+    // through the native driver.
     return this._checkRc('tcc_output_file',
       this._call('tcc_output_file', 'number', ['string'],
         [this._bridge.modulePath(normalizeVfsPath(path))]));
@@ -1784,6 +1763,7 @@ export class TinycState {
       stdin: options.stdin,
       heapBase: options.heapBase,
       _instanceShims: this._instance._shims,
+      _libtcc1: this._instance._libtcc1Exports,
       io: textIOToByteIO(io),
     });
     flushIO(io);
@@ -1847,6 +1827,10 @@ export class Tinyc {
     this._mainRunning = false;
     this._shims = new Map();
     this._fsBackend = 'memory';
+    // The libtcc1 unit's exports, pre-instantiated for the
+    // standalone run paths by _initLibtcc1 during load; null
+    // when the sysroot carries no unit.
+    this._libtcc1Exports = null;
   }
 
   get io() {
@@ -2022,11 +2006,68 @@ export class Tinyc {
       stdin: options.stdin,
       heapBase: options.heapBase,
       _instanceShims: this._shims,
+      _libtcc1: this._libtcc1Exports,
       io: textIOToByteIO(io),
     });
     flushIO(io);
     if (typeof result === 'number') return result;
     return result?.exitCode ?? 0;
+  }
+
+  /** Instantiate the sysroot's libtcc1 unit on its own memory
+   *  and table, for the standalone run paths: a standalone
+   *  module runs without a process, so the runtime helpers its
+   *  code imports — __divdi3 and family, the same names
+   *  TinycProcess loads the unit for — are satisfied from this
+   *  private instance's exports instead (buildWasmImports'
+   *  lowest layer).  The unit's functions are pure computations
+   *  over their arguments and keep their state in the
+   *  instance's own memory.  Runs once during load, after the
+   *  sysroot is staged; a sysroot without the unit leaves the
+   *  names as missing imports, as before. */
+  async _initLibtcc1() {
+    const canonical = '/sysroot/lib/libtcc1.tinyc.js';
+    if (!this.fs.hasFile(canonical)) return;
+    let lib;
+    try {
+      lib = libraryFromBytes(canonical, this.fs.readFile(canonical));
+    } catch {
+      return;
+    }
+    if (lib.meta.kind !== 'wasm') return;
+    const memory = new WebAssembly.Memory({
+      initial: Math.max(1, Math.ceil(lib.meta.memSize / 65536)),
+    });
+    const table = new WebAssembly.Table({
+      element: 'anyfunc', initial: lib.meta.tableSize,
+    });
+    let instance;
+    try {
+      ({ instance } = await WebAssembly.instantiate(lib.bodyBytes, {
+        env: {
+          memory,
+          __indirect_function_table: table,
+          __memory_base: new WebAssembly.Global({ value: 'i32' }, 0),
+          __table_base: new WebAssembly.Global({ value: 'i32' }, 0),
+        },
+      }));
+    } catch {
+      return;
+    }
+    let rc;
+    try {
+      rc = instance.exports.__tinyc_dylink_init(0);
+    } catch {
+      return;
+    }
+    if (rc !== 0) return;
+    const exports = {};
+    for (const e of lib.meta.exports) {
+      if (e.kind === 0 && typeof instance.exports[e.name] === 'function') {
+        exports[e.name] = instance.exports[e.name];
+      }
+    }
+    this._libtcc1Exports = exports;
   }
 
   /** Command-line mode: assemble argv exactly like a shell would
@@ -2159,6 +2200,7 @@ export class Tinyc {
       stdin: options.stdin,
       heapBase: options.heapBase,
       _instanceShims: this._shims,
+      _libtcc1: this._libtcc1Exports,
       io: textIOToByteIO(this._io),
     });
     flushIO(this._io);
@@ -3171,6 +3213,7 @@ export class TinycProcess {
       this._holder, this._byteIO);
     const def = createDefaultShims({
       io: this._byteIO, holder: this._holder, stdin: options.stdin,
+      env: options.env ?? {},
       heapBase: 1024, memoryAllocator: true,
       processTable: this.table,
       // A process attached to an instance shares the instance's
@@ -4047,11 +4090,18 @@ export class TinycProcess {
           continue;
         }
         unresolvedFunctions.push(imp.name);
-        put(imp.module, imp.name, () => {
+        // The stub goes into the import object only, never into
+        // `provided`: that map records what the host and shim
+        // layers supply, and GOT resolution reads it as a
+        // provision source — a name nobody provides must stay
+        // unprovided there, or a GOT.func reference to it (which
+        // binds eagerly) would fill from the stub and the load
+        // would wrongly succeed.
+        (imports[imp.module] ??= {})[imp.name] = () => {
           throw new Error(
             `tinyc: call to unresolved function "${imp.name}" ` +
             `imported by "${record.canonical}"`);
-        });
+        };
         continue;
       }
       unresolvedOther.push(key);
@@ -4098,6 +4148,22 @@ export class TinycProcess {
 
   // -- the load procedure (design §9) -----------------------------------
 
+  /** Load the sysroot's runtime library unit — the wasm form
+   *  of the libtcc1 archive native targets link into every
+   *  product — ahead of the main module, in the global scope.
+   *  The compiler emits calls to its helpers for long long
+   *  division and remainder, variable-count 64-bit shifts and
+   *  the __builtin_* fallbacks; with the unit resident, ordinary
+   *  code using them resolves like any library call.  A sysroot
+   *  without the unit (an older staging) leaves those names to
+   *  fail as unresolved, as they did before the unit existed. */
+  _loadLibtcc1() {
+    const canonical = '/sysroot/lib/libtcc1.tinyc.js';
+    if (this._modules.has(canonical)) return;
+    if (!this._libraryLocal(canonical)) return;
+    this._loadModule(canonical, { flags: RTLD_GLOBAL });
+  }
+
   /** Load (or re-reference) a module by canonical path.
    *  opts: { flags, requester, runtimeEdge, hostEdge, isMain, lib }.
    *  Reference accounting: the call itself is one reference — a
@@ -4124,6 +4190,7 @@ export class TinycProcess {
     if (this._ended) {
       throw new TinycDylinkError('tinyc: the process has ended');
     }
+    if (opts.isMain) this._loadLibtcc1();
     const lib = opts.lib ?? this._libraryLocal(canonical);
     if (lib && !this._libraries.has(canonical)) {
       this._libraries.set(canonical, lib);
@@ -6359,6 +6426,9 @@ async function loadSysroot(instance, sysrootOpt, transportOption) {
     await instance.fs.addFile(entry.path, base64ToBytes(b64));
   }
   if (manifest.includeDir) instance.fs.registerIncludeDir(manifest.includeDir);
+  for (const dir of manifest.extraIncludeDirs ?? []) {
+    instance.fs.registerIncludeDir(dir);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -6553,6 +6623,7 @@ export async function loadTinycWithNative(native, options = {}) {
   if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
 
   await loadSysroot(instance, options.sysroot, options.transport);
+  await instance._initLibtcc1();
   return instance;
 }
 

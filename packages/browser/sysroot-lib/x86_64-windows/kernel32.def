@@ -1,6 +1,8 @@
 LIBRARY kernel32.dll
 
 EXPORTS
+AcquireSRWLockExclusive
+AcquireSRWLockShared
 AddAtomA
 AddAtomW
 AddVectoredContinueHandler
@@ -142,6 +144,10 @@ ExitProcess
 ExitThread
 ExpandEnvironmentStringsA
 ExpandEnvironmentStringsW
+FlsAlloc
+FlsFree
+FlsGetValue
+FlsSetValue
 FT_Exit0
 FT_Exit12
 FT_Exit16
@@ -366,6 +372,7 @@ GetThreadPriorityBoost
 GetThreadSelectorEntry
 GetThreadTimes
 GetTickCount
+GetTickCount64
 GetTimeFormatA
 GetTimeFormatW
 GetTimeZoneInformation
@@ -546,6 +553,8 @@ RegisterSysMsgHandler
 ReinitializeCriticalSection
 ReleaseMutex
 ReleaseSemaphore
+ReleaseSRWLockExclusive
+ReleaseSRWLockShared
 RemoveDirectoryA
 RemoveDirectoryW
 RequestDeviceWakeup
@@ -562,6 +571,7 @@ RtlMoveMemory
 RtlUnwind
 RtlUnwindEx
 RtlZeroMemory
+SleepConditionVariableCS
 SMapLS
 SMapLS_IP_EBP_12
 SMapLS_IP_EBP_16
@@ -684,6 +694,8 @@ TlsSetValue
 Toolhelp32ReadProcessMemory
 TransactNamedPipe
 TransmitCommChar
+TryAcquireSRWLockExclusive
+TryAcquireSRWLockShared
 TryEnterCriticalSection
 UTRegister
 UTUnRegister
@@ -719,6 +731,8 @@ WaitForSingleObject
 WaitForSingleObjectEx
 WaitNamedPipeA
 WaitNamedPipeW
+WakeAllConditionVariable
+WakeConditionVariable
 WideCharToMultiByte
 WinExec
 WriteConsoleA

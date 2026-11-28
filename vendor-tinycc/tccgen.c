@@ -3225,6 +3225,54 @@ static void gen_opif(int op)
     c1 = (v1->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST;
     c2 = (v2->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST;
     if (c1 && c2) {
+        if (bt == VT_LDOUBLE) {
+            /* fold in the target format, never in the host's long
+               double (see tccld.h) */
+            TccLdVal a, b, r;
+            int fa, fb, mc;
+            tcc_ld_decode(&v1->c.ld, &a);
+            tcc_ld_decode(&v2->c.ld, &b);
+            fa = a.cls == TCC_LD_FINITE || a.cls == TCC_LD_ZERO;
+            fb = b.cls == TCC_LD_FINITE || b.cls == TCC_LD_ZERO;
+            /* same gate as the host path below: a non-finite first
+               operand against a finite second one is not folded
+               outside constant initializers */
+            if (!fa && fb && !CONST_WANTED)
+                goto general_case;
+            switch(op) {
+            case '+': tcc_ld_addsub(&a, &b, 0, &r); break;
+            case '-': tcc_ld_addsub(&a, &b, 1, &r); break;
+            case '*': tcc_ld_mul(&a, &b, &r); break;
+            case '/':
+                if (b.cls == TCC_LD_ZERO) {
+                    /* division by zero: fold only in initializers */
+                    if (!CONST_WANTED)
+                        goto general_case;
+                    if (a.cls == TCC_LD_ZERO || a.cls == TCC_LD_NAN)
+                        tcc_ld_nan_result(&r, a.sign ^ b.sign);
+                    else
+                        tcc_ld_inf_result(&r, a.sign ^ b.sign);
+                } else {
+                    tcc_ld_div(&a, &b, &r);
+                }
+                break;
+            case TOK_NEG:
+                r = a;
+                r.sign ^= 1;
+                tcc_ld_encode(&r, &v1->c.ld);
+                return;
+            case TOK_EQ: i = tcc_ld_cmp(&a, &b) == 0; goto make_int;
+            case TOK_NE: i = tcc_ld_cmp(&a, &b) != 0; goto make_int;
+            case TOK_LT: i = tcc_ld_cmp(&a, &b) == -1; goto make_int;
+            case TOK_GE: mc = tcc_ld_cmp(&a, &b); i = mc == 0 || mc == 1; goto make_int;
+            case TOK_LE: mc = tcc_ld_cmp(&a, &b); i = mc == -1 || mc == 0; goto make_int;
+            case TOK_GT: i = tcc_ld_cmp(&a, &b) == 1; goto make_int;
+            default: goto general_case;
+            }
+            vtop--;
+            tcc_ld_encode(&r, &v1->c.ld);
+            return;
+        }
         if (bt == VT_FLOAT) {
             f1 = v1->c.f;
             f2 = v2->c.f;
@@ -3232,8 +3280,8 @@ static void gen_opif(int op)
             f1 = v1->c.d;
             f2 = v2->c.d;
         } else {
-            f1 = v1->c.ld;
-            f2 = v2->c.ld;
+            /* VT_LDOUBLE is folded by the target-format path above */
+            f1 = f2 = 0;
         }
         /* NOTE: we only do constant propagation if finite number (not
            NaN or infinity) (ANSI spec) */
@@ -3298,7 +3346,7 @@ static void gen_opif(int op)
         } else if (bt == VT_DOUBLE) {
             v1->c.d = f1;
         } else {
-            v1->c.ld = f1;
+            /* VT_LDOUBLE is stored by the target-format path above */
         }
     } else {
     general_case:
@@ -4074,36 +4122,93 @@ error:
         if (c) {
             /* constant case: we can do it now */
             /* XXX: in ISOC, cannot do it if error in convert */
+            long double cvt_ld;
+            if (sbt_bt == VT_LDOUBLE || dbt_bt == VT_LDOUBLE) {
+                /* conversions to or from long double are computed in
+                   the target format, never via the host's long
+                   double (see tccld.h) */
+                TccLdVal v;
+                int have_v = 0;
+                if (sbt_bt == VT_LDOUBLE) {
+                    tcc_ld_decode(&vtop->c.ld, &v);
+                    have_v = 1;
+                } else if (sbt == VT_FLOAT) {
+                    tcc_ld_decode_f32(vtop->c.f, &v);
+                    have_v = 1;
+                } else if (sbt == VT_DOUBLE) {
+                    tcc_ld_decode_f64(vtop->c.d, &v);
+                    have_v = 1;
+                }
+                if (df) {
+                    if (!have_v) {
+                        /* integer source */
+                        if (sbt_bt == VT_LLONG) {
+                            if (sbt & VT_UNSIGNED)
+                                tcc_ld_from_u64(vtop->c.i, 0, &v);
+                            else
+                                tcc_ld_from_i64((int64_t)vtop->c.i, &v);
+                        } else {
+                            if (sbt & VT_UNSIGNED)
+                                tcc_ld_from_u64((uint32_t)vtop->c.i, 0, &v);
+                            else
+                                tcc_ld_from_i64((int32_t)vtop->c.i, &v);
+                        }
+                    }
+                    if (dbt == VT_FLOAT)
+                        vtop->c.f = tcc_ld_encode_f32(&v);
+                    else if (dbt == VT_DOUBLE)
+                        vtop->c.d = tcc_ld_encode_f64(&v);
+                    else
+                        tcc_ld_encode(&v, &vtop->c.ld);
+                } else if (dbt == VT_BOOL) {
+                    vtop->c.i = (v.cls != TCC_LD_ZERO);
+                } else {
+                    vtop->c.i = tcc_ld_to_u64(&v, (dbt & VT_UNSIGNED) != 0);
+                    if (dbt_bt == VT_LLONG || (PTR_SIZE == 8 && dbt == VT_PTR))
+                        ;
+                    else {
+                        uint32_t m = dbt_bt == VT_BYTE ? 0xff :
+                                     dbt_bt == VT_SHORT ? 0xffff :
+                                      0xffffffff;
+                        vtop->c.i &= m;
+                        if (!(dbt & VT_UNSIGNED))
+                            vtop->c.i |= -(vtop->c.i & ((m >> 1) + 1));
+                    }
+                }
+                goto done;
+            }
             if (sbt == VT_FLOAT)
-                vtop->c.ld = vtop->c.f;
+                cvt_ld = vtop->c.f;
             else if (sbt == VT_DOUBLE)
-                vtop->c.ld = vtop->c.d;
+                cvt_ld = vtop->c.d;
+            else
+                cvt_ld = 0; /* VT_LDOUBLE is converted by the software path above */
 
             if (df) {
                 if (sbt_bt == VT_LLONG) {
                     if ((sbt & VT_UNSIGNED) || !(vtop->c.i >> 63))
-                        vtop->c.ld = vtop->c.i;
+                        cvt_ld = vtop->c.i;
                     else
-                        vtop->c.ld = -(long double)-vtop->c.i;
+                        cvt_ld = -(long double)-vtop->c.i;
                 } else if(!sf) {
                     if ((sbt & VT_UNSIGNED) || !(vtop->c.i >> 31))
-                        vtop->c.ld = (uint32_t)vtop->c.i;
+                        cvt_ld = (uint32_t)vtop->c.i;
                     else
-                        vtop->c.ld = -(long double)-(uint32_t)vtop->c.i;
+                        cvt_ld = -(long double)-(uint32_t)vtop->c.i;
                 }
 
                 if (dbt == VT_FLOAT)
-                    vtop->c.f = (float)vtop->c.ld;
+                    vtop->c.f = (float)cvt_ld;
                 else if (dbt == VT_DOUBLE)
-                    vtop->c.d = (double)vtop->c.ld;
+                    vtop->c.d = (double)cvt_ld;
             } else if (sf && dbt == VT_BOOL) {
-                vtop->c.i = (vtop->c.ld != 0);
+                vtop->c.i = (cvt_ld != 0);
             } else {
                 if(sf) {
                     if (dbt & VT_UNSIGNED)
-                        vtop->c.i = (uint64_t)vtop->c.ld;
+                        vtop->c.i = (uint64_t)cvt_ld;
                     else
-                        vtop->c.i = (int64_t)vtop->c.ld;
+                        vtop->c.i = (int64_t)cvt_ld;
                 }
                 else if (sbt_bt == VT_LLONG || (PTR_SIZE == 8 && sbt == VT_PTR))
                     ;
@@ -6568,6 +6673,63 @@ static void parse_atomic(int atok)
     }
 }
 
+/* Remaining size of the closest subobject of the complete object
+   type 'obj' that contains byte offset 'off', for a designated
+   component of type 'pointee' (used by __builtin_object_size with
+   type 1/3).  The walk descends into the field containing the
+   offset; a field entered at its start whose type is the pointee
+   type is the component itself.  Returns -1 when the subobject
+   cannot be determined. */
+static int64_t bos_sub_remaining(CType *obj, int64_t off, CType *pointee)
+{
+    int align_dummy;
+
+    if (off < 0)
+        return -1;
+    if (obj->t & VT_ARRAY) {
+        int sz = type_size(obj, &align_dummy);
+        if (sz < 0)
+            return -1;
+        if (off > sz)
+            return 0;
+        if (obj->ref && (obj->ref->type.t & VT_ARRAY)) {
+            /* multi-dimensional array: the component is inside
+               one of the rows */
+            int esz = type_size(&obj->ref->type, &align_dummy);
+            if (esz > 0)
+                return bos_sub_remaining(&obj->ref->type, off % esz,
+                                         pointee);
+        }
+        /* an element of this array: the array is the subobject */
+        return sz - off;
+    }
+    if ((obj->t & VT_BTYPE) == VT_STRUCT) {
+        Sym *f;
+        int is_union = IS_UNION(obj->t);
+        for (f = obj->ref->next; f; f = f->next) {
+            int fsz;
+            int64_t rel;
+            if (f->type.t & VT_BITFIELD)
+                continue;
+            fsz = type_size(&f->type, &align_dummy);
+            if (fsz < 0)
+                continue;
+            rel = off - f->c;
+            if (rel < 0 || rel >= fsz)
+                continue;
+            if (rel == 0 && compare_types(&f->type, pointee, 1))
+                return fsz; /* the component is this field */
+            if (is_union && rel == 0)
+                continue; /* not the designated union member */
+            if ((f->type.t & VT_BTYPE) == VT_STRUCT
+                || (f->type.t & VT_ARRAY))
+                return bos_sub_remaining(&f->type, rel, pointee);
+            return fsz - rel;
+        }
+    }
+    return -1;
+}
+
 ST_FUNC void unary(void)
 {
     int n, t, align, size, r;
@@ -6618,7 +6780,9 @@ ST_FUNC void unary(void)
     case TOK_CLDOUBLE:
 #ifdef TCC_USING_DOUBLE_FOR_LDOUBLE
         t = VT_DOUBLE | VT_LONG;
-        tokc.d = tokc.ld;
+        /* the constant is stored in the target format already,
+           which for this target is double itself */
+        memcpy(&tokc.d, &tokc.ld, sizeof(double));
 #else
         t = VT_LDOUBLE;
 #endif
@@ -6806,6 +6970,56 @@ ST_FUNC void unary(void)
 	parse_builtin_params(0, "ee");
 	vpop();
         break;
+    case TOK_builtin_bswap16:
+    case TOK_builtin_bswap32:
+    case TOK_builtin_bswap64: {
+        /* __builtin_bswap16/32/64: convert the argument to the
+           unsigned type of the width, fold a constant argument,
+           otherwise call the libtcc1 function of the same name
+           (lib/builtin.c) and redescribe the result with the exact
+           unsigned return type. */
+        int which = tok;
+        int bt = which == TOK_builtin_bswap16 ? VT_SHORT :
+                 which == TOK_builtin_bswap32 ? VT_INT : VT_LLONG;
+        CType btype;
+        btype.t = bt | VT_UNSIGNED;
+        btype.ref = NULL;
+        parse_builtin_params(0, "e");
+        gen_assign_cast(&btype);
+        if ((vtop->r & VT_VALMASK) == VT_CONST && !vtop->sym) {
+            unsigned long long v = (unsigned long long)vtop->c.i, r;
+            if (bt == VT_SHORT)
+                r = ((v & 0xff) << 8) | ((v >> 8) & 0xff);
+            else if (bt == VT_INT)
+                r = ((v & 0xff) << 24) | ((v & 0xff00) << 8) |
+                    ((v >> 8) & 0xff00) | ((v >> 24) & 0xff);
+            else
+                r = ((v & 0xffULL) << 56) | ((v & 0xff00ULL) << 40) |
+                    ((v & 0xff0000ULL) << 24) | ((v & 0xff000000ULL) << 8) |
+                    ((v >> 8) & 0xff000000ULL) | ((v >> 24) & 0xff0000ULL) |
+                    ((v >> 40) & 0xff00ULL) | ((v >> 56) & 0xffULL);
+            vtop->c.i = r;
+            vtop->type = btype;
+        } else {
+            vpush_helper_func(which);
+            vrott(2);
+            gfunc_call(1);
+            vpushi(0);
+            PUT_R_RET(vtop, btype.t);
+            vtop->type = btype;
+        }
+        break;
+    }
+#ifdef TCC_TARGET_X86_64
+    case TOK_builtin_ia32_pause:
+        /* __builtin_ia32_pause: emit the pause instruction (F3 90) */
+        parse_builtin_params(0, "");
+        o(0x90f3);
+        type.t = VT_VOID;
+        type.ref = NULL;
+        vpush(&type);
+        break;
+#endif
     case TOK_builtin_types_compatible_p:
 	parse_builtin_params(0, "tt");
 	n = compare_types(&vtop[-1].type, &vtop[0].type, 1);
@@ -7432,6 +7646,111 @@ ST_FUNC void unary(void)
 	    n = 0;
 	vtop--;
 	vpushi(n);
+        break;
+    case TOK_builtin_object_size:
+    case TOK_builtin_dynamic_object_size:
+        {
+            /* __builtin_object_size(ptr, type) and its dynamic twin:
+               the number of bytes remaining in the object (type 0/2)
+               or in the closest subobject (type 1/3) that ptr points
+               into.  When the size cannot be determined at compile
+               time, the result is (size_t)-1 for types 0/1 and 0 for
+               types 2/3.  The pointer argument is not evaluated: it
+               is parsed with code generation disabled, and in that
+               mode plain objects, member access, subscripting and
+               constant pointer arithmetic all keep the designated
+               address in the SValue as a symbol plus a constant
+               offset, which is what the analysis below works from.
+               A pointer variable (an lvalue) designates nothing at
+               compile time and yields the unknown values above. */
+            SValue *pv;
+            Sym *base;
+            int bos_type, align_dummy;
+            int64_t whole = -1, sub = -1; /* remaining sizes; -1: unknown */
+            int64_t res;
+
+            parse_builtin_params(1, "ee");
+            if ((vtop->r & (VT_VALMASK | VT_LVAL)) != VT_CONST
+                || vtop->c.i < 0 || vtop->c.i > 3)
+                tcc_error("second argument to '__builtin_object_size' "
+                          "must be a constant integer between 0 and 3");
+            bos_type = (int)vtop->c.i;
+            pv = vtop - 1;
+            base = pv->sym;
+            /* Only two SValue forms designate an object: an array
+               type (the object itself: array name or string literal)
+               and a non-lvalue pointer value (&object, or an address
+               that kept its symbol form).  An lvalue of pointer type
+               is a pointer variable: what it points to is unknown. */
+            if (base && ((pv->type.t & VT_ARRAY)
+                         || ((pv->type.t & VT_BTYPE) == VT_PTR
+                             && !(pv->r & VT_LVAL)))) {
+                int64_t off = 0, base_size = -1;
+                int addr_known = 0;
+
+                if ((pv->r & VT_VALMASK) == VT_LOCAL) {
+                    /* frame address: c.i is absolute, base->c is the
+                       offset of the object itself */
+                    addr_known = 1;
+                    off = pv->c.i - base->c;
+                } else if ((pv->r & (VT_VALMASK | VT_SYM))
+                           == (VT_CONST | VT_SYM)) {
+                    /* global or static object: c.i is the offset
+                       within the object */
+                    addr_known = 1;
+                    off = pv->c.i;
+                }
+                if (addr_known) {
+                    int bs = type_size(&base->type, &align_dummy);
+                    if (bs >= 0)
+                        base_size = bs;
+                }
+                if (addr_known && base_size >= 0 && off >= 0)
+                    whole = off <= base_size ? base_size - off : 0;
+                if (addr_known && (pv->type.t & VT_ARRAY)) {
+                    /* the array object itself is designated: the
+                       pointer is at its start, so it is also the
+                       closest subobject */
+                    int cs = type_size(&pv->type, &align_dummy);
+                    if (cs >= 0)
+                        sub = cs;
+                    /* a row of a multi-dimensional array (a subscript
+                       result): the containing array is the subobject */
+                    if ((base->type.t & VT_ARRAY) && base->type.ref
+                        && whole >= 0
+                        && compare_types(&pv->type,
+                                         &base->type.ref->type, 1))
+                        sub = whole;
+                } else if (addr_known && pv->type.ref) {
+                    if ((base->type.t & VT_ARRAY) && base->type.ref
+                        && compare_types(&base->type.ref->type,
+                                         pointed_type(&pv->type), 1)) {
+                        /* a pointer into the array object itself */
+                        sub = whole;
+                    } else if (compare_types(&base->type,
+                                              pointed_type(&pv->type), 1)) {
+                        /* the object itself is designated (&object) */
+                        sub = whole;
+                    } else {
+                        int64_t w = bos_sub_remaining(&base->type, off,
+                                                      pointed_type(&pv->type));
+                        if (w >= 0) {
+                            sub = w;
+                        } else {
+                            int cs = type_size(pointed_type(&pv->type),
+                                               &align_dummy);
+                            if (cs >= 0)
+                                sub = cs;
+                        }
+                    }
+                }
+            }
+            res = (bos_type == 0 || bos_type == 2) ? whole : sub;
+            if (res < 0)
+                res = bos_type <= 1 ? -1 : 0;
+            vtop -= 2;
+            vpushs((addr_t)res);
+        }
         break;
     case TOK_builtin_unreachable:
 	parse_builtin_params(0, ""); /* just skip '()' */
@@ -9499,67 +9818,23 @@ static int decl_designator(init_params *p, CType *type, unsigned long c,
 
 static void write_ldouble(unsigned char *d, void *s)
 {
-    //printf("long double %Lf\n", *(long double*)s);
-#ifdef TCC_CROSS_TEST
-    if (LDOUBLE_SIZE >= 10) {
-        double b = *(long double*)s;
-        s = &b;
+    /* the constant is stored in the target format already
+       (see tccld.h); emit it verbatim, zero-filling the rest of
+       the target's long double slot */
+    TccLDouble *v = s;
+    memset(d, 0, LDOUBLE_SIZE);
+#if TCC_LDOUBLE_KIND == 1
+    /* x87 80-bit extended: 64-bit mantissa, then sign/exponent */
+    write64le(d, v->w[0]);
+    write16le(d + 8, (uint16_t)v->w[1]);
+#elif TCC_LDOUBLE_KIND == 2
+    /* IEEE binary128 */
+    write64le(d, v->w[0]);
+    write64le(d + 8, v->w[1]);
 #else
-    if (sizeof (long double) == 8 && LDOUBLE_SIZE >= 10) {
+    /* IEEE double */
+    write64le(d, v->w[0]);
 #endif
-        /* our 'long double' is a double really (_WIN32, __APPLE__) */
-        uint64_t m = *(uint64_t*)s;
-        int e = m >> 48;
-        int f = e >> 4 & 0x7FF;
-        m <<= 11;
-        if (0 == f) {
-            if (0 == m)
-                goto set;
-            for (f = 1; !(m & 1ULL<<63); --f)
-                m <<= 1;
-        }
-        if (f == 0x7ff)
-            f = 0x43FF;
-        e = (e & 0x8000) | (f + 0x3C00);
-        m |= 1ULL<<63;
-    set:
-    #if (defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64)
-        /* double -> extended */
-        write64le(d, m);
-        write16le(d+8, e);
-    #elif LDOUBLE_SIZE == 16
-        /* double -> quad */
-        write64le(d+6, m << 1);
-        write16le(d+14, e);
-    #endif
-        ;
-    } else {
-    #if LDOUBLE_SIZE == 8
-        /* long double -> double */
-        double b = *(long double*)s;
-        memcpy(d, &b, 8);
-    #elif (__i386__ || __x86_64__) && (defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64)
-        /* extended -> extended */
-        memcpy(d, s, 10);
-    #elif (__i386__ || __x86_64__) && (defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64)
-        /* extended -> quad */
-        uint64_t m = *(uint64_t*)s;
-        int e = *(uint16_t*)((char*)s + 8);
-        write64le(d+6, m << 1);
-        write16le(d+14, e);
-    #elif (__aarch64__ || __riscv) && (defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64)
-        /* quad -> extended */
-        uint64_t m = read64le((char*)s + 6);
-        int e = read16le((char*)s + 14);
-        (e & 0x7fff) && (m & 1) && 0 == ++m && ++e;
-        write64le(d, m >> 1 | ((e & 0x7fff) ? 1ULL<<63 : 0));
-        write16le(d+8, e);
-    #else
-        /* unknown */
-        if (sizeof (long double) == LDOUBLE_SIZE)
-            memcpy(d, s, LDOUBLE_SIZE);
-    #endif
-    }
 }
 
 /* store a value or an expression directly in global data or in local array */

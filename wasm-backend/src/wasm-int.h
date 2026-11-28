@@ -35,6 +35,8 @@ typedef struct WSig {
     int nparams;
     int params[16];
     int ret; /* WT_* or -1 for void */
+    int ret2; /* second result (a struct return of 5..8 bytes travels
+                 as two i32 results) or -1 when there is none */
 } WSig;
 
 #define WFIX_CALL 1 /* uleb5 at pos := final function index of sym */
@@ -70,6 +72,14 @@ typedef struct WFix {
                      variable): the dylink output classifies a
                      defined one into the module's TLS span and an
                      undefined one as a GOT.tls reference */
+    int dead_local; /* the symbol is anonymous or static and had no
+                     ELF entry when the fixup was created: its only
+                     definition site was parsed with code generation
+                     suppressed (a compile-time-dead branch), so the
+                     frontend emitted neither the symbol nor its
+                     data.  Output resolves the fixup to the
+                     module's own data base instead of importing a
+                     symbol no module can define */
 } WFix;
 
 typedef struct WFunc {
@@ -85,6 +95,7 @@ typedef struct WFunc {
     int final_index;  /* assigned by wasm-link */
     int nparams;
     int rettype;      /* WT_* or -1 */
+    int rettype2;     /* second result WT_* or -1 (two-i32 struct return) */
     WBuf final_body;  /* assembled at gfunc_epilog */
     WFix *fixs;
     int nfixs, fixcap;

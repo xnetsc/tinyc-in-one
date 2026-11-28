@@ -40,9 +40,6 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <unistd.h>
-#if defined(__ANDROID__)
-#include <poll.h>
-#endif
 static volatile const char *tls_stage = "start";
 static volatile long tls_handshake_iters = 0;
 static volatile int tls_hs_state = -1;
@@ -209,24 +206,7 @@ int main(int argc, char **argv) {
        readable and the handshake's first recv returns at once;
        if it reports nothing after 3 s, no ClientHello has
        arrived and the stall is on the client/network side, not
-       in the bio. Android uses poll(): bionic's FD_SET is a
-       fortified inline function referencing __builtin_object_size,
-       which TCC does not implement (the same reason
-       probe_nb_connect in default_libs_net.c avoids select()
-       on Android); the round-6 select probe broke the android
-       tlsserve build with an unresolved __builtin_object_size. */
-#if defined(__ANDROID__)
-    {
-        struct pollfd pfd;
-        pfd.fd = client_fd.fd;
-        pfd.events = POLLIN;
-        pfd.revents = 0;
-        int pr = poll(&pfd, 1, 3000);
-        printf("pre-handshake poll: fd=%d ret=%d readable=%d\n",
-               client_fd.fd, pr, pr > 0 && (pfd.revents & POLLIN));
-        fflush(stdout);
-    }
-#else
+       in the bio. */
     {
         fd_set rfds;
         struct timeval tv = { 3, 0 };
@@ -237,7 +217,6 @@ int main(int argc, char **argv) {
                client_fd.fd, sr, sr > 0 && FD_ISSET(client_fd.fd, &rfds));
         fflush(stdout);
     }
-#endif
 #endif
     mbedtls_ssl_set_bio(&ssl, &client_fd, tls_send, tls_recv, NULL);
     /* Single-step handshake loop: mbedtls_ssl_handshake() is

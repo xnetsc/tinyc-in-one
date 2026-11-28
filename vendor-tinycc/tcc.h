@@ -462,12 +462,27 @@ typedef struct CType {
     struct Sym *ref;
 } CType;
 
-/* long double words on host(!) platform */
-#define LDOUBLE_WORDS ((sizeof(long double)+3)/4)
+/* The target's long double format, selected by target, never by
+   host: long double constants are parsed, folded, converted and
+   emitted in this format (see tccld.h), so the host's own long
+   double representation cannot leak into the output. */
+#if defined TCC_USING_DOUBLE_FOR_LDOUBLE || (defined LDOUBLE_SIZE && LDOUBLE_SIZE == 8)
+# define TCC_LDOUBLE_KIND 0 /* IEEE double */
+#elif defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64
+# define TCC_LDOUBLE_KIND 1 /* x87 80-bit extended */
+#elif defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64
+# define TCC_LDOUBLE_KIND 2 /* IEEE binary128 (quad) */
+#else
+# define TCC_LDOUBLE_KIND 0
+#endif
+
+#include "tccld.h"
+
+#define LDOUBLE_WORDS ((sizeof(TccLDouble)+3)/4)
 
 /* constant value */
 typedef union CValue {
-    long double ld;
+    TccLDouble ld;
     double d;
     float f;
     uint64_t i;

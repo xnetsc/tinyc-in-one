@@ -84,11 +84,28 @@ for (const mf of manifestFiles) {
   const target = manifest.target;
   const files = {};
   let omittedLibs = 0;
+  /* The manifest's libcIncludeRoot is repo-relative; the
+   * manifests directory lives at <repo>/packages/browser/
+   * sysroot-manifests, so the root resolves three levels up
+   * when this runs inside the repository. Outside it (an
+   * unpacked artifact) the path does not exist and the
+   * --include-root arguments alone apply. */
+  const repoRoot = path.resolve(args.manifests, '..', '..', '..');
+  const libcRoot = manifest.libcIncludeRoot
+    ? path.join(repoRoot, manifest.libcIncludeRoot)
+    : null;
+  const vendorRoot = path.join(repoRoot, 'vendor-tinycc', 'include');
+  const wasmRoot = path.join(repoRoot, 'wasm-backend', 'include');
+  const includeRoots = libcRoot && fs.existsSync(libcRoot)
+    ? (manifest.builtinHeadersFirst
+        ? [vendorRoot, libcRoot, wasmRoot]
+        : [libcRoot, vendorRoot, wasmRoot])
+    : args.includeRoots;
   for (const entry of manifest.includeFiles ?? []) {
     let src = null;
     if (entry.source.startsWith('include/')) {
       const name = entry.source.slice('include/'.length);
-      for (const root of args.includeRoots) {
+      for (const root of includeRoots) {
         const p = path.join(root, name);
         if (fs.existsSync(p)) { src = p; break; }
       }

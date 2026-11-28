@@ -94,6 +94,12 @@ node tests/run-datagot-dylink.mjs; stage_rc $? "node"
 echo "== dylink address-only function classification (GOT.func by symbol type) =="
 node tests/run-addronly-dylink.mjs; stage_rc $? "node"
 
+echo "== dead-branch literals (no GOT.mem orphans, both forms) =="
+node tests/run-deadlit-dylink.mjs; stage_rc $? "node"
+
+echo "== expression-level dead code (dead arms do not execute) =="
+node tests/run-deadcode.mjs; stage_rc $? "node"
+
 echo "== compile test-varargs.c (variadic definitions and calls) =="
 $TCC -nostdlib -I include -I ../vendor-tinycc/include -o tests/test-varargs.wasm tests/test-varargs.c; stage_rc $? "compile"
 echo "== varargs assertions =="

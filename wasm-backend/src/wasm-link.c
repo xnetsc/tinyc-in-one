@@ -444,10 +444,13 @@ static void wasm_apply_data_relocs(TCCState *s,
                    (the slot keeps its in-place addend, which the
                    init adds to the GOT value).  A weak undefined
                    reference keeps the historical behaviour — the
-                   slot reads its addend, typically 0 — and so does
-                   standalone output, which has no GOT. */
-                if (glist_out &&
-                    ELFW(ST_BIND)(es->st_info) != STB_WEAK) {
+                   slot reads its addend, typically 0.  Standalone
+                   output has no GOT, but a function target's value
+                   is known there: its index in the module's
+                   function table, imports first, and the indices
+                   are final by the time relocations are applied —
+                   patch the slot with it directly. */
+                {
                     const char *name =
                         (const char *)symtab_section->link->data +
                         es->st_name;
@@ -460,12 +463,22 @@ static void wasm_apply_data_relocs(TCCState *s,
                         (wf = wasm_find_wfunc(name, 0)) >= 0 &&
                         !wfuns[wf].defined)
                         is_func = 1;
-                    dy_data_got_add(&glist, &gn, &gcap,
-                                    wsec_base[i] + rel->r_offset, name,
-                                    is_tls ? DY_GOTLS :
-                                    is_func ? DY_GOTFUNC : DY_GOTMEM,
-                                    (int32_t)read32le(sec->data +
-                                                      rel->r_offset));
+                    if (glist_out &&
+                        ELFW(ST_BIND)(es->st_info) != STB_WEAK) {
+                        dy_data_got_add(&glist, &gn, &gcap,
+                                        wsec_base[i] + rel->r_offset, name,
+                                        is_tls ? DY_GOTLS :
+                                        is_func ? DY_GOTFUNC : DY_GOTMEM,
+                                        (int32_t)read32le(sec->data +
+                                                          rel->r_offset));
+                    } else if (!glist_out && is_func &&
+                               ELFW(ST_BIND)(es->st_info) != STB_WEAK &&
+                               (wf = wasm_find_wfunc(name, 0)) >= 0 &&
+                               !wfuns[wf].defined) {
+                        write32le(sec->data + rel->r_offset,
+                                  wfuns[wf].final_index +
+                                  read32le(sec->data + rel->r_offset));
+                    }
                 }
                 continue;
             }
@@ -563,6 +576,10 @@ static int wasm_dy_classify(TCCState *s, WFix *x, addr_t *local)
 {
     int idx, wf;
     ElfSym *es;
+    if (x->dead_local) {
+        *local = 0;
+        return DY_DEFDATA;
+    }
     if (x->shndx >= 0) {
         if (x->shndx >= s->nb_sections)
             return 0;
@@ -664,7 +681,7 @@ static int wasm_dy_hook(const char *name, int nparams, int ret)
     WSig *sig;
     if (wf < 0) return -1;
     sig = &wsigs[wfuns[wf].sig];
-    if (sig->nparams != nparams || sig->ret != ret) return -2;
+    if (sig->nparams != nparams || sig->ret != ret || sig->ret2 != -1) return -2;
     for (i = 0; i < nparams; i++)
         if (sig->params[i] != WT_I32) return -2;
     return wf;
@@ -683,6 +700,7 @@ static int wasm_dy_add_synth(const char *name, int sig, int nparams,
     fn->sig = sig;
     fn->nparams = nparams;
     fn->rettype = rettype;
+    fn->rettype2 = -1;
     fn->defined = 1;
     fn->final_index = -1;
     wb_init(&fn->final_body);
@@ -1151,7 +1169,8 @@ static int wasm_output_dylink(TCCState *s, const char *filename)
         wb_uleb(&pay, wsigs[i].nparams);
         for (j = 0; j < wsigs[i].nparams; j++) wb_putc(&pay, wsigs[i].params[j]);
         if (wsigs[i].ret < 0) wb_uleb(&pay, 0);
-        else { wb_uleb(&pay, 1); wb_putc(&pay, wsigs[i].ret); }
+        else if (wsigs[i].ret2 < 0) { wb_uleb(&pay, 1); wb_putc(&pay, wsigs[i].ret); }
+        else { wb_uleb(&pay, 2); wb_putc(&pay, wsigs[i].ret); wb_putc(&pay, wsigs[i].ret2); }
     }
     sec_begin(&mod, 1, &pay); wb_free(&pay);
 
@@ -1510,9 +1529,22 @@ static int wasm_output_module(TCCState *s, const char *filename)
                         return tcc_error_noabort("wasm: cannot resolve "
                                                  "address of '%s'", x->name);
                     a = wsec_base[x->shndx] + x->value;
-                } else if (wasm_sym_addr(s, x->name, &a) != 0)
-                    return tcc_error_noabort("wasm: cannot resolve address of '%s'",
-                                             x->name);
+                } else if (x->dead_local) {
+                    /* in compile-time-dead code (see WFix): the
+                       symbol and its data were never emitted */
+                    a = 0;
+                } else if (wasm_sym_addr(s, x->name, &a) != 0) {
+                    /* An undefined function symbol's address is
+                       its index in the module's function table:
+                       the table covers every function, imports
+                       first, so an imported function's address is
+                       its import index. */
+                    int wf = wasm_find_wfunc(x->name, 0);
+                    if (wf < 0 || wfuns[wf].defined)
+                        return tcc_error_noabort("wasm: cannot resolve address of '%s'",
+                                                 x->name);
+                    a = wfuns[wf].final_index;
+                }
                 wb_patch_sleb5(&fn->final_body, x->pos, (int32_t)(a + x->addend));
             }
         }
@@ -1529,7 +1561,8 @@ static int wasm_output_module(TCCState *s, const char *filename)
         wb_uleb(&pay, wsigs[i].nparams);
         for (j = 0; j < wsigs[i].nparams; j++) wb_putc(&pay, wsigs[i].params[j]);
         if (wsigs[i].ret < 0) wb_uleb(&pay, 0);
-        else { wb_uleb(&pay, 1); wb_putc(&pay, wsigs[i].ret); }
+        else if (wsigs[i].ret2 < 0) { wb_uleb(&pay, 1); wb_putc(&pay, wsigs[i].ret); }
+        else { wb_uleb(&pay, 2); wb_putc(&pay, wsigs[i].ret); wb_putc(&pay, wsigs[i].ret2); }
     }
     sec_begin(&mod, 1, &pay); wb_free(&pay);
 

@@ -1262,6 +1262,7 @@ export function startThreadWorker(boot, helpers, port) {
     memory: () => rt.memory,
     holder: rt.holder,
     io: byteIO,
+    env: boot.env ?? {},
     memoryAllocator: true,
     processTable: rt.table,
   });

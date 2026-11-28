@@ -5214,15 +5214,11 @@ typedef DWORD LCID;
 
     __CRT_INLINE PVOID RtlSecureZeroMemory(PVOID ptr,SIZE_T cnt) {
       volatile char *vptr =(volatile char *)ptr;
-#ifdef __x86_64
-      __stosb((PBYTE)((DWORD64)vptr),0,cnt);
-#else
       while(cnt) {
 	*vptr = 0;
 	vptr++;
 	cnt--;
       }
-#endif
       return ptr;
     }
 

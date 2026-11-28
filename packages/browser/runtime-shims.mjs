@@ -66,9 +66,9 @@ const ALLOC_USED = 0xa110ce11;
  *             paths absolute and normalized. Default: a private
  *             in-memory map owned by this shim set, so a run's
  *             files live exactly as long as the run.
- *   args/env  accepted for symmetry with the WASI shim options;
- *             libc shims do not consume argv, and getenv returns
- *             null by design, so neither is read.
+ *   args/env  args is accepted for symmetry with the WASI shim
+ *             options (the libc shims do not consume argv); env
+ *             is the process environment getenv reads.
  *
  * Returns { env: { ... } }, ready to merge into an importObject.
  *
@@ -113,18 +113,28 @@ export function createDefaultShims(options = {}) {
   // ---------------------------------------------------------------
   // Error number state for this shim set (one per run / process):
   // the file and allocation functions below record the failure
-  // code here, and perror reports it. The sysroot has no errno
-  // variable surface — in this process model a data symbol
-  // cannot be supplied by the shim layer (the same reason
-  // stdin/stdout/stderr are macros over handle values) — so the
-  // number lives only here, and perror is its only reader.
-  // Successful calls never clear it.
+  // code here. <errno.h>'s errno is a macro over the layer's
+  // __tinyc_errno accessor: a data symbol cannot be supplied
+  // across the import boundary (the same reason stdin/stdout/
+  // stderr are macros over handle values), so the accessor
+  // allocates a cell in the process's own memory on first use
+  // and returns its address. From then on the cell is the
+  // guest-visible number: setErrno mirrors every recorded code
+  // into it, and perror reads it back, so a guest store through
+  // errno is honored exactly as on a hosted system. Each shim
+  // set has its own cell, so in a threaded process the number
+  // is per-thread. Successful calls never clear it.
   // ---------------------------------------------------------------
   const ERRNO = {
     ENOENT: 2, EBADF: 9, ENOMEM: 12, EEXIST: 17, EINVAL: 22,
+    ENOSYS: 38,
   };
   let errnoValue = 0;
-  const setErrno = (code) => { errnoValue = code; };
+  let errnoCell = 0;
+  const setErrno = (code) => {
+    errnoValue = code;
+    if (errnoCell) writeU32(errnoCell, code);
+  };
 
   // ---------------------------------------------------------------
   // Allocator: first-fit free list over [heapBase, memory end).
@@ -485,6 +495,7 @@ export function createDefaultShims(options = {}) {
       12: 'Cannot allocate memory',
       17: 'File exists',
       22: 'Invalid argument',
+      38: 'Function not implemented',
     };
     return table[errnum] ?? `Unknown error ${errnum | 0}`;
   }
@@ -636,6 +647,31 @@ export function createDefaultShims(options = {}) {
   const abs = (v) => Math.abs(v | 0);
   const labs = (v) => Math.abs(v | 0);
   const llabs = (v) => (v < 0n ? -v : v);
+
+  // div/ldiv return their { quot, rem } struct as two i32
+  // results, so the JS return value is the pair as an array,
+  // which is what a multi-value wasm import reads back. The
+  // quotient truncates toward zero and the remainder takes the
+  // dividend's sign, as in C. (Division by zero and the
+  // INT_MIN / -1 overflow are undefined in C.)
+  function div(numer, denom) {
+    const q = Math.trunc(numer / denom);
+    return [q | 0, (numer - q * denom) | 0];
+  }
+  const ldiv = div;
+
+  // lldiv's struct is 16 bytes, so it travels through the
+  // hidden pointer the caller passes as the first argument:
+  // write quot and rem as little-endian i64s there and return
+  // nothing. BigInt division truncates toward zero, as in C.
+  // (Division by zero and the LLONG_MIN / -1 overflow are
+  // undefined in C; here they raise instead of trapping.)
+  function lldiv(sret, numer, denom) {
+    const q = numer / denom;
+    const view = dv();
+    view.setBigInt64(sret, q, true);
+    view.setBigInt64(sret + 8, numer - q * denom, true);
+  }
 
   // qsort/bsearch call the guest comparator through the module's
   // indirect function table — the same route atexit handlers
@@ -1486,6 +1522,38 @@ export function createDefaultShims(options = {}) {
     return handle;
   }
 
+  // tmpnam: generate a filename that is not the name of an
+  // existing file, in the same generated-name space tmpfile's
+  // backing entries use (a per-set counter plus a random
+  // suffix, checked against the file space), so the two never
+  // collide. With a null argument the name is written into an
+  // internal buffer owned by this shim set and its address is
+  // returned (later calls overwrite it, as the standard
+  // allows); otherwise the name goes into the caller's buffer,
+  // which the standard sizes at L_tmpnam bytes.
+  let tmpnamCounter = 0;
+  let tmpnamBuffer = 0;
+  function tmpnam(s) {
+    let path;
+    do {
+      tmpnamCounter++;
+      const rand = Math.floor(Math.random() * 0x100000000).toString(36);
+      path = `/tmpnam-${tmpnamCounter.toString(36)}-${rand}`;
+    } while (backingRead(path) != null);
+    if (!s && !tmpnamBuffer) tmpnamBuffer = rawMalloc(64);
+    const target = s || tmpnamBuffer;
+    writeCStringBytes(target, textEncoder.encode(path));
+    return target;
+  }
+
+  // __assert_fail: the <assert.h> failure path — the message
+  // to stderr, then abort.
+  function __assert_fail(assertion, file, line) {
+    streamWriteText(2, `assertion failed: ${readCString(assertion)} ` +
+      `(${readCString(file)}:${line | 0})\n`);
+    abort();
+  }
+
   // Buffering control. Writes in this layer go through to the
   // backing store as they happen, so every stream is effectively
   // unbuffered whatever mode is requested: setvbuf records the
@@ -1511,12 +1579,26 @@ export function createDefaultShims(options = {}) {
     return setvbuf(stream, buf, buf ? 0 : 2, buf ? 1024 : 0);
   }
 
-  // perror: report the layer's recorded error number for the
-  // most recent failed call on the error stream, in the standard
-  // form "<s>: <message>" (or just the message for a null or
-  // empty prefix).
+  // __tinyc_errno: the accessor behind <errno.h>'s errno macro.
+  // Allocates the error-number cell in the process's memory on
+  // first use (see the error number state block above), seeded
+  // with the code recorded so far, and returns its address.
+  function __tinyc_errno() {
+    if (!errnoCell) {
+      errnoCell = rawMalloc(4);
+      if (errnoCell) writeU32(errnoCell, errnoValue);
+    }
+    return errnoCell;
+  }
+
+  // perror: report the error number for the most recent failed
+  // call on the error stream, in the standard form
+  // "<s>: <message>" (or just the message for a null or empty
+  // prefix). Once the errno cell exists it is authoritative:
+  // guest code may have stored through errno since the failure.
   function perror(sPtr) {
     const prefix = sPtr ? readCString(sPtr) : '';
+    if (errnoCell) errnoValue = readU32(errnoCell);
     const text = (prefix ? `${prefix}: ` : '') + strerrorText(errnoValue) + '\n';
     streamWriteText(2, text);
   }
@@ -2479,6 +2561,41 @@ export function createDefaultShims(options = {}) {
   // implementation with the result rounded to float precision.
   const asF32 = (fn) => (...args) => Math.fround(fn(...args));
 
+  // getenv: read the process environment this shim set was
+  // created with (createProcess's env option, or runWasmModule's).
+  // A present name's value is copied into the process's memory
+  // once and the same pointer returned on every later call; an
+  // absent name returns null. The environment does not change
+  // over a run, so the copies never go stale.
+  const processEnv = options.env ?? {};
+  const getenvCache = new Map();
+  function getenv(namePtr) {
+    const name = readCString(namePtr);
+    if (!Object.prototype.hasOwnProperty.call(processEnv, name)) return 0;
+    let ptr = getenvCache.get(name);
+    if (ptr === undefined) {
+      const bytes = textEncoder.encode(String(processEnv[name]));
+      ptr = rawMalloc(bytes.length + 1);
+      if (!ptr) {
+        setErrno(ERRNO.ENOMEM);
+        return 0;
+      }
+      writeCStringBytes(ptr, bytes);
+      getenvCache.set(name, ptr);
+    }
+    return ptr;
+  }
+
+  // system: there is no command processor in this process
+  // model. The null query answers 0 — no processor available —
+  // and any actual command fails with ENOSYS, the way a hosted
+  // system without a shell reports it.
+  function system(cmdPtr) {
+    if (!cmdPtr) return 0;
+    setErrno(ERRNO.ENOSYS);
+    return -1;
+  }
+
   const env = {
     // memory / string
     memcpy,
@@ -2526,6 +2643,7 @@ export function createDefaultShims(options = {}) {
     fwrite,
     fread,
     fgetc,
+    getc: fgetc,
     getchar: () => fgetc(0),
     ungetc,
     fopen,
@@ -2544,9 +2662,12 @@ export function createDefaultShims(options = {}) {
     rename: renameFile,
     fdopen,
     tmpfile,
+    tmpnam,
+    __assert_fail,
     setbuf,
     setvbuf,
     perror,
+    __tinyc_errno,
     fgets,
     scanf,
     fscanf,
@@ -2571,12 +2692,22 @@ export function createDefaultShims(options = {}) {
     abs,
     labs,
     llabs,
+    div,
+    ldiv,
+    lldiv,
+    // <inttypes.h> imax family: intmax_t is long long on this
+    // target, so these are the ll* implementations under their
+    // standard names (declarations land with the header pass).
+    imaxabs: llabs,
+    imaxdiv: lldiv,
+    strtoimax: strtoll,
+    strtoumax: strtoull,
     bsearch,
     qsort,
     rand,
     srand,
-    getenv: (_name) => 0,
-    system: (cmd) => (cmd === 0 ? 0 : -1),
+    getenv,
+    system,
     // ctype
     isalpha,
     isdigit,
@@ -2668,6 +2799,15 @@ export function createDefaultShims(options = {}) {
     },
     clock: () => Math.floor(performance.now() * 1000),
     difftime: (a, b) => a - b,
+    // TIME_UTC is the host wall clock — the same frame the
+    // pthread layer's CLOCK_REALTIME abstimes use.
+    timespec_get: (ts, base) => {
+      if (base !== 1) return 0;
+      const ms = Date.now();
+      writeU32(ts, Math.floor(ms / 1000));
+      writeU32(ts + 4, (ms % 1000) * 1000000);
+      return 1;
+    },
   };
 
   const result = { env };

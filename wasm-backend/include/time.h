@@ -1,12 +1,20 @@
-/* time.h — the time types for the wasm32 sysroot.
+/* time.h — the time types for the wasm32 sysroot, plus the
+ * one time function the shim layer supplies.
  *
- * This header carries types only: time_t, clock_t, struct tm and
- * struct timespec. It declares no functions — the sysroot's shim
- * layer supplies no time calls, and a header here declares nothing
- * the runtime does not supply. The header exists because other
- * shipped headers name these types (curl/curl.h includes <time.h>
- * unconditionally; mbedtls/platform_time.h likewise), and because
- * struct timespec is shared with <pthread.h> under the same guard
+ * The header carries the types time_t, clock_t, struct tm and
+ * struct timespec, and declares the four time functions the
+ * shim layer supplies: time, clock, difftime and timespec_get.
+ * timespec_get reads the host wall clock (Date.now), which is
+ * also the frame the pthread layer's CLOCK_REALTIME abstimes
+ * use, so a program can form the abstimes the timed waits
+ * take.  The calendar-conversion functions (gmtime, localtime,
+ * mktime, strftime, asctime, ctime) are not supplied by the
+ * layer and are not declared: a header here declares nothing
+ * the runtime does not supply.
+ * The header exists also because other shipped headers name
+ * these types (curl/curl.h includes <time.h> unconditionally;
+ * mbedtls/platform_time.h likewise), and because struct
+ * timespec is shared with <pthread.h> under the same guard
  * that header already uses.
  */
 #ifndef _TINYC_TIME_H
@@ -47,5 +55,12 @@ struct tm {
 };
 
 #define CLOCKS_PER_SEC 1000000
+
+#define TIME_UTC	1
+
+time_t time(time_t *timer);
+clock_t clock(void);
+double difftime(time_t time1, time_t time0);
+int timespec_get(struct timespec *ts, int base);
 
 #endif /* _TINYC_TIME_H */

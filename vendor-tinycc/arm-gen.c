@@ -1793,7 +1793,11 @@ static int is_zero(int i)
     return (vtop[i].c.f == 0.f);
   else if (vtop[i].type.t == VT_DOUBLE)
     return (vtop[i].c.d == 0.0);
-  return (vtop[i].c.ld == 0.l);
+  {
+    TccLdVal v;
+    tcc_ld_decode(&vtop[i].c.ld, &v);
+    return v.cls == TCC_LD_ZERO;
+  }
 }
 
 /* generate a floating point operation 'v = t1 op t2' instruction. The
@@ -1904,8 +1908,13 @@ static uint32_t is_fconst()
     f = vtop->c.f;
   else if (vtop->type.t == VT_DOUBLE)
     f = vtop->c.d;
-  else
-    f = vtop->c.ld;
+  else {
+    /* the constant is stored in the target format (double on ARM);
+       only its value class and small exact values are used here */
+    TccLdVal v;
+    tcc_ld_decode(&vtop->c.ld, &v);
+    f = tcc_ld_encode_f64(&v);
+  }
   if(!ieee_finite(f))
     return 0;
   r=0x8;

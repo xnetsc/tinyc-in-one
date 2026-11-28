@@ -12,15 +12,18 @@
  * module's own allocator when the module exports one).  exit
  * unwinds the guest without terminating the host and runs
  * atexit handlers; abort unwinds the same way with the
- * conventional failure code.  The environment is empty by
- * design: getenv always returns NULL, and there is no command
- * processor — system(NULL) returns 0 (none available) and any
- * command returns -1.  long is 32-bit and long double is
+ * conventional failure code.  getenv reads the environment the
+ * process was created with and returns NULL for a name it does
+ * not carry.  There is no command processor — system(NULL)
+ * returns 0 (none available) and any command returns -1 with
+ * errno set to ENOSYS.  long is 32-bit and long double is
  * double in this target's ABI, so the strto* surface ends at
- * the forms below.  The div family (div, ldiv, lldiv) is not
- * declared: those functions return a struct by value, and the
- * compiler's wasm backend rejects struct-return signatures at
- * compile time, so no caller of them could be built. */
+ * the forms below.  The div family returns its struct by
+ * value: div_t and ldiv_t are 8 bytes and travel as two i32
+ * results, lldiv_t is 16 bytes and travels through a hidden
+ * first-argument pointer — the compiler's wasm calling
+ * convention for struct returns, which the host layer's
+ * implementations follow. */
 
 #include <stddef.h>
 
@@ -58,6 +61,13 @@ float strtof(const char *nptr, char **endptr);
 int abs(int j);
 long labs(long j);
 long long llabs(long long j);
+
+typedef struct { int quot; int rem; } div_t;
+typedef struct { long quot; long rem; } ldiv_t;
+typedef struct { long long quot; long long rem; } lldiv_t;
+div_t div(int numer, int denom);
+ldiv_t ldiv(long numer, long denom);
+lldiv_t lldiv(long long numer, long long denom);
 
 /* Searching and sorting.  The comparator is called through the
    module's indirect function table, as in the host layer. */

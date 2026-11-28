@@ -14,18 +14,19 @@ installed on the machine that runs it:
     own objects, copied from the installed glibc development
     files; libc.so/libm.so are stubs generated from the dynamic
     symbol tables of the installed libc.so.6/libm.so.6.
-  Android targets -- crtbegin_dynamic.o and crtend_android.o from
-    the NDK sysroot, copied in under the crt1.o/crtn.o names the
-    ELF linker looks up (the android compiler modules are built
-    without TARGETOS_ANDROID, so they use the generic ELF crt
-    names); crti.o is an empty object (bionic ships none).  The
-    libc.so/libm.so/libdl.so stubs mirror the NDK sysroot
-    libraries at API level 21.
-  Windows -- msvcrt.def/kernel32.def are TinyCC's own import
-    definition files from vendor-tinycc/win32/lib, copied verbatim.
-  Darwin -- libc.tbd is a text stub written by this script: the
-    install name of libSystem and the export names of the two
-    headers whose facilities it provides (math.h, tcclib.h).
+  Android targets -- every link input is copied verbatim
+    from the vendored NDK collection
+    (vendor-android/<triple>/<api>/lib, the same files the
+    native dist bundles): the crt objects under their own
+    names (crtbegin_dynamic.o/crtbegin_so.o/
+    crtbegin_static.o, crtend_android.o/crtend_so.o) and
+    libc.so/libm.so/libdl.so.
+  Windows -- the *.def import definition files are TinyCC's
+    own, from vendor-tinycc/win32/lib, copied verbatim.
+  Darwin -- the *.tbd text stubs are the vendored set from
+    vendor-darwin/lib, copied verbatim (the same files the
+    native dist bundles); this script verifies their exports
+    cover the shipped headers' declared function sets.
 
 Requirements: readelf and nm (binutils), and a clang with an lld
 that can link ELF shared objects for x86_64, aarch64 and riscv64
@@ -55,13 +56,9 @@ NDK_CLANG = os.environ.get(
     os.path.expanduser(
         "~/workspace/envs/android-toolchain/sdk/ndk/toolchains/"
         "llvm/prebuilt/linux-x86_64/bin/clang"))
-NDK_SYSROOT = os.path.expanduser(
-    "~/workspace/envs/android-toolchain/sdk/ndk/toolchains/"
-    "llvm/prebuilt/linux-x86_64/sysroot/usr/lib")
 X86_64_LIBDIR = os.environ.get("X86_64_LIBDIR", "/usr/lib/x86_64-linux-gnu")
 AARCH64_SYSROOT = os.environ.get("AARCH64_SYSROOT", "/usr/aarch64-linux-gnu")
 RISCV64_SYSROOT = os.environ.get("RISCV64_SYSROOT", "/usr/riscv64-linux-gnu")
-ANDROID_API = "21"
 
 GNU_TARGETS = {  # target -> (clang triple, crt dir, libc, libm)
     "x86_64-linux-gnu": ("x86_64-linux-gnu", X86_64_LIBDIR,
@@ -89,7 +86,14 @@ def run(cmd, **kw):
 
 def dynsyms(path):
     """Defined dynamic symbols of an ELF shared object:
-    {name: (kind, size)} with kind 'func' or 'obj'."""
+    {(name, version): (kind, size, is_default)} with kind 'func'
+    or 'obj'; version is None for an unversioned symbol. A name
+    the real library exports under several versions (glibc's
+    memcpy@@GLIBC_2.14 next to memcpy@GLIBC_2.2.5, bionic's
+    LIBC / LIBC_N / ... sets) yields one entry per version, so
+    the stub can carry the same symbol-version bindings: a
+    program linked against the stub must record the same
+    version references as one linked against the real library."""
     out = subprocess.run(
         ["readelf", "--dyn-syms", "-W", path],
         check=True, capture_output=True, text=True).stdout
@@ -105,7 +109,13 @@ def dynsyms(path):
             continue
         if typ == "TLS":
             continue  # a link stub cannot model thread-local storage
-        name = name.split("@")[0]
+        version = None
+        is_default = True
+        if "@@" in name:
+            name, version = name.split("@@", 1)
+        elif "@" in name:
+            name, version = name.split("@", 1)
+            is_default = False
         if not name or not re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*", name):
             raise SystemExit(f"unusable symbol name {name!r} in {path}")
         # An IFUNC is called through the PLT exactly like a plain
@@ -115,40 +125,118 @@ def dynsyms(path):
         # strcpy, strlen, memset and friends are IFUNCs).
         kind = "func" if typ in ("FUNC", "IFUNC") else "obj"
         size = int(size)
-        if name in syms:
-            okind, osize = syms[name]
+        key = (name, version)
+        if key in syms:
+            okind, osize, odef = syms[key]
             if okind == "func" or kind == "func":
                 kind = "func"
-            syms[name] = (kind, max(osize, size))
+            syms[key] = (kind, max(osize, size), odef or is_default)
         else:
-            syms[name] = (kind, size)
+            syms[key] = (kind, size, is_default)
     return syms
 
 
 def write_stub_asm(syms, path):
+    """Emit the stub's definitions. A symbol the real library
+    binds to a version is defined once per version under an
+    internal label, with .symver binding the label to the
+    public name and version: versions of one name can differ
+    in kind and size in the real library (glibc's sys_errlist
+    exists at four versions with four sizes), and a linker
+    copying the symbol into a product takes st_size from the
+    definition of the version it bound, so each version needs
+    its own definition carrying its own size. The matching
+    version nodes are declared by the version script
+    build_stub writes, so the stub's .gnu.version_d names the
+    same versions as the real library's."""
+    by_name = {}
+    for (name, version), (kind, size, is_default) in syms.items():
+        by_name.setdefault(name, []).append((version, kind, size, is_default))
     with open(path, "w") as f:
+        def emit(body_name, kind, size):
+            # Internal labels (the per-version bodies of a
+            # multi-version name) are defined global so .symver
+            # binds them, and the version script's
+            # `local: __tinyc_stub_*` keeps them out of the
+            # stub's .dynsym: only the versioned public names
+            # are exported, exactly the real library's set.
+            if kind == "func":
+                # The recorded size is the real library's: a
+                # linker copying this symbol into a product's
+                # .dynsym takes st_size from here, so it must
+                # match the real library's, not the stub's
+                # empty body.
+                f.write(f"\t.globl\t{body_name}\n"
+                        f"\t.type\t{body_name}, %function\n"
+                        f"{body_name}:\n\t.size\t{body_name}, {size}\n")
+            else:
+                f.write(f"\t.globl\t{body_name}\n"
+                        f"\t.type\t{body_name}, %object\n"
+                        f"\t.p2align\t3\n{body_name}:\n"
+                        f"\t.zero\t{max(size, 8)}\n"
+                        f"\t.size\t{body_name}, {size}\n")
         f.write("\t.text\n")
-        for name in sorted(syms):
-            if syms[name][0] != "func":
-                continue
-            f.write(f"\t.globl\t{name}\n\t.type\t{name}, %function\n"
-                    f"{name}:\n\t.size\t{name}, 0\n")
-        f.write("\t.section .bss.stub,\"aw\",%nobits\n")
-        for name in sorted(syms):
-            kind, size = syms[name]
-            if kind != "obj":
-                continue
-            size = max(size, 8)
-            f.write(f"\t.globl\t{name}\n\t.type\t{name}, %object\n"
-                    f"\t.p2align\t3\n{name}:\n\t.zero\t{size}\n"
-                    f"\t.size\t{name}, {size}\n")
+        # Function bodies first (the .text above), then object
+        # bodies in their .bss section; two passes over the
+        # same plan keep the sections contiguous.
+        plan = []
+        for name in sorted(by_name):
+            entries = by_name[name]
+            versions = sorted((e for e in entries if e[0] is not None),
+                              key=lambda e: e[0])
+            bare = [e for e in entries if e[0] is None]
+            for i, (version, kind, size, is_default) in enumerate(versions):
+                # The public name itself carries the definition
+                # only for a lone default version with no bare
+                # entry next to it; every other versioned entry
+                # gets an internal label, so no name is defined
+                # twice.
+                if len(versions) == 1 and is_default and not bare:
+                    label = name
+                else:
+                    label = f"__tinyc_stub_{name}_{i}"
+                plan.append((label, name, version, kind, size, is_default))
+            if bare:
+                _v, kind, size, _d = bare[0]
+                plan.append((name, name, None, kind, size, True))
+        for want in ("func", "obj"):
+            if want == "obj":
+                f.write("\t.section .bss.stub,\"aw\",%nobits\n")
+            for label, name, version, kind, size, is_default in plan:
+                if kind != want:
+                    continue
+                if label == name and version is None:
+                    emit(name, kind, size)
+                elif label == name:
+                    emit(name, kind, size)
+                    mark = "@@" if is_default else "@"
+                    f.write(f"\t.symver\t{name},{name}{mark}{version}\n")
+                else:
+                    emit(label, kind, size)
+                    mark = "@@" if is_default else "@"
+                    f.write(f"\t.symver\t{label},{name}{mark}{version}\n")
+    return sorted({v for vs in by_name.values() for v, *_ in vs if v})
 
 
 def build_stub(triple, syms, soname, out):
     asm = os.path.join(WORK, os.path.basename(out) + "." + triple + ".s")
-    write_stub_asm(syms, asm)
-    run([NDK_CLANG, "-target", triple, "-nostdlib", "-shared",
-         "-Wl,-soname," + soname, asm, "-o", out])
+    versions = write_stub_asm(syms, asm)
+    cmd = [NDK_CLANG, "-target", triple, "-nostdlib", "-shared",
+           "-Wl,-soname," + soname, asm, "-o", out]
+    if versions:
+        vscript = os.path.join(
+            WORK, os.path.basename(out) + "." + triple + ".ver")
+        by_version = {}
+        for (name, version) in syms:
+            if version is not None:
+                by_version.setdefault(version, []).append(name)
+        with open(vscript, "w") as f:
+            for version in versions:
+                names = "; ".join(sorted(set(by_version[version])))
+                f.write(f"{version} {{ global: {names}; "
+                        f"local: __tinyc_stub_*; }};\n")
+        cmd.insert(-2, "-Wl,--version-script," + vscript)
+    run(cmd)
 
 
 DECL = re.compile(
@@ -216,63 +304,88 @@ def gen_gnu(target, triple, crt_dir, libc, libm, math_set, tcclib_set):
             (libc, "libc.so", "libc.so.6"), (libm, "libm.so", "libm.so.6")):
         syms = dynsyms(real)
         build_stub(triple, syms, soname, os.path.join(outdir, stub_name))
-        exports.update(syms)
+        exports.update(dict.fromkeys(name for name, _version in syms))
     check(target, set(exports), math_set, tcclib_set, crt_undefs)
 
 
 def gen_android(target, triple, arch, math_set, tcclib_set):
     outdir = os.path.join(HERE, target)
     os.makedirs(outdir, exist_ok=True)
-    libdir = os.path.join(NDK_SYSROOT, arch, ANDROID_API)
-    crt1 = os.path.join(libdir, "crtbegin_dynamic.o")
-    shutil.copyfile(crt1, os.path.join(outdir, "crt1.o"))
-    shutil.copyfile(os.path.join(libdir, "crtend_android.o"),
-                    os.path.join(outdir, "crtn.o"))
-    empty = os.path.join(WORK, "empty.s")
-    with open(empty, "w") as f:
-        f.write("")
-    run([NDK_CLANG, "-target", triple, "-c", empty,
-         "-o", os.path.join(outdir, "crti.o")])
-    crt_undefs = undefined_syms(crt1)
+    # Every link input is copied verbatim from the vendored NDK
+    # collection at the API level the native dist is built with
+    # (build.sh's TINYC_ANDROID_API, default 30): the dist
+    # bundles the same files, so the browser sysroot's Android
+    # link inputs are the dist's, byte for byte. The compiler's
+    # crt search names the bionic files directly (tccelf.c's
+    # TARGETOS_ANDROID branches): crtbegin_dynamic.o /
+    # crtbegin_so.o at the start of an exe / shared-library
+    # link, crtend_android.o / crtend_so.o at the end;
+    # crtbegin_static.o is the static-link variant of the same
+    # set. libc.so / libm.so / libdl.so are the sysroot's own
+    # link-time libraries.
+    dist_api = os.environ.get("TINYC_ANDROID_API", "30")
+    libdir = os.path.join(REPO, "vendor-android", target, dist_api, "lib")
+    crt_undefs = set()
+    for name in sorted(os.listdir(libdir)):
+        src = os.path.join(libdir, name)
+        shutil.copyfile(src, os.path.join(outdir, name))
+        if name.startswith("crtbegin"):
+            crt_undefs |= undefined_syms(src)
     exports = {}
     for lib in ("libc.so", "libm.so", "libdl.so"):
         syms = dynsyms(os.path.join(libdir, lib))
-        build_stub(triple, syms, lib, os.path.join(outdir, lib))
-        exports.update(syms)
+        exports.update(dict.fromkeys(name for name, _version in syms))
     check(target, set(exports), math_set, tcclib_set, crt_undefs)
 
 
-# The facilities math.h and tcclib.h declare that the Windows C
-# runtime (msvcrt.dll) does not export -- the C99 math additions,
-# the long double forms, snprintf/vsnprintf and the dl* quartet
-# among them -- are why those two headers are not shipped for
-# x86_64-windows; see README.md.  The .def files themselves are
-# TinyCC's own, copied verbatim: they cover the hosted link of the
-# remaining headers (the C89 core, stdio and the string functions
-# are all in msvcrt.dll).
+# The .def files are TinyCC's own import definitions, copied
+# verbatim: they cover the hosted link against the Windows
+# system libraries (the C89 core, stdio and the string
+# functions are all in msvcrt.dll). Facilities the headers
+# declare that msvcrt.dll does not export -- the C99 math
+# additions, the long double forms, snprintf/vsnprintf and the
+# dl* quartet among them -- fail to link here exactly as they
+# do against the native Windows sysroot, whose .def files are
+# the same ones.
 def gen_windows():
     outdir = os.path.join(HERE, "x86_64-windows")
     os.makedirs(outdir, exist_ok=True)
-    for name in ("msvcrt.def", "kernel32.def"):
-        shutil.copyfile(
-            os.path.join(REPO, "vendor-tinycc", "win32", "lib", name),
-            os.path.join(outdir, name))
+    libdir = os.path.join(REPO, "vendor-tinycc", "win32", "lib")
+    for name in sorted(os.listdir(libdir)):
+        if name.endswith(".def"):
+            shutil.copyfile(os.path.join(libdir, name),
+                            os.path.join(outdir, name))
     print("x86_64-windows: def files copied")
 
 
 def gen_darwin(target, math_set, tcclib_set):
     outdir = os.path.join(HERE, target)
     os.makedirs(outdir, exist_ok=True)
-    syms = sorted("_" + n for n in (math_set | tcclib_set) - LIBTCC1_PROVIDED)
-    with open(os.path.join(outdir, "libc.tbd"), "w") as f:
-        f.write("--- !tapi-tbd\n")
-        f.write("tbd-version: 4\n")
-        f.write("targets: [ x86_64-macos, arm64-macos ]\n")
-        f.write("install-name: /usr/lib/libSystem.B.dylib\n")
-        f.write("exports:\n  - symbols: [ ")
-        f.write(", ".join(syms))
-        f.write(" ]\n")
-    print(f"{target}: libc.tbd written ({len(syms)} symbols)")
+    # The .tbd stubs are the vendored set the native dist bundles
+    # (mac-test-bundle/darwin-dist.py copies vendor-darwin/lib's
+    # *.tbd into the dist verbatim); copy them the same way, and
+    # verify the shipped headers' declared sets are covered by
+    # their exports, the check the earlier hand-written single
+    # stub was generated to pass.
+    lib_src = os.path.join(REPO, "vendor-darwin", "lib")
+    tbds = sorted(f for f in os.listdir(lib_src) if f.endswith(".tbd"))
+    if not tbds:
+        raise SystemExit(f"no .tbd stubs in {lib_src}")
+    exports = set()
+    for name in tbds:
+        text = open(os.path.join(lib_src, name)).read()
+        exports |= set(re.findall(r"(?<![A-Za-z0-9_])_[A-Za-z0-9_]+", text))
+        shutil.copyfile(os.path.join(lib_src, name),
+                        os.path.join(outdir, name))
+    want = {"_" + n for n in (math_set | tcclib_set) - LIBTCC1_PROVIDED}
+    missing = sorted(want - exports)
+    if missing:
+        raise SystemExit(
+            f"{target}: vendored .tbd stubs do not cover declared "
+            f"symbols: {' '.join(missing)}")
+    print(f"{target}: {len(tbds)} .tbd stubs copied from "
+          f"vendor-darwin/lib ({len(exports)} exports, declared "
+          f"sets covered)")
 
 
 def main():

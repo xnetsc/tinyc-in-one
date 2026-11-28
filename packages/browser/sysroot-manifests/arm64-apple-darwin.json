@@ -6,20 +6,164 @@
   "includeDir": "/sysroot/include",
   "includeFiles": [
     {
+      "path": "/sysroot/include/arm_neon.h",
+      "source": "include/arm_neon.h"
+    },
+    {
+      "path": "/sysroot/include/arpa/inet.h",
+      "source": "include/arpa/inet.h"
+    },
+    {
+      "path": "/sysroot/include/assert.h",
+      "source": "include/assert.h"
+    },
+    {
+      "path": "/sysroot/include/avx2intrin.h",
+      "source": "include/avx2intrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512bwintrin.h",
+      "source": "include/avx512bwintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512cdintrin.h",
+      "source": "include/avx512cdintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512dqintrin.h",
+      "source": "include/avx512dqintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512fintrin.h",
+      "source": "include/avx512fintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vbmiintrin.h",
+      "source": "include/avx512vbmiintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vlintrin.h",
+      "source": "include/avx512vlintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vnniintrin.h",
+      "source": "include/avx512vnniintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avxintrin.h",
+      "source": "include/avxintrin.h"
+    },
+    {
+      "path": "/sysroot/include/ctype.h",
+      "source": "include/ctype.h"
+    },
+    {
+      "path": "/sysroot/include/dirent.h",
+      "source": "include/dirent.h"
+    },
+    {
+      "path": "/sysroot/include/dispatch/dispatch.h",
+      "source": "include/dispatch/dispatch.h"
+    },
+    {
+      "path": "/sysroot/include/dlfcn.h",
+      "source": "include/dlfcn.h"
+    },
+    {
+      "path": "/sysroot/include/emmintrin.h",
+      "source": "include/emmintrin.h"
+    },
+    {
+      "path": "/sysroot/include/errno.h",
+      "source": "include/errno.h"
+    },
+    {
+      "path": "/sysroot/include/f16cintrin.h",
+      "source": "include/f16cintrin.h"
+    },
+    {
+      "path": "/sysroot/include/fcntl.h",
+      "source": "include/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/fenv.h",
+      "source": "include/fenv.h"
+    },
+    {
       "path": "/sysroot/include/float.h",
       "source": "include/float.h"
+    },
+    {
+      "path": "/sysroot/include/fmaintrin.h",
+      "source": "include/fmaintrin.h"
+    },
+    {
+      "path": "/sysroot/include/immintrin.h",
+      "source": "include/immintrin.h"
+    },
+    {
+      "path": "/sysroot/include/inttypes.h",
+      "source": "include/inttypes.h"
     },
     {
       "path": "/sysroot/include/iso646.h",
       "source": "include/iso646.h"
     },
     {
+      "path": "/sysroot/include/libgen.h",
+      "source": "include/libgen.h"
+    },
+    {
       "path": "/sysroot/include/limits.h",
       "source": "include/limits.h"
     },
     {
+      "path": "/sysroot/include/locale.h",
+      "source": "include/locale.h"
+    },
+    {
       "path": "/sysroot/include/math.h",
       "source": "include/math.h"
+    },
+    {
+      "path": "/sysroot/include/netdb.h",
+      "source": "include/netdb.h"
+    },
+    {
+      "path": "/sysroot/include/netinet/in.h",
+      "source": "include/netinet/in.h"
+    },
+    {
+      "path": "/sysroot/include/netinet/tcp.h",
+      "source": "include/netinet/tcp.h"
+    },
+    {
+      "path": "/sysroot/include/pthread.h",
+      "source": "include/pthread.h"
+    },
+    {
+      "path": "/sysroot/include/riscv_vector.h",
+      "source": "include/riscv_vector.h"
+    },
+    {
+      "path": "/sysroot/include/runetype.h",
+      "source": "include/runetype.h"
+    },
+    {
+      "path": "/sysroot/include/sched.h",
+      "source": "include/sched.h"
+    },
+    {
+      "path": "/sysroot/include/setjmp.h",
+      "source": "include/setjmp.h"
+    },
+    {
+      "path": "/sysroot/include/signal.h",
+      "source": "include/signal.h"
+    },
+    {
+      "path": "/sysroot/include/smmintrin.h",
+      "source": "include/smmintrin.h"
     },
     {
       "path": "/sysroot/include/stdalign.h",
@@ -46,24 +190,116 @@
       "source": "include/stdint.h"
     },
     {
+      "path": "/sysroot/include/stdio.h",
+      "source": "include/stdio.h"
+    },
+    {
+      "path": "/sysroot/include/stdlib.h",
+      "source": "include/stdlib.h"
+    },
+    {
       "path": "/sysroot/include/stdnoreturn.h",
       "source": "include/stdnoreturn.h"
+    },
+    {
+      "path": "/sysroot/include/string.h",
+      "source": "include/string.h"
+    },
+    {
+      "path": "/sysroot/include/strings.h",
+      "source": "include/strings.h"
+    },
+    {
+      "path": "/sysroot/include/sys/mman.h",
+      "source": "include/sys/mman.h"
+    },
+    {
+      "path": "/sysroot/include/sys/resource.h",
+      "source": "include/sys/resource.h"
+    },
+    {
+      "path": "/sysroot/include/sys/socket.h",
+      "source": "include/sys/socket.h"
+    },
+    {
+      "path": "/sysroot/include/sys/stat.h",
+      "source": "include/sys/stat.h"
+    },
+    {
+      "path": "/sysroot/include/sys/syscall.h",
+      "source": "include/sys/syscall.h"
+    },
+    {
+      "path": "/sysroot/include/sys/time.h",
+      "source": "include/sys/time.h"
+    },
+    {
+      "path": "/sysroot/include/sys/types.h",
+      "source": "include/sys/types.h"
+    },
+    {
+      "path": "/sysroot/include/sys/ucontext.h",
+      "source": "include/sys/ucontext.h"
+    },
+    {
+      "path": "/sysroot/include/sys/uio.h",
+      "source": "include/sys/uio.h"
+    },
+    {
+      "path": "/sysroot/include/sys/wait.h",
+      "source": "include/sys/wait.h"
     },
     {
       "path": "/sysroot/include/tccdefs.h",
       "source": "include/tccdefs.h"
     },
     {
+      "path": "/sysroot/include/tcclib.h",
+      "source": "tcclib.h"
+    },
+    {
       "path": "/sysroot/include/tgmath.h",
       "source": "include/tgmath.h"
+    },
+    {
+      "path": "/sysroot/include/threads.h",
+      "source": "include/threads.h"
+    },
+    {
+      "path": "/sysroot/include/time.h",
+      "source": "include/time.h"
+    },
+    {
+      "path": "/sysroot/include/tmmintrin.h",
+      "source": "include/tmmintrin.h"
+    },
+    {
+      "path": "/sysroot/include/uchar.h",
+      "source": "include/uchar.h"
+    },
+    {
+      "path": "/sysroot/include/unistd.h",
+      "source": "include/unistd.h"
+    },
+    {
+      "path": "/sysroot/include/utime.h",
+      "source": "include/utime.h"
     },
     {
       "path": "/sysroot/include/varargs.h",
       "source": "include/varargs.h"
     },
     {
-      "path": "/sysroot/include/tcclib.h",
-      "source": "tcclib.h"
+      "path": "/sysroot/include/wchar.h",
+      "source": "include/wchar.h"
+    },
+    {
+      "path": "/sysroot/include/wctype.h",
+      "source": "include/wctype.h"
+    },
+    {
+      "path": "/sysroot/include/xmmintrin.h",
+      "source": "include/xmmintrin.h"
     }
   ],
   "libDir": "/sysroot/lib",
@@ -75,8 +311,28 @@
     },
     {
       "binary": true,
+      "path": "/sysroot/lib/libSystem.tbd",
+      "source": "lib/arm64-apple-darwin/libSystem.tbd"
+    },
+    {
+      "binary": true,
       "path": "/sysroot/lib/libc.tbd",
       "source": "lib/arm64-apple-darwin/libc.tbd"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libdl.tbd",
+      "source": "lib/arm64-apple-darwin/libdl.tbd"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libm.tbd",
+      "source": "lib/arm64-apple-darwin/libm.tbd"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/libpthread.tbd",
+      "source": "lib/arm64-apple-darwin/libpthread.tbd"
     }
   ],
   "outputs": {
@@ -97,5 +353,6 @@
       "ext": ".a"
     }
   },
-  "systemHeaders": "user-sdk"
+  "systemHeaders": "user-sdk",
+  "libcIncludeRoot": "vendor-darwin/include"
 }

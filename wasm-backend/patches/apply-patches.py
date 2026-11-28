@@ -531,6 +531,105 @@ PATCHES = [
      "    if (s->nb_sections == 0)\n"
      "        tccelf_new(s);",
      1),
+    # libtcc1's di3 helper section (the __divdi3 / __moddi3 /
+    # __udivdi3 / __umoddi3 family and the variable-count 64-bit
+    # shifts) is compiled only for __i386__, where the four
+    # longlong.h primitives it is built from are inline asm.
+    # wasm32 code generation emits calls to exactly these helpers
+    # for long long division, remainder and variable shifts, and
+    # the wasm sysroot carries no native libtcc1 archive a product
+    # could link: enable the section for __wasm32__ too, with the
+    # four primitives defined in plain C.  The wasm backend
+    # performs 64-bit add/subtract/multiply and constant-count
+    # shifts natively, and 32-bit shifts natively, so sub_ddmmss
+    # and umul_ppmm reduce to native operations; udiv_qrnnd is a
+    # binary long division because a 64-bit divide inside it
+    # would recurse into __udivmoddi4 itself.
+    ("lib/libtcc1.c",
+     "/* XXX: we don't support several builtin supports for now */\n"
+     "#if defined __i386__\n",
+     "/* XXX: we don't support several builtin supports for now */\n"
+     "#if defined __i386__ || defined __wasm32__\n",
+     1),
+    ("lib/libtcc1.c",
+     "/* XXX: use gcc/tcc intrinsic ? */\n"
+     "#define sub_ddmmss(sh, sl, ah, al, bh, bl) \\",
+     "#if defined __wasm32__\n"
+     "/* wasm32 has no inline asm: the four longlong.h primitives\n"
+     "   the di3 routines below are built from, in plain C (see\n"
+     "   the patch comment in apply-patches.py).  The argument\n"
+     "   values are snapshotted before any result is stored: the\n"
+     "   call sites pass slots that are also result targets. */\n"
+     "#define sub_ddmmss(sh, sl, ah, al, bh, bl) \\\n"
+     "  do { \\\n"
+     "    UDWtype _a = ((UDWtype) (UWtype) (ah) << 32) | (UWtype) (al); \\\n"
+     "    UDWtype _b = ((UDWtype) (UWtype) (bh) << 32) | (UWtype) (bl); \\\n"
+     "    UDWtype _d = _a - _b; \\\n"
+     "    (sh) = (UWtype) (_d >> 32); \\\n"
+     "    (sl) = (UWtype) _d; \\\n"
+     "  } while (0)\n"
+     "#define umul_ppmm(w1, w0, u, v) \\\n"
+     "  do { \\\n"
+     "    UDWtype _p = (UDWtype) (UWtype) (u) * (UWtype) (v); \\\n"
+     "    (w1) = (UWtype) (_p >> 32); \\\n"
+     "    (w0) = (UWtype) _p; \\\n"
+     "  } while (0)\n"
+     "#define udiv_qrnnd(q, r, n1, n0, dv) \\\n"
+     "  do { \\\n"
+     "    UWtype _dv = (UWtype) (dv); \\\n"
+     "    UDWtype _rem = (UWtype) (n1); \\\n"
+     "    UWtype _n0 = (UWtype) (n0); \\\n"
+     "    UWtype _q = 0; \\\n"
+     "    int _i; \\\n"
+     "    for (_i = 31; _i >= 0; _i--) { \\\n"
+     "      _rem = (_rem << 1) | ((_n0 >> _i) & 1); \\\n"
+     "      if (_rem >= _dv) { _rem -= _dv; _q |= (UWtype) 1 << _i; } \\\n"
+     "    } \\\n"
+     "    (q) = _q; \\\n"
+     "    (r) = (UWtype) _rem; \\\n"
+     "  } while (0)\n"
+     "#define count_leading_zeros(count, x) \\\n"
+     "  do { \\\n"
+     "    UWtype _x = (UWtype) (x); \\\n"
+     "    int _c = 0; \\\n"
+     "    if (_x == 0) _c = 32; \\\n"
+     "    else while ((_x & 0x80000000u) == 0) { _x <<= 1; _c++; } \\\n"
+     "    (count) = _c; \\\n"
+     "  } while (0)\n"
+     "#else\n"
+     "/* XXX: use gcc/tcc intrinsic ? */\n"
+     "#define sub_ddmmss(sh, sl, ah, al, bh, bl) \\",
+     1),
+    ("lib/libtcc1.c",
+     "/* most of this code is taken from libgcc2.c from gcc */",
+     "#endif /* __wasm32__ */\n"
+     "\n"
+     "/* most of this code is taken from libgcc2.c from gcc */",
+     1),
+    # greloca hook: the wasm backend interns a function the
+    # moment a data relocation names it (a function-pointer
+    # initializer), so standalone output can give it an import
+    # slot and a table index even when nothing calls it.  The
+    # declaration and the call are wasm-target only.
+    ("tcc.h",
+     "ST_FUNC void greloca(Section *s, Sym *sym, unsigned long offset, int type, addr_t addend);\n",
+     "ST_FUNC void greloca(Section *s, Sym *sym, unsigned long offset, int type, addr_t addend);\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "ST_FUNC void wasm_greloca_hook(Sym *sym);\n"
+     "#endif\n",
+     1),
+    ("tccgen.c",
+     "    /* now we can add ELF relocation info */\n"
+     "    put_elf_reloca(symtab_section, s, offset, type, c, addend);\n"
+     "}",
+     "    /* now we can add ELF relocation info */\n"
+     "    put_elf_reloca(symtab_section, s, offset, type, c, addend);\n"
+     "#ifdef TCC_TARGET_WASM32\n"
+     "    if (type == R_DATA_PTR)\n"
+     "        wasm_greloca_hook(sym);\n"
+     "#endif\n"
+     "}",
+     1),
 ]
 
 for fname, old, new, count in PATCHES:

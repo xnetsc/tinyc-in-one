@@ -26,47 +26,15 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); }
 
 "$TC" "$ROOT/tests/default_libs.c" -lpcre2 -lmbedcrypto \
     -o "$TMP/battery1" || { fail "battery1 build"; exit 1; }
-# libcurl is linked whole-archive: the mac-host link drops
-# archive members that are only referenced from the static
-# protocols table in url.c (ws/wss and the other table-only
-# handlers have no code reference anywhere, so the normal
-# archive pull never sees them and the linked binary has no
-# ws handler even though libcurl.a does). Pulling the whole
-# archive makes every handler present; the -no-whole-archive
-# after -lcurl keeps mbedTLS on the normal pull.
-# Echo the link command: whether -Wl,-whole-archive actually
-# reaches the link is itself evidence (earlier rounds had no
-# link command in any log, so the flag's effect could not be
-# confirmed). -vv lists every archive member the link loads,
-# which is the decisive next datum: if ws.o/url.o load but the
-# binary still lacks them, the fault is in the Mach-O output;
-# if they never load, it is in the archive loading on the
-# mac-host compiler.
-echo "link battery2: $TC $ROOT/tests/default_libs_net.c -Wl,-whole-archive -lcurl -Wl,-no-whole-archive -lmbedtls -lmbedx509 -lmbedcrypto -o $TMP/battery2"
-"$TC" -vv "$ROOT/tests/default_libs_net.c" \
-    -Wl,-whole-archive -lcurl -Wl,-no-whole-archive \
-    -lmbedtls -lmbedx509 -lmbedcrypto \
-    -o "$TMP/battery2" || { fail "battery2 build"; exit 1; }
-"$TC" "$ROOT/tests/default_libs_tlsserve.c" \
-    -lmbedtls -lmbedx509 -lmbedcrypto \
-    -o "$TMP/tlsserve" || { fail "tlsserve build"; exit 1; }
-"$TC" "$ROOT/tests/default_libs_httpsget.c" \
-    -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
-    -o "$TMP/httpsget" || { fail "httpsget build"; exit 1; }
-pass "battery programs build"
-
-# The ws handler lives in a perfect-hash table emitted as
-# chained fixups; dump it so a "ws not supported" failure
-# shows whether the table itself lost the handler.
-if command -v python3 >/dev/null 2>&1; then
-    python3 "$ROOT/tests/macos/check_protocols_table.py" "$TMP/battery2" || true
-fi
-
 # Independent check with the system nm: whether the ws handler
-# symbols are in the staged archive at all, and whether they
-# survived into the linked battery. A handler present in the
-# archive but missing from the binary points at the link/table;
-# absent from the archive points at the library build.
+# symbols are in the staged archive at all. This runs BEFORE
+# the battery2 link on purpose: it only needs libcurl.a, so it
+# still reports the archive side even when the link itself
+# fails below (previously the whole diagnostics block sat after
+# the builds and never ran once the link failed, so a link
+# failure also erased the archive evidence). A handler present
+# in the archive but missing from the binary points at the
+# link; absent from the archive points at the library build.
 # Diagnostic only (|| true): never fails the step itself.
 if command -v nm >/dev/null 2>&1; then
     echo "--- ws symbols (nm) ---"
@@ -80,12 +48,60 @@ if command -v nm >/dev/null 2>&1; then
         nm "$CURLA" 2>/dev/null | grep -E 'Curl_handler_ws|_protocols' \
             || echo "nm: no Curl_handler_ws/_protocols in libcurl.a"
     done
+fi
+
+# libcurl is linked whole-archive, and the link must resolve
+# -lcurl to the staged libcurl.a: the linker's form-major
+# search used to let the macOS SDK's libcurl.tbd shadow the
+# staged archive, so earlier rounds silently linked the system
+# libcurl (whose "ws not supported" was misread as the archive
+# pull dropping ws.o -- the staged archive was never in the
+# binary at all). The search is directory-major now, so the
+# dist's lib directory wins over the SDK path; -vv below lists
+# every archive member the link loads, which is the decisive
+# check that the staged archive is the one being linked.
+# Echo the link command: whether -Wl,-whole-archive actually
+# reaches the link is itself evidence. The -no-whole-archive
+# after -lcurl keeps mbedTLS on the normal pull.
+echo "link battery2: $TC $ROOT/tests/default_libs_net.c -Wl,-whole-archive -lcurl -Wl,-no-whole-archive -lmbedtls -lmbedx509 -lmbedcrypto -o $TMP/battery2"
+"$TC" -vv "$ROOT/tests/default_libs_net.c" \
+    -Wl,-whole-archive -lcurl -Wl,-no-whole-archive \
+    -lmbedtls -lmbedx509 -lmbedcrypto \
+    -o "$TMP/battery2" || fail "battery2 build"
+"$TC" "$ROOT/tests/default_libs_tlsserve.c" \
+    -lmbedtls -lmbedx509 -lmbedcrypto \
+    -o "$TMP/tlsserve" || fail "tlsserve build"
+"$TC" "$ROOT/tests/default_libs_httpsget.c" \
+    -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
+    -o "$TMP/httpsget" || fail "httpsget build"
+# A failed build above is recorded, not fatal: the remaining
+# diagnostics and interop legs still run (they need tlsserve /
+# httpsget, not battery2), and the final exit status is the
+# FAIL count. Exiting at the first failed build used to erase
+# all of the downstream evidence in the same round.
+[ "$FAIL" -eq 0 ] && pass "battery programs build"
+
+# The ws handler lives in a perfect-hash table emitted as
+# chained fixups; dump it so a "ws not supported" failure
+# shows whether the table itself lost the handler. Needs the
+# linked binary; skip when the link failed.
+if [ -x "$TMP/battery2" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT/tests/macos/check_protocols_table.py" "$TMP/battery2" || true
+fi
+
+# Same for the linked binary's own symbols (the archive half of
+# this check already ran above, before the link).
+if [ -x "$TMP/battery2" ] && command -v nm >/dev/null 2>&1; then
     nm "$TMP/battery2" 2>/dev/null | grep -E 'Curl_handler_ws|_protocols' \
         || echo "nm: no Curl_handler_ws/_protocols in battery2"
 fi
 
 "$TMP/battery1" && pass "battery1 run" || fail "battery1 run"
-"$TMP/battery2" && pass "battery2 run" || fail "battery2 run"
+if [ -x "$TMP/battery2" ]; then
+    "$TMP/battery2" && pass "battery2 run" || fail "battery2 run"
+else
+    echo "battery2 run skipped: no binary (link failed)"
+fi
 
 CERT=$TMP/cert
 mkdir -p "$CERT"

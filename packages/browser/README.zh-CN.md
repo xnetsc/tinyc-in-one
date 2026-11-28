@@ -43,14 +43,14 @@ const tinyc = await loadTinyc({ target: 'x86_64-linux-gnu', sysroot: true });
 
 目标的模块以一份资产信封文件出货（`tcc-<target>.tinyc.js`：胶水源码加模块字节），按需加载——只取请求目标的那一份信封，每个页面至多取一次。不同目标的实例可共存；每个实例有自己的虚拟文件系统与自己的 sysroot 清单（`sysroot-manifests/<target>.json`；顶层的 `sysroot-manifest.json` 是缺省目标的清单）。未知目标会被拒绝，并列出支持的清单。
 
-`sysroot: true` 把该目标自带的头文件集合（TCC 自带头：`float.h`、`stdarg.h`、`stddef.h`、`stdbool.h`、`tcclib.h`，以及该目标清单里的其余头）加载进虚拟文件系统的 `/sysroot/include` 并注册为 include 目录。自定义清单可以以 `{ manifest, baseUrl }` 传入。
+`sysroot: true` 把该目标自带的头文件集合（TCC 自带头——`float.h`、`stdarg.h`、`stddef.h`、`stdbool.h`、`tcclib.h`——加上该目标的 libc 头树，即原生构建随包的那棵树）加载进虚拟文件系统的 `/sysroot/include` 并注册为 include 目录。自定义清单可以以 `{ manifest, baseUrl }` 传入。
 
-sysroot 还在 `/sysroot/lib` 下带该目标的链接期输入：`libtcc1.a`（编译器运行时），以及按目标而定的平台 C 运行时启动对象与每个系统库的 stub 共享库（ELF 目标）、导入定义文件（Windows）或文本 stub（Darwin）——来源与许可见 `sysroot-lib/README.md`。因此 hosted 链接（除 `wasm32-wasi` 外每个目标的缺省形态）产出的是动态链接程序：产物按名引用平台自身的库——`libc.so.6`/`libm.so.6`、bionic 的库、`msvcrt.dll`/`kernel32.dll`、`libSystem`——运行时由平台的加载器与库服务。`x86_64-windows` 的 sysroot 不带 `math.h`、`tgmath.h`、`tcclib.h`：这三个头声明的、超出其余头集的设施不是 `msvcrt.dll` 的导出，而 Windows 产物绑定的正是这个 C 运行时。
+sysroot 还在 `/sysroot/lib` 下带该目标的链接期输入：`libtcc1.a`（编译器运行时），以及按目标而定的平台 C 运行时启动对象与每个系统库的 stub 共享库（ELF 目标）、导入定义文件（Windows）或文本 stub（Darwin）——来源与许可见 `sysroot-lib/README.md`。因此 hosted 链接（除 `wasm32-wasi` 外每个目标的缺省形态）产出的是动态链接程序：产物按名引用平台自身的库——`libc.so.6`/`libm.so.6`、bionic 的库、`msvcrt.dll`/`kernel32.dll`、`libSystem`——运行时由平台的加载器与库服务。
 
 各目标清单的特有事实：
 
 - Android 清单描述的是原生 Android 构建的 bionic sysroot 布局：`libc: "bionic"`、`androidApi: 30`、`dynamicLinker: "/system/bin/linker64"`（64 位 Android ELF 产物的解释器）。
-- Darwin 清单只含 TCC 自带头。macOS 系统 SDK 头受许可限制、不随包分发；清单以 `systemHeaders: "user-sdk"` 标记这一点，系统头由使用者加进虚拟文件系统并注册其目录来提供（见*虚拟文件系统与添加文件*）。Darwin 目标只能编译成文件；Mach-O 产物要在 Apple Silicon 上运行需要代码签名——至少是 ad-hoc 签名——无论它在哪里编译。
+- Darwin 清单带 TCC 自带头加上本包的 Darwin 头集——与原生构建随包的头相同。完整的 macOS SDK 头受许可限制、不随包分发；清单以 `systemHeaders: "user-sdk"` 标记这一点，随包头集之外的 SDK 头由使用者加进虚拟文件系统并注册其目录来提供（见*虚拟文件系统与添加文件*）。Darwin 目标只能编译成文件；Mach-O 产物要在 Apple Silicon 上运行需要代码签名——至少是 ad-hoc 签名——无论它在哪里编译。
 
 ## 输出格式
 

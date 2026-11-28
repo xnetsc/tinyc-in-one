@@ -132,6 +132,7 @@ extern "C" {
   clock_t __cdecl clock(void);
   _CRTIMP double __cdecl _difftime32(__time32_t _Time1,__time32_t _Time2);
   _CRTIMP struct tm *__cdecl _gmtime32(const __time32_t *_Time);
+  _CRTIMP errno_t __cdecl _gmtime32_s(struct tm *_Tm,const __time32_t *_Time);
   _CRTIMP struct tm *__cdecl _localtime32(const __time32_t *_Time);
   size_t __cdecl strftime(char *_Buf,size_t _SizeInBytes,const char *_Format,const struct tm *_Tm);
   _CRTIMP size_t __cdecl _strftime_l(char *_Buf,size_t _Max_size,const char *_Format,const struct tm *_Tm,_locale_t _Locale);
@@ -150,6 +151,7 @@ extern "C" {
   double __cdecl _difftime64(__time64_t _Time1,__time64_t _Time2);
   _CRTIMP char *__cdecl _ctime64(const __time64_t *_Time);
   _CRTIMP struct tm *__cdecl _gmtime64(const __time64_t *_Time);
+  _CRTIMP errno_t __cdecl _gmtime64_s(struct tm *_Tm,const __time64_t *_Time);
   _CRTIMP struct tm *__cdecl _localtime64(const __time64_t *_Time);
   _CRTIMP __time64_t __cdecl _mktime64(struct tm *_Tm);
   _CRTIMP __time64_t __cdecl _mkgmtime64(struct tm *_Tm);
@@ -232,6 +234,7 @@ __CRT_INLINE time_t __cdecl time(time_t *_Time) { return _time32(_Time); }
 __CRT_INLINE double __cdecl difftime(time_t _Time1,time_t _Time2) { return _difftime64(_Time1,_Time2); }
 __CRT_INLINE char *__cdecl ctime(const time_t *_Time) { return _ctime64(_Time); }
 __CRT_INLINE struct tm *__cdecl gmtime(const time_t *_Time) { return _gmtime64(_Time); }
+__CRT_INLINE errno_t __cdecl gmtime_s(struct tm *_Tm,const time_t *_Time) { return _gmtime64_s(_Tm,_Time); }
 __CRT_INLINE struct tm *__cdecl localtime(const time_t *_Time) { return _localtime64(_Time); }
 __CRT_INLINE time_t __cdecl mktime(struct tm *_Tm) { return _mktime64(_Tm); }
 __CRT_INLINE time_t __cdecl _mkgmtime(struct tm *_Tm) { return _mkgmtime64(_Tm); }

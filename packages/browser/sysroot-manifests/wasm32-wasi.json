@@ -6,6 +6,10 @@
  "includeDir": "/sysroot/include",
  "includeFiles": [
   {
+   "path": "/sysroot/include/assert.h",
+   "source": "include/assert.h"
+  },
+  {
    "path": "/sysroot/include/arm_neon.h",
    "source": "include/arm_neon.h"
   },
@@ -22,12 +26,20 @@
    "source": "include/emmintrin.h"
   },
   {
+   "path": "/sysroot/include/fenv.h",
+   "source": "include/fenv.h"
+  },
+  {
    "path": "/sysroot/include/float.h",
    "source": "include/float.h"
   },
   {
    "path": "/sysroot/include/iso646.h",
    "source": "include/iso646.h"
+  },
+  {
+   "path": "/sysroot/include/locale.h",
+   "source": "include/locale.h"
   },
   {
    "path": "/sysroot/include/limits.h",
@@ -96,6 +108,10 @@
   {
    "path": "/sysroot/include/wasm_simd128.h",
    "source": "include/wasm_simd128.h"
+  },
+  {
+   "path": "/sysroot/include/uchar.h",
+   "source": "include/uchar.h"
   },
   {
    "path": "/sysroot/include/xmmintrin.h",
@@ -236,6 +252,10 @@
   {
    "path": "/sysroot/include/mbedtls/sha512.h",
    "source": "include/mbedtls/sha512.h"
+  },
+  {
+   "path": "/sysroot/include/errno.h",
+   "source": "include/errno.h"
   }
  ],
  "libDir": "/sysroot/lib",
@@ -259,6 +279,11 @@
    "binary": true,
    "path": "/sysroot/lib/libmbedtls.tinyc.js",
    "source": "lib/wasm32-wasi/libmbedtls.tinyc.js"
+  },
+  {
+   "binary": true,
+   "path": "/sysroot/lib/libtcc1.tinyc.js",
+   "source": "lib/wasm32-wasi/libtcc1.tinyc.js"
   }
  ],
  "outputs": {

@@ -6,20 +6,792 @@
   "includeDir": "/sysroot/include",
   "includeFiles": [
     {
+      "path": "/sysroot/include/aarch64-linux-android/asm/auxvec.h",
+      "source": "include/aarch64-linux-android/asm/auxvec.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/bitsperlong.h",
+      "source": "include/aarch64-linux-android/asm/bitsperlong.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/byteorder.h",
+      "source": "include/aarch64-linux-android/asm/byteorder.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/errno.h",
+      "source": "include/aarch64-linux-android/asm/errno.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/fcntl.h",
+      "source": "include/aarch64-linux-android/asm/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/hwcap.h",
+      "source": "include/aarch64-linux-android/asm/hwcap.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/ioctl.h",
+      "source": "include/aarch64-linux-android/asm/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/ioctls.h",
+      "source": "include/aarch64-linux-android/asm/ioctls.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/mman.h",
+      "source": "include/aarch64-linux-android/asm/mman.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/poll.h",
+      "source": "include/aarch64-linux-android/asm/poll.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/posix_types.h",
+      "source": "include/aarch64-linux-android/asm/posix_types.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/resource.h",
+      "source": "include/aarch64-linux-android/asm/resource.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/sigcontext.h",
+      "source": "include/aarch64-linux-android/asm/sigcontext.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/siginfo.h",
+      "source": "include/aarch64-linux-android/asm/siginfo.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/signal.h",
+      "source": "include/aarch64-linux-android/asm/signal.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/socket.h",
+      "source": "include/aarch64-linux-android/asm/socket.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/sockios.h",
+      "source": "include/aarch64-linux-android/asm/sockios.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/sve_context.h",
+      "source": "include/aarch64-linux-android/asm/sve_context.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/swab.h",
+      "source": "include/aarch64-linux-android/asm/swab.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/termbits.h",
+      "source": "include/aarch64-linux-android/asm/termbits.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/termios.h",
+      "source": "include/aarch64-linux-android/asm/termios.h"
+    },
+    {
+      "path": "/sysroot/include/aarch64-linux-android/asm/types.h",
+      "source": "include/aarch64-linux-android/asm/types.h"
+    },
+    {
+      "path": "/sysroot/include/alloca.h",
+      "source": "include/alloca.h"
+    },
+    {
+      "path": "/sysroot/include/android/api-level.h",
+      "source": "include/android/api-level.h"
+    },
+    {
+      "path": "/sysroot/include/android/dlext.h",
+      "source": "include/android/dlext.h"
+    },
+    {
+      "path": "/sysroot/include/android/fdsan.h",
+      "source": "include/android/fdsan.h"
+    },
+    {
+      "path": "/sysroot/include/android/legacy_stdlib_inlines.h",
+      "source": "include/android/legacy_stdlib_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/android/legacy_termios_inlines.h",
+      "source": "include/android/legacy_termios_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/android/legacy_threads_inlines.h",
+      "source": "include/android/legacy_threads_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/android/legacy_unistd_inlines.h",
+      "source": "include/android/legacy_unistd_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/android/ndk-version.h",
+      "source": "include/android/ndk-version.h"
+    },
+    {
+      "path": "/sysroot/include/android/set_abort_message.h",
+      "source": "include/android/set_abort_message.h"
+    },
+    {
+      "path": "/sysroot/include/android/versioning.h",
+      "source": "include/android/versioning.h"
+    },
+    {
+      "path": "/sysroot/include/ar.h",
+      "source": "include/ar.h"
+    },
+    {
+      "path": "/sysroot/include/arm_neon.h",
+      "source": "include/arm_neon.h"
+    },
+    {
+      "path": "/sysroot/include/arpa/inet.h",
+      "source": "include/arpa/inet.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/bitsperlong.h",
+      "source": "include/asm-generic/bitsperlong.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/errno-base.h",
+      "source": "include/asm-generic/errno-base.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/errno.h",
+      "source": "include/asm-generic/errno.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/fcntl.h",
+      "source": "include/asm-generic/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/hugetlb_encode.h",
+      "source": "include/asm-generic/hugetlb_encode.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/int-ll64.h",
+      "source": "include/asm-generic/int-ll64.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/ioctl.h",
+      "source": "include/asm-generic/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/ioctls.h",
+      "source": "include/asm-generic/ioctls.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/mman-common.h",
+      "source": "include/asm-generic/mman-common.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/mman.h",
+      "source": "include/asm-generic/mman.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/poll.h",
+      "source": "include/asm-generic/poll.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/posix_types.h",
+      "source": "include/asm-generic/posix_types.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/resource.h",
+      "source": "include/asm-generic/resource.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/siginfo.h",
+      "source": "include/asm-generic/siginfo.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/signal-defs.h",
+      "source": "include/asm-generic/signal-defs.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/signal.h",
+      "source": "include/asm-generic/signal.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/socket.h",
+      "source": "include/asm-generic/socket.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/sockios.h",
+      "source": "include/asm-generic/sockios.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/swab.h",
+      "source": "include/asm-generic/swab.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/termbits-common.h",
+      "source": "include/asm-generic/termbits-common.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/termbits.h",
+      "source": "include/asm-generic/termbits.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/termios.h",
+      "source": "include/asm-generic/termios.h"
+    },
+    {
+      "path": "/sysroot/include/asm-generic/types.h",
+      "source": "include/asm-generic/types.h"
+    },
+    {
+      "path": "/sysroot/include/assert.h",
+      "source": "include/assert.h"
+    },
+    {
+      "path": "/sysroot/include/avx2intrin.h",
+      "source": "include/avx2intrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512bwintrin.h",
+      "source": "include/avx512bwintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512cdintrin.h",
+      "source": "include/avx512cdintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512dqintrin.h",
+      "source": "include/avx512dqintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512fintrin.h",
+      "source": "include/avx512fintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vbmiintrin.h",
+      "source": "include/avx512vbmiintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vlintrin.h",
+      "source": "include/avx512vlintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avx512vnniintrin.h",
+      "source": "include/avx512vnniintrin.h"
+    },
+    {
+      "path": "/sysroot/include/avxintrin.h",
+      "source": "include/avxintrin.h"
+    },
+    {
+      "path": "/sysroot/include/bits/ctype_inlines.h",
+      "source": "include/bits/ctype_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fcntl.h",
+      "source": "include/bits/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fenv_arm.h",
+      "source": "include/bits/fenv_arm.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fenv_riscv64.h",
+      "source": "include/bits/fenv_riscv64.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fenv_x86.h",
+      "source": "include/bits/fenv_x86.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fenv_x86_64.h",
+      "source": "include/bits/fenv_x86_64.h"
+    },
+    {
+      "path": "/sysroot/include/bits/flock.h",
+      "source": "include/bits/flock.h"
+    },
+    {
+      "path": "/sysroot/include/bits/flock64.h",
+      "source": "include/bits/flock64.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/fcntl.h",
+      "source": "include/bits/fortify/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/poll.h",
+      "source": "include/bits/fortify/poll.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/socket.h",
+      "source": "include/bits/fortify/socket.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/stat.h",
+      "source": "include/bits/fortify/stat.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/stdio.h",
+      "source": "include/bits/fortify/stdio.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/stdlib.h",
+      "source": "include/bits/fortify/stdlib.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/string.h",
+      "source": "include/bits/fortify/string.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/strings.h",
+      "source": "include/bits/fortify/strings.h"
+    },
+    {
+      "path": "/sysroot/include/bits/fortify/unistd.h",
+      "source": "include/bits/fortify/unistd.h"
+    },
+    {
+      "path": "/sysroot/include/bits/get_device_api_level_inlines.h",
+      "source": "include/bits/get_device_api_level_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/bits/getopt.h",
+      "source": "include/bits/getopt.h"
+    },
+    {
+      "path": "/sysroot/include/bits/in_addr.h",
+      "source": "include/bits/in_addr.h"
+    },
+    {
+      "path": "/sysroot/include/bits/ioctl.h",
+      "source": "include/bits/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/bits/ip_mreq_source.h",
+      "source": "include/bits/ip_mreq_source.h"
+    },
+    {
+      "path": "/sysroot/include/bits/ip_msfilter.h",
+      "source": "include/bits/ip_msfilter.h"
+    },
+    {
+      "path": "/sysroot/include/bits/lockf.h",
+      "source": "include/bits/lockf.h"
+    },
+    {
+      "path": "/sysroot/include/bits/mbstate_t.h",
+      "source": "include/bits/mbstate_t.h"
+    },
+    {
+      "path": "/sysroot/include/bits/posix_limits.h",
+      "source": "include/bits/posix_limits.h"
+    },
+    {
+      "path": "/sysroot/include/bits/pthread_types.h",
+      "source": "include/bits/pthread_types.h"
+    },
+    {
+      "path": "/sysroot/include/bits/sa_family_t.h",
+      "source": "include/bits/sa_family_t.h"
+    },
+    {
+      "path": "/sysroot/include/bits/seek_constants.h",
+      "source": "include/bits/seek_constants.h"
+    },
+    {
+      "path": "/sysroot/include/bits/signal_types.h",
+      "source": "include/bits/signal_types.h"
+    },
+    {
+      "path": "/sysroot/include/bits/stdatomic.h",
+      "source": "include/bits/stdatomic.h"
+    },
+    {
+      "path": "/sysroot/include/bits/strcasecmp.h",
+      "source": "include/bits/strcasecmp.h"
+    },
+    {
+      "path": "/sysroot/include/bits/struct_file.h",
+      "source": "include/bits/struct_file.h"
+    },
+    {
+      "path": "/sysroot/include/bits/swab.h",
+      "source": "include/bits/swab.h"
+    },
+    {
+      "path": "/sysroot/include/bits/sysconf.h",
+      "source": "include/bits/sysconf.h"
+    },
+    {
+      "path": "/sysroot/include/bits/termios_inlines.h",
+      "source": "include/bits/termios_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/bits/threads_inlines.h",
+      "source": "include/bits/threads_inlines.h"
+    },
+    {
+      "path": "/sysroot/include/bits/timespec.h",
+      "source": "include/bits/timespec.h"
+    },
+    {
+      "path": "/sysroot/include/bits/wait.h",
+      "source": "include/bits/wait.h"
+    },
+    {
+      "path": "/sysroot/include/bits/wchar_limits.h",
+      "source": "include/bits/wchar_limits.h"
+    },
+    {
+      "path": "/sysroot/include/bits/wctype.h",
+      "source": "include/bits/wctype.h"
+    },
+    {
+      "path": "/sysroot/include/complex.h",
+      "source": "include/complex.h"
+    },
+    {
+      "path": "/sysroot/include/cpio.h",
+      "source": "include/cpio.h"
+    },
+    {
+      "path": "/sysroot/include/ctype.h",
+      "source": "include/ctype.h"
+    },
+    {
+      "path": "/sysroot/include/dirent.h",
+      "source": "include/dirent.h"
+    },
+    {
+      "path": "/sysroot/include/dlfcn.h",
+      "source": "include/dlfcn.h"
+    },
+    {
+      "path": "/sysroot/include/emmintrin.h",
+      "source": "include/emmintrin.h"
+    },
+    {
+      "path": "/sysroot/include/endian.h",
+      "source": "include/endian.h"
+    },
+    {
+      "path": "/sysroot/include/errno.h",
+      "source": "include/errno.h"
+    },
+    {
+      "path": "/sysroot/include/f16cintrin.h",
+      "source": "include/f16cintrin.h"
+    },
+    {
+      "path": "/sysroot/include/fcntl.h",
+      "source": "include/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/fenv.h",
+      "source": "include/fenv.h"
+    },
+    {
       "path": "/sysroot/include/float.h",
       "source": "include/float.h"
+    },
+    {
+      "path": "/sysroot/include/fmaintrin.h",
+      "source": "include/fmaintrin.h"
+    },
+    {
+      "path": "/sysroot/include/fnmatch.h",
+      "source": "include/fnmatch.h"
+    },
+    {
+      "path": "/sysroot/include/ftw.h",
+      "source": "include/ftw.h"
+    },
+    {
+      "path": "/sysroot/include/glob.h",
+      "source": "include/glob.h"
+    },
+    {
+      "path": "/sysroot/include/grp.h",
+      "source": "include/grp.h"
+    },
+    {
+      "path": "/sysroot/include/iconv.h",
+      "source": "include/iconv.h"
+    },
+    {
+      "path": "/sysroot/include/immintrin.h",
+      "source": "include/immintrin.h"
+    },
+    {
+      "path": "/sysroot/include/inttypes.h",
+      "source": "include/inttypes.h"
     },
     {
       "path": "/sysroot/include/iso646.h",
       "source": "include/iso646.h"
     },
     {
+      "path": "/sysroot/include/langinfo.h",
+      "source": "include/langinfo.h"
+    },
+    {
+      "path": "/sysroot/include/libgen.h",
+      "source": "include/libgen.h"
+    },
+    {
       "path": "/sysroot/include/limits.h",
       "source": "include/limits.h"
     },
     {
+      "path": "/sysroot/include/linux/auxvec.h",
+      "source": "include/linux/auxvec.h"
+    },
+    {
+      "path": "/sysroot/include/linux/byteorder/big_endian.h",
+      "source": "include/linux/byteorder/big_endian.h"
+    },
+    {
+      "path": "/sysroot/include/linux/byteorder/little_endian.h",
+      "source": "include/linux/byteorder/little_endian.h"
+    },
+    {
+      "path": "/sysroot/include/linux/compiler.h",
+      "source": "include/linux/compiler.h"
+    },
+    {
+      "path": "/sysroot/include/linux/compiler_types.h",
+      "source": "include/linux/compiler_types.h"
+    },
+    {
+      "path": "/sysroot/include/linux/const.h",
+      "source": "include/linux/const.h"
+    },
+    {
+      "path": "/sysroot/include/linux/errno.h",
+      "source": "include/linux/errno.h"
+    },
+    {
+      "path": "/sysroot/include/linux/fadvise.h",
+      "source": "include/linux/fadvise.h"
+    },
+    {
+      "path": "/sysroot/include/linux/falloc.h",
+      "source": "include/linux/falloc.h"
+    },
+    {
+      "path": "/sysroot/include/linux/fcntl.h",
+      "source": "include/linux/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/linux/hdlc/ioctl.h",
+      "source": "include/linux/hdlc/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/linux/if.h",
+      "source": "include/linux/if.h"
+    },
+    {
+      "path": "/sysroot/include/linux/in.h",
+      "source": "include/linux/in.h"
+    },
+    {
+      "path": "/sysroot/include/linux/in6.h",
+      "source": "include/linux/in6.h"
+    },
+    {
+      "path": "/sysroot/include/linux/ioctl.h",
+      "source": "include/linux/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/linux/ipv6.h",
+      "source": "include/linux/ipv6.h"
+    },
+    {
+      "path": "/sysroot/include/linux/libc-compat.h",
+      "source": "include/linux/libc-compat.h"
+    },
+    {
+      "path": "/sysroot/include/linux/limits.h",
+      "source": "include/linux/limits.h"
+    },
+    {
+      "path": "/sysroot/include/linux/memfd.h",
+      "source": "include/linux/memfd.h"
+    },
+    {
+      "path": "/sysroot/include/linux/mman.h",
+      "source": "include/linux/mman.h"
+    },
+    {
+      "path": "/sysroot/include/linux/openat2.h",
+      "source": "include/linux/openat2.h"
+    },
+    {
+      "path": "/sysroot/include/linux/poll.h",
+      "source": "include/linux/poll.h"
+    },
+    {
+      "path": "/sysroot/include/linux/posix_types.h",
+      "source": "include/linux/posix_types.h"
+    },
+    {
+      "path": "/sysroot/include/linux/resource.h",
+      "source": "include/linux/resource.h"
+    },
+    {
+      "path": "/sysroot/include/linux/sched.h",
+      "source": "include/linux/sched.h"
+    },
+    {
+      "path": "/sysroot/include/linux/signal.h",
+      "source": "include/linux/signal.h"
+    },
+    {
+      "path": "/sysroot/include/linux/socket.h",
+      "source": "include/linux/socket.h"
+    },
+    {
+      "path": "/sysroot/include/linux/sockios.h",
+      "source": "include/linux/sockios.h"
+    },
+    {
+      "path": "/sysroot/include/linux/stat.h",
+      "source": "include/linux/stat.h"
+    },
+    {
+      "path": "/sysroot/include/linux/stddef.h",
+      "source": "include/linux/stddef.h"
+    },
+    {
+      "path": "/sysroot/include/linux/swab.h",
+      "source": "include/linux/swab.h"
+    },
+    {
+      "path": "/sysroot/include/linux/tcp.h",
+      "source": "include/linux/tcp.h"
+    },
+    {
+      "path": "/sysroot/include/linux/termios.h",
+      "source": "include/linux/termios.h"
+    },
+    {
+      "path": "/sysroot/include/linux/time.h",
+      "source": "include/linux/time.h"
+    },
+    {
+      "path": "/sysroot/include/linux/time_types.h",
+      "source": "include/linux/time_types.h"
+    },
+    {
+      "path": "/sysroot/include/linux/times.h",
+      "source": "include/linux/times.h"
+    },
+    {
+      "path": "/sysroot/include/linux/tty.h",
+      "source": "include/linux/tty.h"
+    },
+    {
+      "path": "/sysroot/include/linux/types.h",
+      "source": "include/linux/types.h"
+    },
+    {
+      "path": "/sysroot/include/linux/uio.h",
+      "source": "include/linux/uio.h"
+    },
+    {
+      "path": "/sysroot/include/linux/un.h",
+      "source": "include/linux/un.h"
+    },
+    {
+      "path": "/sysroot/include/linux/utime.h",
+      "source": "include/linux/utime.h"
+    },
+    {
+      "path": "/sysroot/include/linux/wait.h",
+      "source": "include/linux/wait.h"
+    },
+    {
+      "path": "/sysroot/include/locale.h",
+      "source": "include/locale.h"
+    },
+    {
+      "path": "/sysroot/include/malloc.h",
+      "source": "include/malloc.h"
+    },
+    {
       "path": "/sysroot/include/math.h",
       "source": "include/math.h"
+    },
+    {
+      "path": "/sysroot/include/net/if.h",
+      "source": "include/net/if.h"
+    },
+    {
+      "path": "/sysroot/include/netdb.h",
+      "source": "include/netdb.h"
+    },
+    {
+      "path": "/sysroot/include/netinet/in.h",
+      "source": "include/netinet/in.h"
+    },
+    {
+      "path": "/sysroot/include/netinet/in6.h",
+      "source": "include/netinet/in6.h"
+    },
+    {
+      "path": "/sysroot/include/netinet/tcp.h",
+      "source": "include/netinet/tcp.h"
+    },
+    {
+      "path": "/sysroot/include/nl_types.h",
+      "source": "include/nl_types.h"
+    },
+    {
+      "path": "/sysroot/include/poll.h",
+      "source": "include/poll.h"
+    },
+    {
+      "path": "/sysroot/include/pthread.h",
+      "source": "include/pthread.h"
+    },
+    {
+      "path": "/sysroot/include/pwd.h",
+      "source": "include/pwd.h"
+    },
+    {
+      "path": "/sysroot/include/regex.h",
+      "source": "include/regex.h"
+    },
+    {
+      "path": "/sysroot/include/riscv_vector.h",
+      "source": "include/riscv_vector.h"
+    },
+    {
+      "path": "/sysroot/include/sched.h",
+      "source": "include/sched.h"
+    },
+    {
+      "path": "/sysroot/include/search.h",
+      "source": "include/search.h"
+    },
+    {
+      "path": "/sysroot/include/semaphore.h",
+      "source": "include/semaphore.h"
+    },
+    {
+      "path": "/sysroot/include/setjmp.h",
+      "source": "include/setjmp.h"
+    },
+    {
+      "path": "/sysroot/include/signal.h",
+      "source": "include/signal.h"
+    },
+    {
+      "path": "/sysroot/include/smmintrin.h",
+      "source": "include/smmintrin.h"
+    },
+    {
+      "path": "/sysroot/include/spawn.h",
+      "source": "include/spawn.h"
     },
     {
       "path": "/sysroot/include/stdalign.h",
@@ -46,24 +818,272 @@
       "source": "include/stdint.h"
     },
     {
+      "path": "/sysroot/include/stdio.h",
+      "source": "include/stdio.h"
+    },
+    {
+      "path": "/sysroot/include/stdlib.h",
+      "source": "include/stdlib.h"
+    },
+    {
       "path": "/sysroot/include/stdnoreturn.h",
       "source": "include/stdnoreturn.h"
+    },
+    {
+      "path": "/sysroot/include/string.h",
+      "source": "include/string.h"
+    },
+    {
+      "path": "/sysroot/include/strings.h",
+      "source": "include/strings.h"
+    },
+    {
+      "path": "/sysroot/include/sys/cdefs.h",
+      "source": "include/sys/cdefs.h"
+    },
+    {
+      "path": "/sysroot/include/sys/endian.h",
+      "source": "include/sys/endian.h"
+    },
+    {
+      "path": "/sysroot/include/sys/ioctl.h",
+      "source": "include/sys/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/sys/mman.h",
+      "source": "include/sys/mman.h"
+    },
+    {
+      "path": "/sysroot/include/sys/resource.h",
+      "source": "include/sys/resource.h"
+    },
+    {
+      "path": "/sysroot/include/sys/select.h",
+      "source": "include/sys/select.h"
+    },
+    {
+      "path": "/sysroot/include/sys/socket.h",
+      "source": "include/sys/socket.h"
+    },
+    {
+      "path": "/sysroot/include/sys/stat.h",
+      "source": "include/sys/stat.h"
+    },
+    {
+      "path": "/sysroot/include/sys/statvfs.h",
+      "source": "include/sys/statvfs.h"
+    },
+    {
+      "path": "/sysroot/include/sys/syslog.h",
+      "source": "include/sys/syslog.h"
+    },
+    {
+      "path": "/sysroot/include/sys/sysmacros.h",
+      "source": "include/sys/sysmacros.h"
+    },
+    {
+      "path": "/sysroot/include/sys/time.h",
+      "source": "include/sys/time.h"
+    },
+    {
+      "path": "/sysroot/include/sys/times.h",
+      "source": "include/sys/times.h"
+    },
+    {
+      "path": "/sysroot/include/sys/types.h",
+      "source": "include/sys/types.h"
+    },
+    {
+      "path": "/sysroot/include/sys/ucontext.h",
+      "source": "include/sys/ucontext.h"
+    },
+    {
+      "path": "/sysroot/include/sys/uio.h",
+      "source": "include/sys/uio.h"
+    },
+    {
+      "path": "/sysroot/include/sys/un.h",
+      "source": "include/sys/un.h"
+    },
+    {
+      "path": "/sysroot/include/sys/user.h",
+      "source": "include/sys/user.h"
+    },
+    {
+      "path": "/sysroot/include/sys/utsname.h",
+      "source": "include/sys/utsname.h"
+    },
+    {
+      "path": "/sysroot/include/sys/wait.h",
+      "source": "include/sys/wait.h"
+    },
+    {
+      "path": "/sysroot/include/syslog.h",
+      "source": "include/syslog.h"
+    },
+    {
+      "path": "/sysroot/include/tar.h",
+      "source": "include/tar.h"
     },
     {
       "path": "/sysroot/include/tccdefs.h",
       "source": "include/tccdefs.h"
     },
     {
+      "path": "/sysroot/include/tcclib.h",
+      "source": "tcclib.h"
+    },
+    {
+      "path": "/sysroot/include/termios.h",
+      "source": "include/termios.h"
+    },
+    {
       "path": "/sysroot/include/tgmath.h",
       "source": "include/tgmath.h"
+    },
+    {
+      "path": "/sysroot/include/threads.h",
+      "source": "include/threads.h"
+    },
+    {
+      "path": "/sysroot/include/time.h",
+      "source": "include/time.h"
+    },
+    {
+      "path": "/sysroot/include/tmmintrin.h",
+      "source": "include/tmmintrin.h"
+    },
+    {
+      "path": "/sysroot/include/uchar.h",
+      "source": "include/uchar.h"
+    },
+    {
+      "path": "/sysroot/include/ucontext.h",
+      "source": "include/ucontext.h"
+    },
+    {
+      "path": "/sysroot/include/unistd.h",
+      "source": "include/unistd.h"
+    },
+    {
+      "path": "/sysroot/include/utime.h",
+      "source": "include/utime.h"
     },
     {
       "path": "/sysroot/include/varargs.h",
       "source": "include/varargs.h"
     },
     {
-      "path": "/sysroot/include/tcclib.h",
-      "source": "tcclib.h"
+      "path": "/sysroot/include/wchar.h",
+      "source": "include/wchar.h"
+    },
+    {
+      "path": "/sysroot/include/wctype.h",
+      "source": "include/wctype.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/auxvec.h",
+      "source": "include/x86_64-linux-android/asm/auxvec.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/bitsperlong.h",
+      "source": "include/x86_64-linux-android/asm/bitsperlong.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/byteorder.h",
+      "source": "include/x86_64-linux-android/asm/byteorder.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/errno.h",
+      "source": "include/x86_64-linux-android/asm/errno.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/fcntl.h",
+      "source": "include/x86_64-linux-android/asm/fcntl.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/hwcap2.h",
+      "source": "include/x86_64-linux-android/asm/hwcap2.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/ioctl.h",
+      "source": "include/x86_64-linux-android/asm/ioctl.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/ioctls.h",
+      "source": "include/x86_64-linux-android/asm/ioctls.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/mman.h",
+      "source": "include/x86_64-linux-android/asm/mman.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/poll.h",
+      "source": "include/x86_64-linux-android/asm/poll.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/posix_types.h",
+      "source": "include/x86_64-linux-android/asm/posix_types.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/posix_types_32.h",
+      "source": "include/x86_64-linux-android/asm/posix_types_32.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/posix_types_64.h",
+      "source": "include/x86_64-linux-android/asm/posix_types_64.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/posix_types_x32.h",
+      "source": "include/x86_64-linux-android/asm/posix_types_x32.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/resource.h",
+      "source": "include/x86_64-linux-android/asm/resource.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/sigcontext.h",
+      "source": "include/x86_64-linux-android/asm/sigcontext.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/siginfo.h",
+      "source": "include/x86_64-linux-android/asm/siginfo.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/signal.h",
+      "source": "include/x86_64-linux-android/asm/signal.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/socket.h",
+      "source": "include/x86_64-linux-android/asm/socket.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/sockios.h",
+      "source": "include/x86_64-linux-android/asm/sockios.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/swab.h",
+      "source": "include/x86_64-linux-android/asm/swab.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/termbits.h",
+      "source": "include/x86_64-linux-android/asm/termbits.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/termios.h",
+      "source": "include/x86_64-linux-android/asm/termios.h"
+    },
+    {
+      "path": "/sysroot/include/x86_64-linux-android/asm/types.h",
+      "source": "include/x86_64-linux-android/asm/types.h"
+    },
+    {
+      "path": "/sysroot/include/xlocale.h",
+      "source": "include/xlocale.h"
+    },
+    {
+      "path": "/sysroot/include/xmmintrin.h",
+      "source": "include/xmmintrin.h"
     }
   ],
   "libDir": "/sysroot/lib",
@@ -75,18 +1095,28 @@
     },
     {
       "binary": true,
-      "path": "/sysroot/lib/crt1.o",
-      "source": "lib/aarch64-linux-android/crt1.o"
+      "path": "/sysroot/lib/crtbegin_dynamic.o",
+      "source": "lib/aarch64-linux-android/crtbegin_dynamic.o"
     },
     {
       "binary": true,
-      "path": "/sysroot/lib/crti.o",
-      "source": "lib/aarch64-linux-android/crti.o"
+      "path": "/sysroot/lib/crtbegin_so.o",
+      "source": "lib/aarch64-linux-android/crtbegin_so.o"
     },
     {
       "binary": true,
-      "path": "/sysroot/lib/crtn.o",
-      "source": "lib/aarch64-linux-android/crtn.o"
+      "path": "/sysroot/lib/crtbegin_static.o",
+      "source": "lib/aarch64-linux-android/crtbegin_static.o"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/crtend_android.o",
+      "source": "lib/aarch64-linux-android/crtend_android.o"
+    },
+    {
+      "binary": true,
+      "path": "/sysroot/lib/crtend_so.o",
+      "source": "lib/aarch64-linux-android/crtend_so.o"
     },
     {
       "binary": true,
@@ -95,13 +1125,13 @@
     },
     {
       "binary": true,
-      "path": "/sysroot/lib/libm.so",
-      "source": "lib/aarch64-linux-android/libm.so"
+      "path": "/sysroot/lib/libdl.so",
+      "source": "lib/aarch64-linux-android/libdl.so"
     },
     {
       "binary": true,
-      "path": "/sysroot/lib/libdl.so",
-      "source": "lib/aarch64-linux-android/libdl.so"
+      "path": "/sysroot/lib/libm.so",
+      "source": "lib/aarch64-linux-android/libm.so"
     }
   ],
   "outputs": {
@@ -124,5 +1154,10 @@
   },
   "libc": "bionic",
   "androidApi": 30,
-  "dynamicLinker": "/system/bin/linker64"
+  "dynamicLinker": "/system/bin/linker64",
+  "libcIncludeRoot": "vendor-android/include",
+  "builtinHeadersFirst": true,
+  "extraIncludeDirs": [
+    "/sysroot/include/aarch64-linux-android"
+  ]
 }

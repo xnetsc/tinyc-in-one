@@ -2242,7 +2242,7 @@ static void bn_zero(unsigned int *bn)
    current token */
 static void parse_number(const char *p)
 {
-    int b, t, shift, frac_bits, s, exp_val, ch;
+    int b, t, shift, frac_bits, s, exp_val, ch, hex_sticky;
     char *q;
     unsigned int bn[BN_SIZE];
     long double d;
@@ -2297,6 +2297,7 @@ static void parse_number(const char *p)
             /* hexadecimal or binary floats */
             /* XXX: handle overflows */
             frac_bits = 0;
+            hex_sticky = 0;
             *q = '\0';
             if (b == 16)
                 shift = 4;
@@ -2315,7 +2316,10 @@ static void parse_number(const char *p)
                 } else {
                     t = t - '0';
                 }
-                frac_bits -= bn_lshift(bn, shift, t);
+                s = bn_lshift(bn, shift, t);
+                frac_bits -= s;
+                if (s && t)
+                    hex_sticky = 1;
             }
             if (ch == '.') {
                 ch = *p++;
@@ -2332,7 +2336,10 @@ static void parse_number(const char *p)
                     }
                     if (t >= b)
                         tcc_error("invalid digit");
-                    frac_bits -= bn_lshift(bn, shift, t);
+                    s = bn_lshift(bn, shift, t);
+                    frac_bits -= s;
+                    if (s && t)
+                        hex_sticky = 1;
                     frac_bits += shift;
                     ch = *p++;
                 }
@@ -2374,7 +2381,7 @@ static void parse_number(const char *p)
             } else if (t == 'L') {
                 ch = *p++;
                 tok = TOK_CLDOUBLE;
-                tokc.ld = d;
+                tcc_ld_parse_hex(bn, exp_val - frac_bits, hex_sticky, &tokc.ld);
             } else {
                 tok = TOK_CDOUBLE;
                 tokc.d = (double)d;
@@ -2424,7 +2431,7 @@ static void parse_number(const char *p)
             } else if (t == 'L') {
                 ch = *p++;
                 tok = TOK_CLDOUBLE;
-                tokc.ld = strtold(token_buf, NULL);
+                tcc_ld_parse(token_buf, &tokc.ld);
             } else {
                 tok = TOK_CDOUBLE;
                 tokc.d = strtod(token_buf, NULL);

@@ -1869,6 +1869,7 @@ static void asm_move_wide(TCCState *s1, int token)
 static void asm_wait(TCCState *s1, int token) {
     uint32_t instr;
     switch (token) {
+        case TOK_ASM_yield: instr = ARM64_YIELD; break;
         case TOK_ASM_wfe: instr = ARM64_WFE; break;
         case TOK_ASM_wfi: instr = ARM64_WFI; break;
         case TOK_ASM_sev: instr = ARM64_SEV; break;
@@ -2006,6 +2007,7 @@ ST_FUNC void asm_opcode(TCCState *s1, int opcode)
             asm_barrier(s1, opcode);
             break;
 
+        case TOK_ASM_yield:
         case TOK_ASM_wfe:
         case TOK_ASM_wfi:
         case TOK_ASM_sev:

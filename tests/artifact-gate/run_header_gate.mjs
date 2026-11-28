@@ -87,7 +87,14 @@ function report(ok, label, detail = '') {
 
 function expectationFor(header, target) {
   for (const e of expectations) {
-    if (e.header !== header) continue;
+    // An entry whose header names a path (contains '/') matches
+    // that include form exactly: a fragment in a subdirectory
+    // (bits/byteswap.h) is a different assertion from a public
+    // header of the same basename (byteswap.h). A bare basename
+    // entry matches any include form with that basename.
+    if (e.header.includes('/')) {
+      if (e.header !== header) continue;
+    } else if (e.header !== header.split('/').pop()) continue;
     if (e.targets === 'all') return e;
     if (e.targets.startsWith('all-except:')) {
       if (!e.targets.slice('all-except:'.length).split(',').includes(target)) return e;
@@ -168,8 +175,7 @@ for (const target of targets) {
     const includeForm = entry.path.startsWith('/sysroot/include/')
       ? entry.path.slice('/sysroot/include/'.length)
       : entry.path.split('/').pop();
-    const header = entry.path.split('/').pop();
-    const exp = expectationFor(header, target);
+    const exp = expectationFor(includeForm, target);
     const r = await tryCompile(`#include <${includeForm}>\nint tinyc_gate_marker;`);
     if (!exp) {
       report(r.ok, `${target}: #include <${includeForm}> compiles standalone`,

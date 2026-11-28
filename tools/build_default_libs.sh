@@ -86,19 +86,6 @@ esac
 SYSINCFLAGS=()
 for d in "${SYSINC[@]}"; do SYSINCFLAGS+=(-I"$d"); done
 
-# Bionic's checked FD_SET/FD_CLR/FD_ISSET inlines pass
-# __builtin_object_size(set, 0) to their _chk helpers. The
-# bundled compiler cannot fold that builtin, so the symbol
-# stays undefined and any translation unit using FD_SET fails
-# to link. Defining it to the unknown-size value keeps the
-# checks in their no-op mode (the semantics of an unchecked
-# FD_SET) for the library builds on the android family.
-if [ "$FAMILY" = android ]; then
-    BOSDEF=('-D__builtin_object_size(p,t)=((unsigned long)-1)')
-else
-    BOSDEF=()
-fi
-
 rm -rf "$WORK"
 mkdir -p "$WORK" "$INCDIR" "$LIBDIR"
 
@@ -233,14 +220,14 @@ build_pcre2() {
     srcs+=("$ROOT/libs-config/pcre2_chartables.c")
     compile_list "$WORK/pcre2.log" "$objdir" "${srcs[@]}" -- \
         -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=8 \
-        -I"$CFG/pcre2" -I"$V" "${SYSINCFLAGS[@]}" "${BOSDEF[@]}"
+        -I"$CFG/pcre2" -I"$V" "${SYSINCFLAGS[@]}"
     archive "$LIBDIR/libpcre2.a" "$objdir"
 
     local pobj=$WORK/pcre2/posix
     mkdir -p "$pobj"
     if ! "$TCC" -c "$V/pcre2posix.c" -o "$pobj/pcre2posix.o" \
         -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=8 \
-        -I"$CFG/pcre2" -I"$V" "${SYSINCFLAGS[@]}" "${BOSDEF[@]}" \
+        -I"$CFG/pcre2" -I"$V" "${SYSINCFLAGS[@]}" \
         >>"$WORK/pcre2.log" 2>&1; then
         tail -20 "$WORK/pcre2.log"
         echo "pcre2posix build failed" >&2
@@ -297,7 +284,7 @@ build_mbedtls() {
         for f in ${!group}; do srcs+=("$V/library/$f.c"); done
         compile_list "$WORK/mbedtls-$group.log" "$WORK/mbedtls/$group" \
             "${srcs[@]}" -- \
-            -I"$CFG" -I"$V/include" -I"$V/library" "${SYSINCFLAGS[@]}" "${BOSDEF[@]}"
+            -I"$CFG" -I"$V/include" -I"$V/library" "${SYSINCFLAGS[@]}"
     done
     archive "$LIBDIR/libmbedcrypto.a" "$WORK/mbedtls/crypto"
     archive "$LIBDIR/libmbedx509.a" "$WORK/mbedtls/x509"
@@ -347,7 +334,7 @@ PYEOF
     compile_list "$WORK/curl.log" "$WORK/curl/obj" "${srcs[@]}" -- \
         -DBUILDING_LIBCURL -DCURL_STATICLIB -DHAVE_CONFIG_H \
         "${gnudef[@]}" \
-        -I"$CFG" -I"$V/lib" -I"$V/include" "${SYSINCFLAGS[@]}" "${BOSDEF[@]}"
+        -I"$CFG" -I"$V/lib" -I"$V/include" "${SYSINCFLAGS[@]}"
     archive "$LIBDIR/libcurl.a" "$WORK/curl/obj"
     echo "curl: $(fsize "$LIBDIR/libcurl.a") bytes"
 }

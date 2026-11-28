@@ -404,12 +404,23 @@ assert m.get('target') == sys.argv[2], 'dist manifest target mismatch: %r != %r'
             x86_64-linux-android) cp "$SRC/runmain.o" "$dst/lib/runmain.o" ;;
         esac
         # Target-specific toolchain files from the dist: the darwin
-        # .tbd link stubs live in the tccdir's lib/ (the same place
-        # the top-level dist puts them), and the win32 tree
-        # (headers + .def files) in the tccdir's win32/.
+        # .tbd link stubs and the bundled default libraries live in
+        # the tccdir's lib/ (the same place the top-level dist puts
+        # them), and the win32 tree (headers + .def files) in the
+        # tccdir's win32/. The darwin default libraries (the six
+        # archives and their LICENSE files that build_default_libs
+        # stages into the dist's lib/) are copied by name, so a dist
+        # built without them fails here instead of shipping an AAR
+        # whose darwin targets silently lack libraries the other
+        # host packages carry.
         case $triple in
             arm64-apple-darwin|x86_64-apple-darwin)
                 cp "$ROOT/build/dist/$triple/lib/tcc/lib/"*.tbd "$dst/lib/"
+                for f in libcurl.a libpcre2.a libpcre2-posix.a \
+                         libmbedtls.a libmbedx509.a libmbedcrypto.a \
+                         LICENSE-curl LICENSE-pcre2 LICENSE-mbedtls; do
+                    cp "$ROOT/build/dist/$triple/lib/tcc/lib/$f" "$dst/lib/"
+                done
                 ;;
             x86_64-w64-mingw32)
                 mkdir -p "$dst/win32"
@@ -431,7 +442,8 @@ assert m.get('target') == sys.argv[2], 'dist manifest target mismatch: %r != %r'
     #
     # Per-target sysroot source in the dist (an empty lib means
     # the target has no sysroot lib dir: darwin links the .tbd
-    # stubs already staged in the toolchain's lib/, and wasm32
+    # stubs and bundled default libraries already staged in the
+    # toolchain's lib/, and wasm32
     # needs no libc at all):
     #   linux-gnu, android: include-libc -> include, libc -> lib
     #   darwin:             include-libc -> include

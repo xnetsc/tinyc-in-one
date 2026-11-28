@@ -13,8 +13,16 @@
  *
  * Source resolution is the package's canonical one, shared with
  * packages/pyodide/bundle_assets.py and the artifact gate's
- * assemble_sysroot.mjs: an include/<name> entry is looked up in
- * ../../wasm-backend/include first, then ../../vendor-tinycc/include;
+ * assemble_sysroot.mjs: an include/<name> entry of a native
+ * target is looked up in the target's libc header tree (the
+ * manifest's libcIncludeRoot, the same tree the native dist's
+ * include-libc is copied from), then ../../vendor-tinycc/include,
+ * then ../../wasm-backend/include; a manifest with
+ * builtinHeadersFirst (the Android targets, whose dist
+ * compilers search the builtin directory first) puts
+ * ../../vendor-tinycc/include first. The wasm32-wasi manifest
+ * keeps the wasm order: ../../wasm-backend/include, then
+ * ../../vendor-tinycc/include.
  * tcclib.h comes from ../../vendor-tinycc/tcclib.h. The libtcc1.a
  * entry, lib/<target>/libtcc1.a, resolves through --lib or the
  * candidate build outputs, in order: the wasm32 browser build's own
@@ -98,8 +106,19 @@ function distTriple(target) {
   return target === 'x86_64-windows' ? 'x86_64-w64-mingw32' : target;
 }
 
-function findInclude(name) {
-  for (const root of includeRoots) {
+function findInclude(name, manifest) {
+  let roots;
+  if (manifest && manifest.libcIncludeRoot) {
+    const libcRoot = path.join(repo, manifest.libcIncludeRoot);
+    const vendorRoot = path.join(repo, 'vendor-tinycc', 'include');
+    const wasmRoot = path.join(repo, 'wasm-backend', 'include');
+    roots = manifest.builtinHeadersFirst
+      ? [vendorRoot, libcRoot, wasmRoot]
+      : [libcRoot, vendorRoot, wasmRoot];
+  } else {
+    roots = includeRoots;
+  }
+  for (const root of roots) {
     const p = path.join(root, name);
     if (fs.existsSync(p)) return p;
   }
@@ -167,7 +186,7 @@ for (const target of targets) {
   for (const entry of entries) {
     let src = null;
     if (entry.source.startsWith('include/')) {
-      src = findInclude(entry.source.slice('include/'.length));
+      src = findInclude(entry.source.slice('include/'.length), manifest);
     } else if (entry.source === 'tcclib.h') {
       if (fs.existsSync(tcclibPath)) src = tcclibPath;
     } else if (entry.source === `lib/${target}/libtcc1.a`) {

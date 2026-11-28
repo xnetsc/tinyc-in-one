@@ -87,6 +87,10 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
         path: "/sysroot/include/arm_neon.h",
         source: "include/arm_neon.h"
       },
@@ -103,12 +107,20 @@ var TinycWeb = (() => {
         source: "include/emmintrin.h"
       },
       {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
       },
       {
         path: "/sysroot/include/limits.h",
@@ -177,6 +189,10 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/wasm_simd128.h",
         source: "include/wasm_simd128.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
       },
       {
         path: "/sysroot/include/xmmintrin.h",
@@ -317,6 +333,10 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/mbedtls/sha512.h",
         source: "include/mbedtls/sha512.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -340,6 +360,11 @@ var TinycWeb = (() => {
         binary: true,
         path: "/sysroot/lib/libmbedtls.tinyc.js",
         source: "lib/wasm32-wasi/libmbedtls.tinyc.js"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libtcc1.tinyc.js",
+        source: "lib/wasm32-wasi/libtcc1.tinyc.js"
       }
     ],
     outputs: {
@@ -359,20 +384,1092 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/alloca.h",
+        source: "include/alloca.h"
+      },
+      {
+        path: "/sysroot/include/ar.h",
+        source: "include/ar.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/bitsperlong.h",
+        source: "include/asm-generic/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno-base.h",
+        source: "include/asm-generic/errno-base.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno.h",
+        source: "include/asm-generic/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/int-ll64.h",
+        source: "include/asm-generic/int-ll64.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctl.h",
+        source: "include/asm-generic/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctls.h",
+        source: "include/asm-generic/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/posix_types.h",
+        source: "include/asm-generic/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/socket.h",
+        source: "include/asm-generic/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/sockios.h",
+        source: "include/asm-generic/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/types.h",
+        source: "include/asm-generic/types.h"
+      },
+      {
+        path: "/sysroot/include/asm/bitsperlong.h",
+        source: "include/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm/errno.h",
+        source: "include/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctl.h",
+        source: "include/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctls.h",
+        source: "include/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types.h",
+        source: "include/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types_32.h",
+        source: "include/asm/posix_types_32.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types_64.h",
+        source: "include/asm/posix_types_64.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types_x32.h",
+        source: "include/asm/posix_types_x32.h"
+      },
+      {
+        path: "/sysroot/include/asm/socket.h",
+        source: "include/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm/sockios.h",
+        source: "include/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm/types.h",
+        source: "include/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/bits/atomic_wide_counter.h",
+        source: "include/bits/atomic_wide_counter.h"
+      },
+      {
+        path: "/sysroot/include/bits/byteswap.h",
+        source: "include/bits/byteswap.h"
+      },
+      {
+        path: "/sysroot/include/bits/cmathcalls.h",
+        source: "include/bits/cmathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/confname.h",
+        source: "include/bits/confname.h"
+      },
+      {
+        path: "/sysroot/include/bits/cpu-set.h",
+        source: "include/bits/cpu-set.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent.h",
+        source: "include/bits/dirent.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent_ext.h",
+        source: "include/bits/dirent_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/dl_find_object.h",
+        source: "include/bits/dl_find_object.h"
+      },
+      {
+        path: "/sysroot/include/bits/dlfcn.h",
+        source: "include/bits/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/bits/endian.h",
+        source: "include/bits/endian.h"
+      },
+      {
+        path: "/sysroot/include/bits/endianness.h",
+        source: "include/bits/endianness.h"
+      },
+      {
+        path: "/sysroot/include/bits/environments.h",
+        source: "include/bits/environments.h"
+      },
+      {
+        path: "/sysroot/include/bits/errno.h",
+        source: "include/bits/errno.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl-linux.h",
+        source: "include/bits/fcntl-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl.h",
+        source: "include/bits/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl2.h",
+        source: "include/bits/fcntl2.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv.h",
+        source: "include/bits/fenv.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn-common.h",
+        source: "include/bits/floatn-common.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn.h",
+        source: "include/bits/floatn.h"
+      },
+      {
+        path: "/sysroot/include/bits/flt-eval-method.h",
+        source: "include/bits/flt-eval-method.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-fast.h",
+        source: "include/bits/fp-fast.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-logb.h",
+        source: "include/bits/fp-logb.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_core.h",
+        source: "include/bits/getopt_core.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_posix.h",
+        source: "include/bits/getopt_posix.h"
+      },
+      {
+        path: "/sysroot/include/bits/in.h",
+        source: "include/bits/in.h"
+      },
+      {
+        path: "/sysroot/include/bits/indirect-return.h",
+        source: "include/bits/indirect-return.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctl-types.h",
+        source: "include/bits/ioctl-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctls.h",
+        source: "include/bits/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/bits/iscanonical.h",
+        source: "include/bits/iscanonical.h"
+      },
+      {
+        path: "/sysroot/include/bits/libc-header-start.h",
+        source: "include/bits/libc-header-start.h"
+      },
+      {
+        path: "/sysroot/include/bits/libm-simd-decl-stubs.h",
+        source: "include/bits/libm-simd-decl-stubs.h"
+      },
+      {
+        path: "/sysroot/include/bits/local_lim.h",
+        source: "include/bits/local_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/locale.h",
+        source: "include/bits/locale.h"
+      },
+      {
+        path: "/sysroot/include/bits/long-double.h",
+        source: "include/bits/long-double.h"
+      },
+      {
+        path: "/sysroot/include/bits/math-vector.h",
+        source: "include/bits/math-vector.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-helper-functions.h",
+        source: "include/bits/mathcalls-helper-functions.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-narrow.h",
+        source: "include/bits/mathcalls-narrow.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls.h",
+        source: "include/bits/mathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathdef.h",
+        source: "include/bits/mathdef.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-linux.h",
+        source: "include/bits/mman-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-map-flags-generic.h",
+        source: "include/bits/mman-map-flags-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-shared.h",
+        source: "include/bits/mman-shared.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman.h",
+        source: "include/bits/mman.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman_ext.h",
+        source: "include/bits/mman_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/monetary-ldbl.h",
+        source: "include/bits/monetary-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/netdb.h",
+        source: "include/bits/netdb.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll.h",
+        source: "include/bits/poll.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll2.h",
+        source: "include/bits/poll2.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix1_lim.h",
+        source: "include/bits/posix1_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix2_lim.h",
+        source: "include/bits/posix2_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix_opt.h",
+        source: "include/bits/posix_opt.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min-dynamic.h",
+        source: "include/bits/pthread_stack_min-dynamic.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min.h",
+        source: "include/bits/pthread_stack_min.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes-arch.h",
+        source: "include/bits/pthreadtypes-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes.h",
+        source: "include/bits/pthreadtypes.h"
+      },
+      {
+        path: "/sysroot/include/bits/resource.h",
+        source: "include/bits/resource.h"
+      },
+      {
+        path: "/sysroot/include/bits/sched.h",
+        source: "include/bits/sched.h"
+      },
+      {
+        path: "/sysroot/include/bits/select-decl.h",
+        source: "include/bits/select-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/select.h",
+        source: "include/bits/select.h"
+      },
+      {
+        path: "/sysroot/include/bits/select2.h",
+        source: "include/bits/select2.h"
+      },
+      {
+        path: "/sysroot/include/bits/semaphore.h",
+        source: "include/bits/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp.h",
+        source: "include/bits/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp2.h",
+        source: "include/bits/setjmp2.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigaction.h",
+        source: "include/bits/sigaction.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigcontext.h",
+        source: "include/bits/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigevent-consts.h",
+        source: "include/bits/sigevent-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-arch.h",
+        source: "include/bits/siginfo-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts-arch.h",
+        source: "include/bits/siginfo-consts-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts.h",
+        source: "include/bits/siginfo-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/signal_ext.h",
+        source: "include/bits/signal_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-arch.h",
+        source: "include/bits/signum-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-generic.h",
+        source: "include/bits/signum-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstack.h",
+        source: "include/bits/sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstksz.h",
+        source: "include/bits/sigstksz.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigthread.h",
+        source: "include/bits/sigthread.h"
+      },
+      {
+        path: "/sysroot/include/bits/sockaddr.h",
+        source: "include/bits/sockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket-constants.h",
+        source: "include/bits/socket-constants.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket.h",
+        source: "include/bits/socket.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket2.h",
+        source: "include/bits/socket2.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket_type.h",
+        source: "include/bits/socket_type.h"
+      },
+      {
+        path: "/sysroot/include/bits/spawn_ext.h",
+        source: "include/bits/spawn_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/ss_flags.h",
+        source: "include/bits/ss_flags.h"
+      },
+      {
+        path: "/sysroot/include/bits/stat.h",
+        source: "include/bits/stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/statvfs.h",
+        source: "include/bits/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx-generic.h",
+        source: "include/bits/statx-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx.h",
+        source: "include/bits/statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-intn.h",
+        source: "include/bits/stdint-intn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-least.h",
+        source: "include/bits/stdint-least.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-uintn.h",
+        source: "include/bits/stdint-uintn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio-ldbl.h",
+        source: "include/bits/stdio-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio.h",
+        source: "include/bits/stdio.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2-decl.h",
+        source: "include/bits/stdio2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2.h",
+        source: "include/bits/stdio2.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio_lim.h",
+        source: "include/bits/stdio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-bsearch.h",
+        source: "include/bits/stdlib-bsearch.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-float.h",
+        source: "include/bits/stdlib-float.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-ldbl.h",
+        source: "include/bits/stdlib-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib.h",
+        source: "include/bits/stdlib.h"
+      },
+      {
+        path: "/sysroot/include/bits/string_fortified.h",
+        source: "include/bits/string_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/strings_fortified.h",
+        source: "include/bits/strings_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_mutex.h",
+        source: "include/bits/struct_mutex.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_rwlock.h",
+        source: "include/bits/struct_rwlock.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_stat.h",
+        source: "include/bits/struct_stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_stat_time64_helper.h",
+        source: "include/bits/struct_stat_time64_helper.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-decl.h",
+        source: "include/bits/syslog-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-ldbl.h",
+        source: "include/bits/syslog-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-path.h",
+        source: "include/bits/syslog-path.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog.h",
+        source: "include/bits/syslog.h"
+      },
+      {
+        path: "/sysroot/include/bits/sysmacros.h",
+        source: "include/bits/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-baud.h",
+        source: "include/bits/termios-baud.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cc.h",
+        source: "include/bits/termios-c_cc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cflag.h",
+        source: "include/bits/termios-c_cflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_iflag.h",
+        source: "include/bits/termios-c_iflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_lflag.h",
+        source: "include/bits/termios-c_lflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_oflag.h",
+        source: "include/bits/termios-c_oflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-misc.h",
+        source: "include/bits/termios-misc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-struct.h",
+        source: "include/bits/termios-struct.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-tcflow.h",
+        source: "include/bits/termios-tcflow.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios.h",
+        source: "include/bits/termios.h"
+      },
+      {
+        path: "/sysroot/include/bits/thread-shared-types.h",
+        source: "include/bits/thread-shared-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/time.h",
+        source: "include/bits/time.h"
+      },
+      {
+        path: "/sysroot/include/bits/time64.h",
+        source: "include/bits/time64.h"
+      },
+      {
+        path: "/sysroot/include/bits/timesize.h",
+        source: "include/bits/timesize.h"
+      },
+      {
+        path: "/sysroot/include/bits/timex.h",
+        source: "include/bits/timex.h"
+      },
+      {
+        path: "/sysroot/include/bits/types.h",
+        source: "include/bits/types.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/FILE.h",
+        source: "include/bits/types/FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__FILE.h",
+        source: "include/bits/types/__FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos64_t.h",
+        source: "include/bits/types/__fpos64_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos_t.h",
+        source: "include/bits/types/__fpos_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__locale_t.h",
+        source: "include/bits/types/__locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__mbstate_t.h",
+        source: "include/bits/types/__mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigset_t.h",
+        source: "include/bits/types/__sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigval_t.h",
+        source: "include/bits/types/__sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clock_t.h",
+        source: "include/bits/types/clock_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clockid_t.h",
+        source: "include/bits/types/clockid_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/cookie_io_functions_t.h",
+        source: "include/bits/types/cookie_io_functions_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/error_t.h",
+        source: "include/bits/types/error_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/idtype_t.h",
+        source: "include/bits/types/idtype_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/locale_t.h",
+        source: "include/bits/types/locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/mbstate_t.h",
+        source: "include/bits/types/mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sig_atomic_t.h",
+        source: "include/bits/types/sig_atomic_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigevent_t.h",
+        source: "include/bits/types/sigevent_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/siginfo_t.h",
+        source: "include/bits/types/siginfo_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigset_t.h",
+        source: "include/bits/types/sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigval_t.h",
+        source: "include/bits/types/sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/stack_t.h",
+        source: "include/bits/types/stack_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_FILE.h",
+        source: "include/bits/types/struct_FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct___jmp_buf_tag.h",
+        source: "include/bits/types/struct___jmp_buf_tag.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_iovec.h",
+        source: "include/bits/types/struct_iovec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_itimerspec.h",
+        source: "include/bits/types/struct_itimerspec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_osockaddr.h",
+        source: "include/bits/types/struct_osockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_rusage.h",
+        source: "include/bits/types/struct_rusage.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sched_param.h",
+        source: "include/bits/types/struct_sched_param.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sigstack.h",
+        source: "include/bits/types/struct_sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx.h",
+        source: "include/bits/types/struct_statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx_timestamp.h",
+        source: "include/bits/types/struct_statx_timestamp.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timespec.h",
+        source: "include/bits/types/struct_timespec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timeval.h",
+        source: "include/bits/types/struct_timeval.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_tm.h",
+        source: "include/bits/types/struct_tm.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/time_t.h",
+        source: "include/bits/types/time_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/timer_t.h",
+        source: "include/bits/types/timer_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/wint_t.h",
+        source: "include/bits/types/wint_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/typesizes.h",
+        source: "include/bits/typesizes.h"
+      },
+      {
+        path: "/sysroot/include/bits/uintn-identity.h",
+        source: "include/bits/uintn-identity.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio-ext.h",
+        source: "include/bits/uio-ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio_lim.h",
+        source: "include/bits/uio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd-decl.h",
+        source: "include/bits/unistd-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd.h",
+        source: "include/bits/unistd.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd_ext.h",
+        source: "include/bits/unistd_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/utsname.h",
+        source: "include/bits/utsname.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitflags.h",
+        source: "include/bits/waitflags.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitstatus.h",
+        source: "include/bits/waitstatus.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar-ldbl.h",
+        source: "include/bits/wchar-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar.h",
+        source: "include/bits/wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2-decl.h",
+        source: "include/bits/wchar2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2.h",
+        source: "include/bits/wchar2.h"
+      },
+      {
+        path: "/sysroot/include/bits/wctype-wchar.h",
+        source: "include/bits/wctype-wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wordsize.h",
+        source: "include/bits/wordsize.h"
+      },
+      {
+        path: "/sysroot/include/bits/xopen_lim.h",
+        source: "include/bits/xopen_lim.h"
+      },
+      {
+        path: "/sysroot/include/complex.h",
+        source: "include/complex.h"
+      },
+      {
+        path: "/sysroot/include/cpio.h",
+        source: "include/cpio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/endian.h",
+        source: "include/endian.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/features-time64.h",
+        source: "include/features-time64.h"
+      },
+      {
+        path: "/sysroot/include/features.h",
+        source: "include/features.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/fmtmsg.h",
+        source: "include/fmtmsg.h"
+      },
+      {
+        path: "/sysroot/include/fnmatch.h",
+        source: "include/fnmatch.h"
+      },
+      {
+        path: "/sysroot/include/ftw.h",
+        source: "include/ftw.h"
+      },
+      {
+        path: "/sysroot/include/glob.h",
+        source: "include/glob.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs-64.h",
+        source: "include/gnu/stubs-64.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs.h",
+        source: "include/gnu/stubs.h"
+      },
+      {
+        path: "/sysroot/include/grp.h",
+        source: "include/grp.h"
+      },
+      {
+        path: "/sysroot/include/iconv.h",
+        source: "include/iconv.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/langinfo.h",
+        source: "include/langinfo.h"
+      },
+      {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/linux/close_range.h",
+        source: "include/linux/close_range.h"
+      },
+      {
+        path: "/sysroot/include/linux/errno.h",
+        source: "include/linux/errno.h"
+      },
+      {
+        path: "/sysroot/include/linux/falloc.h",
+        source: "include/linux/falloc.h"
+      },
+      {
+        path: "/sysroot/include/linux/ioctl.h",
+        source: "include/linux/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/limits.h",
+        source: "include/linux/limits.h"
+      },
+      {
+        path: "/sysroot/include/linux/posix_types.h",
+        source: "include/linux/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/stat.h",
+        source: "include/linux/stat.h"
+      },
+      {
+        path: "/sysroot/include/linux/stddef.h",
+        source: "include/linux/stddef.h"
+      },
+      {
+        path: "/sysroot/include/linux/types.h",
+        source: "include/linux/types.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/monetary.h",
+        source: "include/monetary.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/nl_types.h",
+        source: "include/nl_types.h"
+      },
+      {
+        path: "/sysroot/include/poll.h",
+        source: "include/poll.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/pwd.h",
+        source: "include/pwd.h"
+      },
+      {
+        path: "/sysroot/include/regex.h",
+        source: "include/regex.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/rpc/netdb.h",
+        source: "include/rpc/netdb.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/search.h",
+        source: "include/search.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
+      },
+      {
+        path: "/sysroot/include/spawn.h",
+        source: "include/spawn.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -387,8 +1484,16 @@ var TinycWeb = (() => {
         source: "include/stdatomic.h"
       },
       {
+        path: "/sysroot/include/stdbit.h",
+        source: "include/stdbit.h"
+      },
+      {
         path: "/sysroot/include/stdbool.h",
         source: "include/stdbool.h"
+      },
+      {
+        path: "/sysroot/include/stdc-predef.h",
+        source: "include/stdc-predef.h"
       },
       {
         path: "/sysroot/include/stddef.h",
@@ -399,24 +1504,168 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/cdefs.h",
+        source: "include/sys/cdefs.h"
+      },
+      {
+        path: "/sysroot/include/sys/ioctl.h",
+        source: "include/sys/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/poll.h",
+        source: "include/sys/poll.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/statvfs.h",
+        source: "include/sys/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/syslog.h",
+        source: "include/sys/syslog.h"
+      },
+      {
+        path: "/sysroot/include/sys/sysmacros.h",
+        source: "include/sys/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/times.h",
+        source: "include/sys/times.h"
+      },
+      {
+        path: "/sysroot/include/sys/ttydefaults.h",
+        source: "include/sys/ttydefaults.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/utsname.h",
+        source: "include/sys/utsname.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
+      },
+      {
+        path: "/sysroot/include/syslog.h",
+        source: "include/syslog.h"
+      },
+      {
+        path: "/sysroot/include/tar.h",
+        source: "include/tar.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/termios.h",
+        source: "include/termios.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/ucontext.h",
+        source: "include/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -469,7 +1718,8 @@ var TinycWeb = (() => {
         format: "ar archive",
         ext: ".a"
       }
-    }
+    },
+    libcIncludeRoot: "vendor-glibc/x86_64-linux-gnu/include"
   };
 
   // sysroot-manifests/aarch64-linux-gnu.json
@@ -481,20 +1731,1104 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/alloca.h",
+        source: "include/alloca.h"
+      },
+      {
+        path: "/sysroot/include/ar.h",
+        source: "include/ar.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/bitsperlong.h",
+        source: "include/asm-generic/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno-base.h",
+        source: "include/asm-generic/errno-base.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno.h",
+        source: "include/asm-generic/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/int-ll64.h",
+        source: "include/asm-generic/int-ll64.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctl.h",
+        source: "include/asm-generic/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctls.h",
+        source: "include/asm-generic/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/posix_types.h",
+        source: "include/asm-generic/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/socket.h",
+        source: "include/asm-generic/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/sockios.h",
+        source: "include/asm-generic/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/types.h",
+        source: "include/asm-generic/types.h"
+      },
+      {
+        path: "/sysroot/include/asm/bitsperlong.h",
+        source: "include/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm/errno.h",
+        source: "include/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctl.h",
+        source: "include/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctls.h",
+        source: "include/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types.h",
+        source: "include/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm/sigcontext.h",
+        source: "include/asm/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/asm/socket.h",
+        source: "include/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm/sockios.h",
+        source: "include/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm/sve_context.h",
+        source: "include/asm/sve_context.h"
+      },
+      {
+        path: "/sysroot/include/asm/types.h",
+        source: "include/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/bits/atomic_wide_counter.h",
+        source: "include/bits/atomic_wide_counter.h"
+      },
+      {
+        path: "/sysroot/include/bits/byteswap.h",
+        source: "include/bits/byteswap.h"
+      },
+      {
+        path: "/sysroot/include/bits/cmathcalls.h",
+        source: "include/bits/cmathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/confname.h",
+        source: "include/bits/confname.h"
+      },
+      {
+        path: "/sysroot/include/bits/cpu-set.h",
+        source: "include/bits/cpu-set.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent.h",
+        source: "include/bits/dirent.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent_ext.h",
+        source: "include/bits/dirent_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/dl_find_object.h",
+        source: "include/bits/dl_find_object.h"
+      },
+      {
+        path: "/sysroot/include/bits/dlfcn.h",
+        source: "include/bits/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/bits/endian.h",
+        source: "include/bits/endian.h"
+      },
+      {
+        path: "/sysroot/include/bits/endianness.h",
+        source: "include/bits/endianness.h"
+      },
+      {
+        path: "/sysroot/include/bits/environments.h",
+        source: "include/bits/environments.h"
+      },
+      {
+        path: "/sysroot/include/bits/errno.h",
+        source: "include/bits/errno.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl-linux.h",
+        source: "include/bits/fcntl-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl.h",
+        source: "include/bits/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl2.h",
+        source: "include/bits/fcntl2.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv.h",
+        source: "include/bits/fenv.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn-common.h",
+        source: "include/bits/floatn-common.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn.h",
+        source: "include/bits/floatn.h"
+      },
+      {
+        path: "/sysroot/include/bits/flt-eval-method.h",
+        source: "include/bits/flt-eval-method.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-fast.h",
+        source: "include/bits/fp-fast.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-logb.h",
+        source: "include/bits/fp-logb.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_core.h",
+        source: "include/bits/getopt_core.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_posix.h",
+        source: "include/bits/getopt_posix.h"
+      },
+      {
+        path: "/sysroot/include/bits/in.h",
+        source: "include/bits/in.h"
+      },
+      {
+        path: "/sysroot/include/bits/indirect-return.h",
+        source: "include/bits/indirect-return.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctl-types.h",
+        source: "include/bits/ioctl-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctls.h",
+        source: "include/bits/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/bits/iscanonical.h",
+        source: "include/bits/iscanonical.h"
+      },
+      {
+        path: "/sysroot/include/bits/libc-header-start.h",
+        source: "include/bits/libc-header-start.h"
+      },
+      {
+        path: "/sysroot/include/bits/libm-simd-decl-stubs.h",
+        source: "include/bits/libm-simd-decl-stubs.h"
+      },
+      {
+        path: "/sysroot/include/bits/local_lim.h",
+        source: "include/bits/local_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/locale.h",
+        source: "include/bits/locale.h"
+      },
+      {
+        path: "/sysroot/include/bits/long-double.h",
+        source: "include/bits/long-double.h"
+      },
+      {
+        path: "/sysroot/include/bits/math-vector.h",
+        source: "include/bits/math-vector.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-helper-functions.h",
+        source: "include/bits/mathcalls-helper-functions.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-narrow.h",
+        source: "include/bits/mathcalls-narrow.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls.h",
+        source: "include/bits/mathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathdef.h",
+        source: "include/bits/mathdef.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-linux.h",
+        source: "include/bits/mman-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-map-flags-generic.h",
+        source: "include/bits/mman-map-flags-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-shared.h",
+        source: "include/bits/mman-shared.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman.h",
+        source: "include/bits/mman.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman_ext.h",
+        source: "include/bits/mman_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/monetary-ldbl.h",
+        source: "include/bits/monetary-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/netdb.h",
+        source: "include/bits/netdb.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll.h",
+        source: "include/bits/poll.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll2.h",
+        source: "include/bits/poll2.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix1_lim.h",
+        source: "include/bits/posix1_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix2_lim.h",
+        source: "include/bits/posix2_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix_opt.h",
+        source: "include/bits/posix_opt.h"
+      },
+      {
+        path: "/sysroot/include/bits/procfs-extra.h",
+        source: "include/bits/procfs-extra.h"
+      },
+      {
+        path: "/sysroot/include/bits/procfs-id.h",
+        source: "include/bits/procfs-id.h"
+      },
+      {
+        path: "/sysroot/include/bits/procfs-prregset.h",
+        source: "include/bits/procfs-prregset.h"
+      },
+      {
+        path: "/sysroot/include/bits/procfs.h",
+        source: "include/bits/procfs.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min-dynamic.h",
+        source: "include/bits/pthread_stack_min-dynamic.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min.h",
+        source: "include/bits/pthread_stack_min.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes-arch.h",
+        source: "include/bits/pthreadtypes-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes.h",
+        source: "include/bits/pthreadtypes.h"
+      },
+      {
+        path: "/sysroot/include/bits/resource.h",
+        source: "include/bits/resource.h"
+      },
+      {
+        path: "/sysroot/include/bits/sched.h",
+        source: "include/bits/sched.h"
+      },
+      {
+        path: "/sysroot/include/bits/select-decl.h",
+        source: "include/bits/select-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/select.h",
+        source: "include/bits/select.h"
+      },
+      {
+        path: "/sysroot/include/bits/select2.h",
+        source: "include/bits/select2.h"
+      },
+      {
+        path: "/sysroot/include/bits/semaphore.h",
+        source: "include/bits/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp.h",
+        source: "include/bits/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp2.h",
+        source: "include/bits/setjmp2.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigaction.h",
+        source: "include/bits/sigaction.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigcontext.h",
+        source: "include/bits/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigevent-consts.h",
+        source: "include/bits/sigevent-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-arch.h",
+        source: "include/bits/siginfo-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts-arch.h",
+        source: "include/bits/siginfo-consts-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts.h",
+        source: "include/bits/siginfo-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/signal_ext.h",
+        source: "include/bits/signal_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-arch.h",
+        source: "include/bits/signum-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-generic.h",
+        source: "include/bits/signum-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstack.h",
+        source: "include/bits/sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstksz.h",
+        source: "include/bits/sigstksz.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigthread.h",
+        source: "include/bits/sigthread.h"
+      },
+      {
+        path: "/sysroot/include/bits/sockaddr.h",
+        source: "include/bits/sockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket-constants.h",
+        source: "include/bits/socket-constants.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket.h",
+        source: "include/bits/socket.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket2.h",
+        source: "include/bits/socket2.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket_type.h",
+        source: "include/bits/socket_type.h"
+      },
+      {
+        path: "/sysroot/include/bits/spawn_ext.h",
+        source: "include/bits/spawn_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/ss_flags.h",
+        source: "include/bits/ss_flags.h"
+      },
+      {
+        path: "/sysroot/include/bits/stat.h",
+        source: "include/bits/stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/statvfs.h",
+        source: "include/bits/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx-generic.h",
+        source: "include/bits/statx-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx.h",
+        source: "include/bits/statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-intn.h",
+        source: "include/bits/stdint-intn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-least.h",
+        source: "include/bits/stdint-least.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-uintn.h",
+        source: "include/bits/stdint-uintn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio-ldbl.h",
+        source: "include/bits/stdio-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio.h",
+        source: "include/bits/stdio.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2-decl.h",
+        source: "include/bits/stdio2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2.h",
+        source: "include/bits/stdio2.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio_lim.h",
+        source: "include/bits/stdio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-bsearch.h",
+        source: "include/bits/stdlib-bsearch.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-float.h",
+        source: "include/bits/stdlib-float.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-ldbl.h",
+        source: "include/bits/stdlib-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib.h",
+        source: "include/bits/stdlib.h"
+      },
+      {
+        path: "/sysroot/include/bits/string_fortified.h",
+        source: "include/bits/string_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/strings_fortified.h",
+        source: "include/bits/strings_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_mutex.h",
+        source: "include/bits/struct_mutex.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_rwlock.h",
+        source: "include/bits/struct_rwlock.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_stat.h",
+        source: "include/bits/struct_stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-decl.h",
+        source: "include/bits/syslog-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-ldbl.h",
+        source: "include/bits/syslog-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-path.h",
+        source: "include/bits/syslog-path.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog.h",
+        source: "include/bits/syslog.h"
+      },
+      {
+        path: "/sysroot/include/bits/sysmacros.h",
+        source: "include/bits/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-baud.h",
+        source: "include/bits/termios-baud.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cc.h",
+        source: "include/bits/termios-c_cc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cflag.h",
+        source: "include/bits/termios-c_cflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_iflag.h",
+        source: "include/bits/termios-c_iflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_lflag.h",
+        source: "include/bits/termios-c_lflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_oflag.h",
+        source: "include/bits/termios-c_oflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-misc.h",
+        source: "include/bits/termios-misc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-struct.h",
+        source: "include/bits/termios-struct.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-tcflow.h",
+        source: "include/bits/termios-tcflow.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios.h",
+        source: "include/bits/termios.h"
+      },
+      {
+        path: "/sysroot/include/bits/thread-shared-types.h",
+        source: "include/bits/thread-shared-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/time.h",
+        source: "include/bits/time.h"
+      },
+      {
+        path: "/sysroot/include/bits/time64.h",
+        source: "include/bits/time64.h"
+      },
+      {
+        path: "/sysroot/include/bits/timesize.h",
+        source: "include/bits/timesize.h"
+      },
+      {
+        path: "/sysroot/include/bits/timex.h",
+        source: "include/bits/timex.h"
+      },
+      {
+        path: "/sysroot/include/bits/types.h",
+        source: "include/bits/types.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/FILE.h",
+        source: "include/bits/types/FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__FILE.h",
+        source: "include/bits/types/__FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos64_t.h",
+        source: "include/bits/types/__fpos64_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos_t.h",
+        source: "include/bits/types/__fpos_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__locale_t.h",
+        source: "include/bits/types/__locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__mbstate_t.h",
+        source: "include/bits/types/__mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigset_t.h",
+        source: "include/bits/types/__sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigval_t.h",
+        source: "include/bits/types/__sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clock_t.h",
+        source: "include/bits/types/clock_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clockid_t.h",
+        source: "include/bits/types/clockid_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/cookie_io_functions_t.h",
+        source: "include/bits/types/cookie_io_functions_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/error_t.h",
+        source: "include/bits/types/error_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/idtype_t.h",
+        source: "include/bits/types/idtype_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/locale_t.h",
+        source: "include/bits/types/locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/mbstate_t.h",
+        source: "include/bits/types/mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sig_atomic_t.h",
+        source: "include/bits/types/sig_atomic_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigevent_t.h",
+        source: "include/bits/types/sigevent_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/siginfo_t.h",
+        source: "include/bits/types/siginfo_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigset_t.h",
+        source: "include/bits/types/sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigval_t.h",
+        source: "include/bits/types/sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/stack_t.h",
+        source: "include/bits/types/stack_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_FILE.h",
+        source: "include/bits/types/struct_FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct___jmp_buf_tag.h",
+        source: "include/bits/types/struct___jmp_buf_tag.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_iovec.h",
+        source: "include/bits/types/struct_iovec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_itimerspec.h",
+        source: "include/bits/types/struct_itimerspec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_osockaddr.h",
+        source: "include/bits/types/struct_osockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_rusage.h",
+        source: "include/bits/types/struct_rusage.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sched_param.h",
+        source: "include/bits/types/struct_sched_param.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sigstack.h",
+        source: "include/bits/types/struct_sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx.h",
+        source: "include/bits/types/struct_statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx_timestamp.h",
+        source: "include/bits/types/struct_statx_timestamp.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timespec.h",
+        source: "include/bits/types/struct_timespec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timeval.h",
+        source: "include/bits/types/struct_timeval.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_tm.h",
+        source: "include/bits/types/struct_tm.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/time_t.h",
+        source: "include/bits/types/time_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/timer_t.h",
+        source: "include/bits/types/timer_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/wint_t.h",
+        source: "include/bits/types/wint_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/typesizes.h",
+        source: "include/bits/typesizes.h"
+      },
+      {
+        path: "/sysroot/include/bits/uintn-identity.h",
+        source: "include/bits/uintn-identity.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio-ext.h",
+        source: "include/bits/uio-ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio_lim.h",
+        source: "include/bits/uio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd-decl.h",
+        source: "include/bits/unistd-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd.h",
+        source: "include/bits/unistd.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd_ext.h",
+        source: "include/bits/unistd_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/utsname.h",
+        source: "include/bits/utsname.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitflags.h",
+        source: "include/bits/waitflags.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitstatus.h",
+        source: "include/bits/waitstatus.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar-ldbl.h",
+        source: "include/bits/wchar-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar.h",
+        source: "include/bits/wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2-decl.h",
+        source: "include/bits/wchar2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2.h",
+        source: "include/bits/wchar2.h"
+      },
+      {
+        path: "/sysroot/include/bits/wctype-wchar.h",
+        source: "include/bits/wctype-wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wordsize.h",
+        source: "include/bits/wordsize.h"
+      },
+      {
+        path: "/sysroot/include/bits/xopen_lim.h",
+        source: "include/bits/xopen_lim.h"
+      },
+      {
+        path: "/sysroot/include/complex.h",
+        source: "include/complex.h"
+      },
+      {
+        path: "/sysroot/include/cpio.h",
+        source: "include/cpio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/endian.h",
+        source: "include/endian.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/features-time64.h",
+        source: "include/features-time64.h"
+      },
+      {
+        path: "/sysroot/include/features.h",
+        source: "include/features.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/fmtmsg.h",
+        source: "include/fmtmsg.h"
+      },
+      {
+        path: "/sysroot/include/fnmatch.h",
+        source: "include/fnmatch.h"
+      },
+      {
+        path: "/sysroot/include/ftw.h",
+        source: "include/ftw.h"
+      },
+      {
+        path: "/sysroot/include/glob.h",
+        source: "include/glob.h"
+      },
+      {
+        path: "/sysroot/include/gnu/lib-names-lp64.h",
+        source: "include/gnu/lib-names-lp64.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs-lp64.h",
+        source: "include/gnu/stubs-lp64.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs.h",
+        source: "include/gnu/stubs.h"
+      },
+      {
+        path: "/sysroot/include/grp.h",
+        source: "include/grp.h"
+      },
+      {
+        path: "/sysroot/include/iconv.h",
+        source: "include/iconv.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/langinfo.h",
+        source: "include/langinfo.h"
+      },
+      {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/linux/close_range.h",
+        source: "include/linux/close_range.h"
+      },
+      {
+        path: "/sysroot/include/linux/errno.h",
+        source: "include/linux/errno.h"
+      },
+      {
+        path: "/sysroot/include/linux/falloc.h",
+        source: "include/linux/falloc.h"
+      },
+      {
+        path: "/sysroot/include/linux/ioctl.h",
+        source: "include/linux/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/limits.h",
+        source: "include/linux/limits.h"
+      },
+      {
+        path: "/sysroot/include/linux/posix_types.h",
+        source: "include/linux/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/stat.h",
+        source: "include/linux/stat.h"
+      },
+      {
+        path: "/sysroot/include/linux/stddef.h",
+        source: "include/linux/stddef.h"
+      },
+      {
+        path: "/sysroot/include/linux/types.h",
+        source: "include/linux/types.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/monetary.h",
+        source: "include/monetary.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/nl_types.h",
+        source: "include/nl_types.h"
+      },
+      {
+        path: "/sysroot/include/poll.h",
+        source: "include/poll.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/pwd.h",
+        source: "include/pwd.h"
+      },
+      {
+        path: "/sysroot/include/regex.h",
+        source: "include/regex.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/rpc/netdb.h",
+        source: "include/rpc/netdb.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/search.h",
+        source: "include/search.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
+      },
+      {
+        path: "/sysroot/include/spawn.h",
+        source: "include/spawn.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -509,8 +2843,16 @@ var TinycWeb = (() => {
         source: "include/stdatomic.h"
       },
       {
+        path: "/sysroot/include/stdbit.h",
+        source: "include/stdbit.h"
+      },
+      {
         path: "/sysroot/include/stdbool.h",
         source: "include/stdbool.h"
+      },
+      {
+        path: "/sysroot/include/stdc-predef.h",
+        source: "include/stdc-predef.h"
       },
       {
         path: "/sysroot/include/stddef.h",
@@ -521,24 +2863,180 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/cdefs.h",
+        source: "include/sys/cdefs.h"
+      },
+      {
+        path: "/sysroot/include/sys/ifunc.h",
+        source: "include/sys/ifunc.h"
+      },
+      {
+        path: "/sysroot/include/sys/ioctl.h",
+        source: "include/sys/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/poll.h",
+        source: "include/sys/poll.h"
+      },
+      {
+        path: "/sysroot/include/sys/procfs.h",
+        source: "include/sys/procfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/statvfs.h",
+        source: "include/sys/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/syslog.h",
+        source: "include/sys/syslog.h"
+      },
+      {
+        path: "/sysroot/include/sys/sysmacros.h",
+        source: "include/sys/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/times.h",
+        source: "include/sys/times.h"
+      },
+      {
+        path: "/sysroot/include/sys/ttydefaults.h",
+        source: "include/sys/ttydefaults.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/user.h",
+        source: "include/sys/user.h"
+      },
+      {
+        path: "/sysroot/include/sys/utsname.h",
+        source: "include/sys/utsname.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
+      },
+      {
+        path: "/sysroot/include/syslog.h",
+        source: "include/syslog.h"
+      },
+      {
+        path: "/sysroot/include/tar.h",
+        source: "include/tar.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/termios.h",
+        source: "include/termios.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/ucontext.h",
+        source: "include/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -591,7 +3089,8 @@ var TinycWeb = (() => {
         format: "ar archive",
         ext: ".a"
       }
-    }
+    },
+    libcIncludeRoot: "vendor-glibc/aarch64-linux-gnu/include"
   };
 
   // sysroot-manifests/riscv64-linux-gnu.json
@@ -603,20 +3102,1080 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/alloca.h",
+        source: "include/alloca.h"
+      },
+      {
+        path: "/sysroot/include/ar.h",
+        source: "include/ar.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/bitsperlong.h",
+        source: "include/asm-generic/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno-base.h",
+        source: "include/asm-generic/errno-base.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno.h",
+        source: "include/asm-generic/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/int-ll64.h",
+        source: "include/asm-generic/int-ll64.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctl.h",
+        source: "include/asm-generic/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctls.h",
+        source: "include/asm-generic/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/posix_types.h",
+        source: "include/asm-generic/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/socket.h",
+        source: "include/asm-generic/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/sockios.h",
+        source: "include/asm-generic/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/types.h",
+        source: "include/asm-generic/types.h"
+      },
+      {
+        path: "/sysroot/include/asm/bitsperlong.h",
+        source: "include/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm/errno.h",
+        source: "include/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctl.h",
+        source: "include/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm/ioctls.h",
+        source: "include/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm/posix_types.h",
+        source: "include/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm/socket.h",
+        source: "include/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm/sockios.h",
+        source: "include/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm/types.h",
+        source: "include/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/bits/atomic_wide_counter.h",
+        source: "include/bits/atomic_wide_counter.h"
+      },
+      {
+        path: "/sysroot/include/bits/byteswap.h",
+        source: "include/bits/byteswap.h"
+      },
+      {
+        path: "/sysroot/include/bits/cmathcalls.h",
+        source: "include/bits/cmathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/confname.h",
+        source: "include/bits/confname.h"
+      },
+      {
+        path: "/sysroot/include/bits/cpu-set.h",
+        source: "include/bits/cpu-set.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent.h",
+        source: "include/bits/dirent.h"
+      },
+      {
+        path: "/sysroot/include/bits/dirent_ext.h",
+        source: "include/bits/dirent_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/dl_find_object.h",
+        source: "include/bits/dl_find_object.h"
+      },
+      {
+        path: "/sysroot/include/bits/dlfcn.h",
+        source: "include/bits/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/bits/endian.h",
+        source: "include/bits/endian.h"
+      },
+      {
+        path: "/sysroot/include/bits/endianness.h",
+        source: "include/bits/endianness.h"
+      },
+      {
+        path: "/sysroot/include/bits/environments.h",
+        source: "include/bits/environments.h"
+      },
+      {
+        path: "/sysroot/include/bits/errno.h",
+        source: "include/bits/errno.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl-linux.h",
+        source: "include/bits/fcntl-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl.h",
+        source: "include/bits/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl2.h",
+        source: "include/bits/fcntl2.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv.h",
+        source: "include/bits/fenv.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn-common.h",
+        source: "include/bits/floatn-common.h"
+      },
+      {
+        path: "/sysroot/include/bits/floatn.h",
+        source: "include/bits/floatn.h"
+      },
+      {
+        path: "/sysroot/include/bits/flt-eval-method.h",
+        source: "include/bits/flt-eval-method.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-fast.h",
+        source: "include/bits/fp-fast.h"
+      },
+      {
+        path: "/sysroot/include/bits/fp-logb.h",
+        source: "include/bits/fp-logb.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_core.h",
+        source: "include/bits/getopt_core.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt_posix.h",
+        source: "include/bits/getopt_posix.h"
+      },
+      {
+        path: "/sysroot/include/bits/in.h",
+        source: "include/bits/in.h"
+      },
+      {
+        path: "/sysroot/include/bits/indirect-return.h",
+        source: "include/bits/indirect-return.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctl-types.h",
+        source: "include/bits/ioctl-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctls.h",
+        source: "include/bits/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/bits/iscanonical.h",
+        source: "include/bits/iscanonical.h"
+      },
+      {
+        path: "/sysroot/include/bits/libc-header-start.h",
+        source: "include/bits/libc-header-start.h"
+      },
+      {
+        path: "/sysroot/include/bits/libm-simd-decl-stubs.h",
+        source: "include/bits/libm-simd-decl-stubs.h"
+      },
+      {
+        path: "/sysroot/include/bits/local_lim.h",
+        source: "include/bits/local_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/locale.h",
+        source: "include/bits/locale.h"
+      },
+      {
+        path: "/sysroot/include/bits/long-double.h",
+        source: "include/bits/long-double.h"
+      },
+      {
+        path: "/sysroot/include/bits/math-vector.h",
+        source: "include/bits/math-vector.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-helper-functions.h",
+        source: "include/bits/mathcalls-helper-functions.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls-narrow.h",
+        source: "include/bits/mathcalls-narrow.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathcalls.h",
+        source: "include/bits/mathcalls.h"
+      },
+      {
+        path: "/sysroot/include/bits/mathdef.h",
+        source: "include/bits/mathdef.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-linux.h",
+        source: "include/bits/mman-linux.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-map-flags-generic.h",
+        source: "include/bits/mman-map-flags-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman-shared.h",
+        source: "include/bits/mman-shared.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman.h",
+        source: "include/bits/mman.h"
+      },
+      {
+        path: "/sysroot/include/bits/mman_ext.h",
+        source: "include/bits/mman_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/monetary-ldbl.h",
+        source: "include/bits/monetary-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/netdb.h",
+        source: "include/bits/netdb.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll.h",
+        source: "include/bits/poll.h"
+      },
+      {
+        path: "/sysroot/include/bits/poll2.h",
+        source: "include/bits/poll2.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix1_lim.h",
+        source: "include/bits/posix1_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix2_lim.h",
+        source: "include/bits/posix2_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix_opt.h",
+        source: "include/bits/posix_opt.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min-dynamic.h",
+        source: "include/bits/pthread_stack_min-dynamic.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_stack_min.h",
+        source: "include/bits/pthread_stack_min.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes-arch.h",
+        source: "include/bits/pthreadtypes-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthreadtypes.h",
+        source: "include/bits/pthreadtypes.h"
+      },
+      {
+        path: "/sysroot/include/bits/resource.h",
+        source: "include/bits/resource.h"
+      },
+      {
+        path: "/sysroot/include/bits/sched.h",
+        source: "include/bits/sched.h"
+      },
+      {
+        path: "/sysroot/include/bits/select-decl.h",
+        source: "include/bits/select-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/select.h",
+        source: "include/bits/select.h"
+      },
+      {
+        path: "/sysroot/include/bits/select2.h",
+        source: "include/bits/select2.h"
+      },
+      {
+        path: "/sysroot/include/bits/semaphore.h",
+        source: "include/bits/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp.h",
+        source: "include/bits/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/bits/setjmp2.h",
+        source: "include/bits/setjmp2.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigaction.h",
+        source: "include/bits/sigaction.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigcontext.h",
+        source: "include/bits/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigevent-consts.h",
+        source: "include/bits/sigevent-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-arch.h",
+        source: "include/bits/siginfo-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts-arch.h",
+        source: "include/bits/siginfo-consts-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/siginfo-consts.h",
+        source: "include/bits/siginfo-consts.h"
+      },
+      {
+        path: "/sysroot/include/bits/signal_ext.h",
+        source: "include/bits/signal_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-arch.h",
+        source: "include/bits/signum-arch.h"
+      },
+      {
+        path: "/sysroot/include/bits/signum-generic.h",
+        source: "include/bits/signum-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstack.h",
+        source: "include/bits/sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigstksz.h",
+        source: "include/bits/sigstksz.h"
+      },
+      {
+        path: "/sysroot/include/bits/sigthread.h",
+        source: "include/bits/sigthread.h"
+      },
+      {
+        path: "/sysroot/include/bits/sockaddr.h",
+        source: "include/bits/sockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket-constants.h",
+        source: "include/bits/socket-constants.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket.h",
+        source: "include/bits/socket.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket2.h",
+        source: "include/bits/socket2.h"
+      },
+      {
+        path: "/sysroot/include/bits/socket_type.h",
+        source: "include/bits/socket_type.h"
+      },
+      {
+        path: "/sysroot/include/bits/spawn_ext.h",
+        source: "include/bits/spawn_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/ss_flags.h",
+        source: "include/bits/ss_flags.h"
+      },
+      {
+        path: "/sysroot/include/bits/stat.h",
+        source: "include/bits/stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/statvfs.h",
+        source: "include/bits/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx-generic.h",
+        source: "include/bits/statx-generic.h"
+      },
+      {
+        path: "/sysroot/include/bits/statx.h",
+        source: "include/bits/statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-intn.h",
+        source: "include/bits/stdint-intn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-least.h",
+        source: "include/bits/stdint-least.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdint-uintn.h",
+        source: "include/bits/stdint-uintn.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio-ldbl.h",
+        source: "include/bits/stdio-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio.h",
+        source: "include/bits/stdio.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2-decl.h",
+        source: "include/bits/stdio2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio2.h",
+        source: "include/bits/stdio2.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdio_lim.h",
+        source: "include/bits/stdio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-bsearch.h",
+        source: "include/bits/stdlib-bsearch.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-float.h",
+        source: "include/bits/stdlib-float.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib-ldbl.h",
+        source: "include/bits/stdlib-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdlib.h",
+        source: "include/bits/stdlib.h"
+      },
+      {
+        path: "/sysroot/include/bits/string_fortified.h",
+        source: "include/bits/string_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/strings_fortified.h",
+        source: "include/bits/strings_fortified.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_mutex.h",
+        source: "include/bits/struct_mutex.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_rwlock.h",
+        source: "include/bits/struct_rwlock.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_stat.h",
+        source: "include/bits/struct_stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-decl.h",
+        source: "include/bits/syslog-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-ldbl.h",
+        source: "include/bits/syslog-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog-path.h",
+        source: "include/bits/syslog-path.h"
+      },
+      {
+        path: "/sysroot/include/bits/syslog.h",
+        source: "include/bits/syslog.h"
+      },
+      {
+        path: "/sysroot/include/bits/sysmacros.h",
+        source: "include/bits/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-baud.h",
+        source: "include/bits/termios-baud.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cc.h",
+        source: "include/bits/termios-c_cc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_cflag.h",
+        source: "include/bits/termios-c_cflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_iflag.h",
+        source: "include/bits/termios-c_iflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_lflag.h",
+        source: "include/bits/termios-c_lflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-c_oflag.h",
+        source: "include/bits/termios-c_oflag.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-misc.h",
+        source: "include/bits/termios-misc.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-struct.h",
+        source: "include/bits/termios-struct.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios-tcflow.h",
+        source: "include/bits/termios-tcflow.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios.h",
+        source: "include/bits/termios.h"
+      },
+      {
+        path: "/sysroot/include/bits/thread-shared-types.h",
+        source: "include/bits/thread-shared-types.h"
+      },
+      {
+        path: "/sysroot/include/bits/time.h",
+        source: "include/bits/time.h"
+      },
+      {
+        path: "/sysroot/include/bits/time64.h",
+        source: "include/bits/time64.h"
+      },
+      {
+        path: "/sysroot/include/bits/timesize.h",
+        source: "include/bits/timesize.h"
+      },
+      {
+        path: "/sysroot/include/bits/timex.h",
+        source: "include/bits/timex.h"
+      },
+      {
+        path: "/sysroot/include/bits/types.h",
+        source: "include/bits/types.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/FILE.h",
+        source: "include/bits/types/FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__FILE.h",
+        source: "include/bits/types/__FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos64_t.h",
+        source: "include/bits/types/__fpos64_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__fpos_t.h",
+        source: "include/bits/types/__fpos_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__locale_t.h",
+        source: "include/bits/types/__locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__mbstate_t.h",
+        source: "include/bits/types/__mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigset_t.h",
+        source: "include/bits/types/__sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/__sigval_t.h",
+        source: "include/bits/types/__sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clock_t.h",
+        source: "include/bits/types/clock_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/clockid_t.h",
+        source: "include/bits/types/clockid_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/cookie_io_functions_t.h",
+        source: "include/bits/types/cookie_io_functions_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/error_t.h",
+        source: "include/bits/types/error_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/idtype_t.h",
+        source: "include/bits/types/idtype_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/locale_t.h",
+        source: "include/bits/types/locale_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/mbstate_t.h",
+        source: "include/bits/types/mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sig_atomic_t.h",
+        source: "include/bits/types/sig_atomic_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigevent_t.h",
+        source: "include/bits/types/sigevent_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/siginfo_t.h",
+        source: "include/bits/types/siginfo_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigset_t.h",
+        source: "include/bits/types/sigset_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/sigval_t.h",
+        source: "include/bits/types/sigval_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/stack_t.h",
+        source: "include/bits/types/stack_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_FILE.h",
+        source: "include/bits/types/struct_FILE.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct___jmp_buf_tag.h",
+        source: "include/bits/types/struct___jmp_buf_tag.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_iovec.h",
+        source: "include/bits/types/struct_iovec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_itimerspec.h",
+        source: "include/bits/types/struct_itimerspec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_osockaddr.h",
+        source: "include/bits/types/struct_osockaddr.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_rusage.h",
+        source: "include/bits/types/struct_rusage.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sched_param.h",
+        source: "include/bits/types/struct_sched_param.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_sigstack.h",
+        source: "include/bits/types/struct_sigstack.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx.h",
+        source: "include/bits/types/struct_statx.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_statx_timestamp.h",
+        source: "include/bits/types/struct_statx_timestamp.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timespec.h",
+        source: "include/bits/types/struct_timespec.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_timeval.h",
+        source: "include/bits/types/struct_timeval.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/struct_tm.h",
+        source: "include/bits/types/struct_tm.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/time_t.h",
+        source: "include/bits/types/time_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/timer_t.h",
+        source: "include/bits/types/timer_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/types/wint_t.h",
+        source: "include/bits/types/wint_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/typesizes.h",
+        source: "include/bits/typesizes.h"
+      },
+      {
+        path: "/sysroot/include/bits/uintn-identity.h",
+        source: "include/bits/uintn-identity.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio-ext.h",
+        source: "include/bits/uio-ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/uio_lim.h",
+        source: "include/bits/uio_lim.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd-decl.h",
+        source: "include/bits/unistd-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd.h",
+        source: "include/bits/unistd.h"
+      },
+      {
+        path: "/sysroot/include/bits/unistd_ext.h",
+        source: "include/bits/unistd_ext.h"
+      },
+      {
+        path: "/sysroot/include/bits/utsname.h",
+        source: "include/bits/utsname.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitflags.h",
+        source: "include/bits/waitflags.h"
+      },
+      {
+        path: "/sysroot/include/bits/waitstatus.h",
+        source: "include/bits/waitstatus.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar-ldbl.h",
+        source: "include/bits/wchar-ldbl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar.h",
+        source: "include/bits/wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2-decl.h",
+        source: "include/bits/wchar2-decl.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar2.h",
+        source: "include/bits/wchar2.h"
+      },
+      {
+        path: "/sysroot/include/bits/wctype-wchar.h",
+        source: "include/bits/wctype-wchar.h"
+      },
+      {
+        path: "/sysroot/include/bits/wordsize.h",
+        source: "include/bits/wordsize.h"
+      },
+      {
+        path: "/sysroot/include/bits/xopen_lim.h",
+        source: "include/bits/xopen_lim.h"
+      },
+      {
+        path: "/sysroot/include/complex.h",
+        source: "include/complex.h"
+      },
+      {
+        path: "/sysroot/include/cpio.h",
+        source: "include/cpio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/endian.h",
+        source: "include/endian.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/features-time64.h",
+        source: "include/features-time64.h"
+      },
+      {
+        path: "/sysroot/include/features.h",
+        source: "include/features.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/fmtmsg.h",
+        source: "include/fmtmsg.h"
+      },
+      {
+        path: "/sysroot/include/fnmatch.h",
+        source: "include/fnmatch.h"
+      },
+      {
+        path: "/sysroot/include/ftw.h",
+        source: "include/ftw.h"
+      },
+      {
+        path: "/sysroot/include/glob.h",
+        source: "include/glob.h"
+      },
+      {
+        path: "/sysroot/include/gnu/lib-names-lp64d.h",
+        source: "include/gnu/lib-names-lp64d.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs-lp64d.h",
+        source: "include/gnu/stubs-lp64d.h"
+      },
+      {
+        path: "/sysroot/include/gnu/stubs.h",
+        source: "include/gnu/stubs.h"
+      },
+      {
+        path: "/sysroot/include/grp.h",
+        source: "include/grp.h"
+      },
+      {
+        path: "/sysroot/include/iconv.h",
+        source: "include/iconv.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/langinfo.h",
+        source: "include/langinfo.h"
+      },
+      {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/linux/close_range.h",
+        source: "include/linux/close_range.h"
+      },
+      {
+        path: "/sysroot/include/linux/errno.h",
+        source: "include/linux/errno.h"
+      },
+      {
+        path: "/sysroot/include/linux/falloc.h",
+        source: "include/linux/falloc.h"
+      },
+      {
+        path: "/sysroot/include/linux/ioctl.h",
+        source: "include/linux/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/limits.h",
+        source: "include/linux/limits.h"
+      },
+      {
+        path: "/sysroot/include/linux/posix_types.h",
+        source: "include/linux/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/stat.h",
+        source: "include/linux/stat.h"
+      },
+      {
+        path: "/sysroot/include/linux/stddef.h",
+        source: "include/linux/stddef.h"
+      },
+      {
+        path: "/sysroot/include/linux/types.h",
+        source: "include/linux/types.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/monetary.h",
+        source: "include/monetary.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/nl_types.h",
+        source: "include/nl_types.h"
+      },
+      {
+        path: "/sysroot/include/poll.h",
+        source: "include/poll.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/pwd.h",
+        source: "include/pwd.h"
+      },
+      {
+        path: "/sysroot/include/regex.h",
+        source: "include/regex.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/rpc/netdb.h",
+        source: "include/rpc/netdb.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/search.h",
+        source: "include/search.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
+      },
+      {
+        path: "/sysroot/include/spawn.h",
+        source: "include/spawn.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -631,8 +4190,16 @@ var TinycWeb = (() => {
         source: "include/stdatomic.h"
       },
       {
+        path: "/sysroot/include/stdbit.h",
+        source: "include/stdbit.h"
+      },
+      {
         path: "/sysroot/include/stdbool.h",
         source: "include/stdbool.h"
+      },
+      {
+        path: "/sysroot/include/stdc-predef.h",
+        source: "include/stdc-predef.h"
       },
       {
         path: "/sysroot/include/stddef.h",
@@ -643,24 +4210,176 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/asm.h",
+        source: "include/sys/asm.h"
+      },
+      {
+        path: "/sysroot/include/sys/cachectl.h",
+        source: "include/sys/cachectl.h"
+      },
+      {
+        path: "/sysroot/include/sys/cdefs.h",
+        source: "include/sys/cdefs.h"
+      },
+      {
+        path: "/sysroot/include/sys/ioctl.h",
+        source: "include/sys/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/poll.h",
+        source: "include/sys/poll.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/statvfs.h",
+        source: "include/sys/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/syslog.h",
+        source: "include/sys/syslog.h"
+      },
+      {
+        path: "/sysroot/include/sys/sysmacros.h",
+        source: "include/sys/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/times.h",
+        source: "include/sys/times.h"
+      },
+      {
+        path: "/sysroot/include/sys/ttydefaults.h",
+        source: "include/sys/ttydefaults.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/utsname.h",
+        source: "include/sys/utsname.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
+      },
+      {
+        path: "/sysroot/include/syslog.h",
+        source: "include/syslog.h"
+      },
+      {
+        path: "/sysroot/include/tar.h",
+        source: "include/tar.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/termios.h",
+        source: "include/termios.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/ucontext.h",
+        source: "include/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -713,7 +4432,8 @@ var TinycWeb = (() => {
         format: "ar archive",
         ext: ".a"
       }
-    }
+    },
+    libcIncludeRoot: "vendor-glibc/riscv64-linux-gnu/include"
   };
 
   // sysroot-manifests/x86_64-windows.json
@@ -725,8 +4445,120 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/_mingw.h",
+        source: "include/_mingw.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/conio.h",
+        source: "include/conio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dir.h",
+        source: "include/dir.h"
+      },
+      {
+        path: "/sysroot/include/direct.h",
+        source: "include/direct.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dos.h",
+        source: "include/dos.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/excpt.h",
+        source: "include/excpt.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
+      },
+      {
+        path: "/sysroot/include/io.h",
+        source: "include/io.h"
       },
       {
         path: "/sysroot/include/iso646.h",
@@ -735,6 +4567,114 @@ var TinycWeb = (() => {
       {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
+        path: "/sysroot/include/malloc.h",
+        source: "include/malloc.h"
+      },
+      {
+        path: "/sysroot/include/math.h",
+        source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/mem.h",
+        source: "include/mem.h"
+      },
+      {
+        path: "/sysroot/include/memory.h",
+        source: "include/memory.h"
+      },
+      {
+        path: "/sysroot/include/process.h",
+        source: "include/process.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/conio_s.h",
+        source: "include/sec_api/conio_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/crtdbg_s.h",
+        source: "include/sec_api/crtdbg_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/io_s.h",
+        source: "include/sec_api/io_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/mbstring_s.h",
+        source: "include/sec_api/mbstring_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/search_s.h",
+        source: "include/sec_api/search_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/stdio_s.h",
+        source: "include/sec_api/stdio_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/stdlib_s.h",
+        source: "include/sec_api/stdlib_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/stralign_s.h",
+        source: "include/sec_api/stralign_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/string_s.h",
+        source: "include/sec_api/string_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/sys/timeb_s.h",
+        source: "include/sec_api/sys/timeb_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/tchar_s.h",
+        source: "include/sec_api/tchar_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/time_s.h",
+        source: "include/sec_api/time_s.h"
+      },
+      {
+        path: "/sysroot/include/sec_api/wchar_s.h",
+        source: "include/sec_api/wchar_s.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/share.h",
+        source: "include/share.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -761,16 +4701,216 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/sys/fcntl.h",
+        source: "include/sys/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/sys/file.h",
+        source: "include/sys/file.h"
+      },
+      {
+        path: "/sysroot/include/sys/locking.h",
+        source: "include/sys/locking.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/timeb.h",
+        source: "include/sys/timeb.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/unistd.h",
+        source: "include/sys/unistd.h"
+      },
+      {
+        path: "/sysroot/include/sys/utime.h",
+        source: "include/sys/utime.h"
+      },
+      {
+        path: "/sysroot/include/tcc/tcc_libm.h",
+        source: "include/tcc/tcc_libm.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/tchar.h",
+        source: "include/tchar.h"
+      },
+      {
+        path: "/sysroot/include/tgmath.h",
+        source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/vadefs.h",
+        source: "include/vadefs.h"
+      },
+      {
+        path: "/sysroot/include/values.h",
+        source: "include/values.h"
+      },
+      {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
+      },
+      {
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/winapi/basetsd.h",
+        source: "include/winapi/basetsd.h"
+      },
+      {
+        path: "/sysroot/include/winapi/basetyps.h",
+        source: "include/winapi/basetyps.h"
+      },
+      {
+        path: "/sysroot/include/winapi/guiddef.h",
+        source: "include/winapi/guiddef.h"
+      },
+      {
+        path: "/sysroot/include/winapi/poppack.h",
+        source: "include/winapi/poppack.h"
+      },
+      {
+        path: "/sysroot/include/winapi/pshpack1.h",
+        source: "include/winapi/pshpack1.h"
+      },
+      {
+        path: "/sysroot/include/winapi/pshpack2.h",
+        source: "include/winapi/pshpack2.h"
+      },
+      {
+        path: "/sysroot/include/winapi/pshpack4.h",
+        source: "include/winapi/pshpack4.h"
+      },
+      {
+        path: "/sysroot/include/winapi/pshpack8.h",
+        source: "include/winapi/pshpack8.h"
+      },
+      {
+        path: "/sysroot/include/winapi/qos.h",
+        source: "include/winapi/qos.h"
+      },
+      {
+        path: "/sysroot/include/winapi/shellapi.h",
+        source: "include/winapi/shellapi.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winbase.h",
+        source: "include/winapi/winbase.h"
+      },
+      {
+        path: "/sysroot/include/winapi/wincon.h",
+        source: "include/winapi/wincon.h"
+      },
+      {
+        path: "/sysroot/include/winapi/windef.h",
+        source: "include/winapi/windef.h"
+      },
+      {
+        path: "/sysroot/include/winapi/windows.h",
+        source: "include/winapi/windows.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winerror.h",
+        source: "include/winapi/winerror.h"
+      },
+      {
+        path: "/sysroot/include/winapi/wingdi.h",
+        source: "include/winapi/wingdi.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winnls.h",
+        source: "include/winapi/winnls.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winnt.h",
+        source: "include/winapi/winnt.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winreg.h",
+        source: "include/winapi/winreg.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winsock2.h",
+        source: "include/winapi/winsock2.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winuser.h",
+        source: "include/winapi/winuser.h"
+      },
+      {
+        path: "/sysroot/include/winapi/winver.h",
+        source: "include/winapi/winver.h"
+      },
+      {
+        path: "/sysroot/include/winapi/ws2ipdef.h",
+        source: "include/winapi/ws2ipdef.h"
+      },
+      {
+        path: "/sysroot/include/winapi/ws2tcpip.h",
+        source: "include/winapi/ws2tcpip.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -782,13 +4922,28 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
-        path: "/sysroot/lib/msvcrt.def",
-        source: "lib/x86_64-windows/msvcrt.def"
+        path: "/sysroot/lib/gdi32.def",
+        source: "lib/x86_64-windows/gdi32.def"
       },
       {
         binary: true,
         path: "/sysroot/lib/kernel32.def",
         source: "lib/x86_64-windows/kernel32.def"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/msvcrt.def",
+        source: "lib/x86_64-windows/msvcrt.def"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/user32.def",
+        source: "lib/x86_64-windows/user32.def"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/ws2_32.def",
+        source: "lib/x86_64-windows/ws2_32.def"
       }
     ],
     outputs: {
@@ -808,7 +4963,8 @@ var TinycWeb = (() => {
         format: "ar archive",
         ext: ".a"
       }
-    }
+    },
+    libcIncludeRoot: "vendor-tinycc/win32/include"
   };
 
   // sysroot-manifests/aarch64-linux-android.json
@@ -820,20 +4976,792 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/aarch64-linux-android/asm/auxvec.h",
+        source: "include/aarch64-linux-android/asm/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/bitsperlong.h",
+        source: "include/aarch64-linux-android/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/byteorder.h",
+        source: "include/aarch64-linux-android/asm/byteorder.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/errno.h",
+        source: "include/aarch64-linux-android/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/fcntl.h",
+        source: "include/aarch64-linux-android/asm/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/hwcap.h",
+        source: "include/aarch64-linux-android/asm/hwcap.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/ioctl.h",
+        source: "include/aarch64-linux-android/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/ioctls.h",
+        source: "include/aarch64-linux-android/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/mman.h",
+        source: "include/aarch64-linux-android/asm/mman.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/poll.h",
+        source: "include/aarch64-linux-android/asm/poll.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/posix_types.h",
+        source: "include/aarch64-linux-android/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/resource.h",
+        source: "include/aarch64-linux-android/asm/resource.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sigcontext.h",
+        source: "include/aarch64-linux-android/asm/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/siginfo.h",
+        source: "include/aarch64-linux-android/asm/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/signal.h",
+        source: "include/aarch64-linux-android/asm/signal.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/socket.h",
+        source: "include/aarch64-linux-android/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sockios.h",
+        source: "include/aarch64-linux-android/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sve_context.h",
+        source: "include/aarch64-linux-android/asm/sve_context.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/swab.h",
+        source: "include/aarch64-linux-android/asm/swab.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/termbits.h",
+        source: "include/aarch64-linux-android/asm/termbits.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/termios.h",
+        source: "include/aarch64-linux-android/asm/termios.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/types.h",
+        source: "include/aarch64-linux-android/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/alloca.h",
+        source: "include/alloca.h"
+      },
+      {
+        path: "/sysroot/include/android/api-level.h",
+        source: "include/android/api-level.h"
+      },
+      {
+        path: "/sysroot/include/android/dlext.h",
+        source: "include/android/dlext.h"
+      },
+      {
+        path: "/sysroot/include/android/fdsan.h",
+        source: "include/android/fdsan.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_stdlib_inlines.h",
+        source: "include/android/legacy_stdlib_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_termios_inlines.h",
+        source: "include/android/legacy_termios_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_threads_inlines.h",
+        source: "include/android/legacy_threads_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_unistd_inlines.h",
+        source: "include/android/legacy_unistd_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/ndk-version.h",
+        source: "include/android/ndk-version.h"
+      },
+      {
+        path: "/sysroot/include/android/set_abort_message.h",
+        source: "include/android/set_abort_message.h"
+      },
+      {
+        path: "/sysroot/include/android/versioning.h",
+        source: "include/android/versioning.h"
+      },
+      {
+        path: "/sysroot/include/ar.h",
+        source: "include/ar.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/bitsperlong.h",
+        source: "include/asm-generic/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno-base.h",
+        source: "include/asm-generic/errno-base.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno.h",
+        source: "include/asm-generic/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/fcntl.h",
+        source: "include/asm-generic/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/hugetlb_encode.h",
+        source: "include/asm-generic/hugetlb_encode.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/int-ll64.h",
+        source: "include/asm-generic/int-ll64.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctl.h",
+        source: "include/asm-generic/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctls.h",
+        source: "include/asm-generic/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/mman-common.h",
+        source: "include/asm-generic/mman-common.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/mman.h",
+        source: "include/asm-generic/mman.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/poll.h",
+        source: "include/asm-generic/poll.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/posix_types.h",
+        source: "include/asm-generic/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/resource.h",
+        source: "include/asm-generic/resource.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/siginfo.h",
+        source: "include/asm-generic/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/signal-defs.h",
+        source: "include/asm-generic/signal-defs.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/signal.h",
+        source: "include/asm-generic/signal.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/socket.h",
+        source: "include/asm-generic/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/sockios.h",
+        source: "include/asm-generic/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/swab.h",
+        source: "include/asm-generic/swab.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termbits-common.h",
+        source: "include/asm-generic/termbits-common.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termbits.h",
+        source: "include/asm-generic/termbits.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termios.h",
+        source: "include/asm-generic/termios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/types.h",
+        source: "include/asm-generic/types.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/bits/ctype_inlines.h",
+        source: "include/bits/ctype_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl.h",
+        source: "include/bits/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_arm.h",
+        source: "include/bits/fenv_arm.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_riscv64.h",
+        source: "include/bits/fenv_riscv64.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_x86.h",
+        source: "include/bits/fenv_x86.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_x86_64.h",
+        source: "include/bits/fenv_x86_64.h"
+      },
+      {
+        path: "/sysroot/include/bits/flock.h",
+        source: "include/bits/flock.h"
+      },
+      {
+        path: "/sysroot/include/bits/flock64.h",
+        source: "include/bits/flock64.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/fcntl.h",
+        source: "include/bits/fortify/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/poll.h",
+        source: "include/bits/fortify/poll.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/socket.h",
+        source: "include/bits/fortify/socket.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stat.h",
+        source: "include/bits/fortify/stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stdio.h",
+        source: "include/bits/fortify/stdio.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stdlib.h",
+        source: "include/bits/fortify/stdlib.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/string.h",
+        source: "include/bits/fortify/string.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/strings.h",
+        source: "include/bits/fortify/strings.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/unistd.h",
+        source: "include/bits/fortify/unistd.h"
+      },
+      {
+        path: "/sysroot/include/bits/get_device_api_level_inlines.h",
+        source: "include/bits/get_device_api_level_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt.h",
+        source: "include/bits/getopt.h"
+      },
+      {
+        path: "/sysroot/include/bits/in_addr.h",
+        source: "include/bits/in_addr.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctl.h",
+        source: "include/bits/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/bits/ip_mreq_source.h",
+        source: "include/bits/ip_mreq_source.h"
+      },
+      {
+        path: "/sysroot/include/bits/ip_msfilter.h",
+        source: "include/bits/ip_msfilter.h"
+      },
+      {
+        path: "/sysroot/include/bits/lockf.h",
+        source: "include/bits/lockf.h"
+      },
+      {
+        path: "/sysroot/include/bits/mbstate_t.h",
+        source: "include/bits/mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix_limits.h",
+        source: "include/bits/posix_limits.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_types.h",
+        source: "include/bits/pthread_types.h"
+      },
+      {
+        path: "/sysroot/include/bits/sa_family_t.h",
+        source: "include/bits/sa_family_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/seek_constants.h",
+        source: "include/bits/seek_constants.h"
+      },
+      {
+        path: "/sysroot/include/bits/signal_types.h",
+        source: "include/bits/signal_types.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdatomic.h",
+        source: "include/bits/stdatomic.h"
+      },
+      {
+        path: "/sysroot/include/bits/strcasecmp.h",
+        source: "include/bits/strcasecmp.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_file.h",
+        source: "include/bits/struct_file.h"
+      },
+      {
+        path: "/sysroot/include/bits/swab.h",
+        source: "include/bits/swab.h"
+      },
+      {
+        path: "/sysroot/include/bits/sysconf.h",
+        source: "include/bits/sysconf.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios_inlines.h",
+        source: "include/bits/termios_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/threads_inlines.h",
+        source: "include/bits/threads_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/timespec.h",
+        source: "include/bits/timespec.h"
+      },
+      {
+        path: "/sysroot/include/bits/wait.h",
+        source: "include/bits/wait.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar_limits.h",
+        source: "include/bits/wchar_limits.h"
+      },
+      {
+        path: "/sysroot/include/bits/wctype.h",
+        source: "include/bits/wctype.h"
+      },
+      {
+        path: "/sysroot/include/complex.h",
+        source: "include/complex.h"
+      },
+      {
+        path: "/sysroot/include/cpio.h",
+        source: "include/cpio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/endian.h",
+        source: "include/endian.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/fnmatch.h",
+        source: "include/fnmatch.h"
+      },
+      {
+        path: "/sysroot/include/ftw.h",
+        source: "include/ftw.h"
+      },
+      {
+        path: "/sysroot/include/glob.h",
+        source: "include/glob.h"
+      },
+      {
+        path: "/sysroot/include/grp.h",
+        source: "include/grp.h"
+      },
+      {
+        path: "/sysroot/include/iconv.h",
+        source: "include/iconv.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/langinfo.h",
+        source: "include/langinfo.h"
+      },
+      {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/linux/auxvec.h",
+        source: "include/linux/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/linux/byteorder/big_endian.h",
+        source: "include/linux/byteorder/big_endian.h"
+      },
+      {
+        path: "/sysroot/include/linux/byteorder/little_endian.h",
+        source: "include/linux/byteorder/little_endian.h"
+      },
+      {
+        path: "/sysroot/include/linux/compiler.h",
+        source: "include/linux/compiler.h"
+      },
+      {
+        path: "/sysroot/include/linux/compiler_types.h",
+        source: "include/linux/compiler_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/const.h",
+        source: "include/linux/const.h"
+      },
+      {
+        path: "/sysroot/include/linux/errno.h",
+        source: "include/linux/errno.h"
+      },
+      {
+        path: "/sysroot/include/linux/fadvise.h",
+        source: "include/linux/fadvise.h"
+      },
+      {
+        path: "/sysroot/include/linux/falloc.h",
+        source: "include/linux/falloc.h"
+      },
+      {
+        path: "/sysroot/include/linux/fcntl.h",
+        source: "include/linux/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/linux/hdlc/ioctl.h",
+        source: "include/linux/hdlc/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/if.h",
+        source: "include/linux/if.h"
+      },
+      {
+        path: "/sysroot/include/linux/in.h",
+        source: "include/linux/in.h"
+      },
+      {
+        path: "/sysroot/include/linux/in6.h",
+        source: "include/linux/in6.h"
+      },
+      {
+        path: "/sysroot/include/linux/ioctl.h",
+        source: "include/linux/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/ipv6.h",
+        source: "include/linux/ipv6.h"
+      },
+      {
+        path: "/sysroot/include/linux/libc-compat.h",
+        source: "include/linux/libc-compat.h"
+      },
+      {
+        path: "/sysroot/include/linux/limits.h",
+        source: "include/linux/limits.h"
+      },
+      {
+        path: "/sysroot/include/linux/memfd.h",
+        source: "include/linux/memfd.h"
+      },
+      {
+        path: "/sysroot/include/linux/mman.h",
+        source: "include/linux/mman.h"
+      },
+      {
+        path: "/sysroot/include/linux/openat2.h",
+        source: "include/linux/openat2.h"
+      },
+      {
+        path: "/sysroot/include/linux/poll.h",
+        source: "include/linux/poll.h"
+      },
+      {
+        path: "/sysroot/include/linux/posix_types.h",
+        source: "include/linux/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/resource.h",
+        source: "include/linux/resource.h"
+      },
+      {
+        path: "/sysroot/include/linux/sched.h",
+        source: "include/linux/sched.h"
+      },
+      {
+        path: "/sysroot/include/linux/signal.h",
+        source: "include/linux/signal.h"
+      },
+      {
+        path: "/sysroot/include/linux/socket.h",
+        source: "include/linux/socket.h"
+      },
+      {
+        path: "/sysroot/include/linux/sockios.h",
+        source: "include/linux/sockios.h"
+      },
+      {
+        path: "/sysroot/include/linux/stat.h",
+        source: "include/linux/stat.h"
+      },
+      {
+        path: "/sysroot/include/linux/stddef.h",
+        source: "include/linux/stddef.h"
+      },
+      {
+        path: "/sysroot/include/linux/swab.h",
+        source: "include/linux/swab.h"
+      },
+      {
+        path: "/sysroot/include/linux/tcp.h",
+        source: "include/linux/tcp.h"
+      },
+      {
+        path: "/sysroot/include/linux/termios.h",
+        source: "include/linux/termios.h"
+      },
+      {
+        path: "/sysroot/include/linux/time.h",
+        source: "include/linux/time.h"
+      },
+      {
+        path: "/sysroot/include/linux/time_types.h",
+        source: "include/linux/time_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/times.h",
+        source: "include/linux/times.h"
+      },
+      {
+        path: "/sysroot/include/linux/tty.h",
+        source: "include/linux/tty.h"
+      },
+      {
+        path: "/sysroot/include/linux/types.h",
+        source: "include/linux/types.h"
+      },
+      {
+        path: "/sysroot/include/linux/uio.h",
+        source: "include/linux/uio.h"
+      },
+      {
+        path: "/sysroot/include/linux/un.h",
+        source: "include/linux/un.h"
+      },
+      {
+        path: "/sysroot/include/linux/utime.h",
+        source: "include/linux/utime.h"
+      },
+      {
+        path: "/sysroot/include/linux/wait.h",
+        source: "include/linux/wait.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
+        path: "/sysroot/include/malloc.h",
+        source: "include/malloc.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/net/if.h",
+        source: "include/net/if.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in6.h",
+        source: "include/netinet/in6.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/nl_types.h",
+        source: "include/nl_types.h"
+      },
+      {
+        path: "/sysroot/include/poll.h",
+        source: "include/poll.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/pwd.h",
+        source: "include/pwd.h"
+      },
+      {
+        path: "/sysroot/include/regex.h",
+        source: "include/regex.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/search.h",
+        source: "include/search.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
+      },
+      {
+        path: "/sysroot/include/spawn.h",
+        source: "include/spawn.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -860,24 +5788,272 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/cdefs.h",
+        source: "include/sys/cdefs.h"
+      },
+      {
+        path: "/sysroot/include/sys/endian.h",
+        source: "include/sys/endian.h"
+      },
+      {
+        path: "/sysroot/include/sys/ioctl.h",
+        source: "include/sys/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/statvfs.h",
+        source: "include/sys/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/syslog.h",
+        source: "include/sys/syslog.h"
+      },
+      {
+        path: "/sysroot/include/sys/sysmacros.h",
+        source: "include/sys/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/times.h",
+        source: "include/sys/times.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/un.h",
+        source: "include/sys/un.h"
+      },
+      {
+        path: "/sysroot/include/sys/user.h",
+        source: "include/sys/user.h"
+      },
+      {
+        path: "/sysroot/include/sys/utsname.h",
+        source: "include/sys/utsname.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
+      },
+      {
+        path: "/sysroot/include/syslog.h",
+        source: "include/syslog.h"
+      },
+      {
+        path: "/sysroot/include/tar.h",
+        source: "include/tar.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/termios.h",
+        source: "include/termios.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/ucontext.h",
+        source: "include/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/auxvec.h",
+        source: "include/x86_64-linux-android/asm/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/bitsperlong.h",
+        source: "include/x86_64-linux-android/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/byteorder.h",
+        source: "include/x86_64-linux-android/asm/byteorder.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/errno.h",
+        source: "include/x86_64-linux-android/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/fcntl.h",
+        source: "include/x86_64-linux-android/asm/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/hwcap2.h",
+        source: "include/x86_64-linux-android/asm/hwcap2.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/ioctl.h",
+        source: "include/x86_64-linux-android/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/ioctls.h",
+        source: "include/x86_64-linux-android/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/mman.h",
+        source: "include/x86_64-linux-android/asm/mman.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/poll.h",
+        source: "include/x86_64-linux-android/asm/poll.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types.h",
+        source: "include/x86_64-linux-android/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_32.h",
+        source: "include/x86_64-linux-android/asm/posix_types_32.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_64.h",
+        source: "include/x86_64-linux-android/asm/posix_types_64.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_x32.h",
+        source: "include/x86_64-linux-android/asm/posix_types_x32.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/resource.h",
+        source: "include/x86_64-linux-android/asm/resource.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/sigcontext.h",
+        source: "include/x86_64-linux-android/asm/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/siginfo.h",
+        source: "include/x86_64-linux-android/asm/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/signal.h",
+        source: "include/x86_64-linux-android/asm/signal.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/socket.h",
+        source: "include/x86_64-linux-android/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/sockios.h",
+        source: "include/x86_64-linux-android/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/swab.h",
+        source: "include/x86_64-linux-android/asm/swab.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/termbits.h",
+        source: "include/x86_64-linux-android/asm/termbits.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/termios.h",
+        source: "include/x86_64-linux-android/asm/termios.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/types.h",
+        source: "include/x86_64-linux-android/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/xlocale.h",
+        source: "include/xlocale.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -889,18 +6065,28 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
-        path: "/sysroot/lib/crt1.o",
-        source: "lib/aarch64-linux-android/crt1.o"
+        path: "/sysroot/lib/crtbegin_dynamic.o",
+        source: "lib/aarch64-linux-android/crtbegin_dynamic.o"
       },
       {
         binary: true,
-        path: "/sysroot/lib/crti.o",
-        source: "lib/aarch64-linux-android/crti.o"
+        path: "/sysroot/lib/crtbegin_so.o",
+        source: "lib/aarch64-linux-android/crtbegin_so.o"
       },
       {
         binary: true,
-        path: "/sysroot/lib/crtn.o",
-        source: "lib/aarch64-linux-android/crtn.o"
+        path: "/sysroot/lib/crtbegin_static.o",
+        source: "lib/aarch64-linux-android/crtbegin_static.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtend_android.o",
+        source: "lib/aarch64-linux-android/crtend_android.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtend_so.o",
+        source: "lib/aarch64-linux-android/crtend_so.o"
       },
       {
         binary: true,
@@ -909,13 +6095,13 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
-        path: "/sysroot/lib/libm.so",
-        source: "lib/aarch64-linux-android/libm.so"
+        path: "/sysroot/lib/libdl.so",
+        source: "lib/aarch64-linux-android/libdl.so"
       },
       {
         binary: true,
-        path: "/sysroot/lib/libdl.so",
-        source: "lib/aarch64-linux-android/libdl.so"
+        path: "/sysroot/lib/libm.so",
+        source: "lib/aarch64-linux-android/libm.so"
       }
     ],
     outputs: {
@@ -938,7 +6124,12 @@ var TinycWeb = (() => {
     },
     libc: "bionic",
     androidApi: 30,
-    dynamicLinker: "/system/bin/linker64"
+    dynamicLinker: "/system/bin/linker64",
+    libcIncludeRoot: "vendor-android/include",
+    builtinHeadersFirst: true,
+    extraIncludeDirs: [
+      "/sysroot/include/aarch64-linux-android"
+    ]
   };
 
   // sysroot-manifests/x86_64-linux-android.json
@@ -950,20 +6141,792 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/aarch64-linux-android/asm/auxvec.h",
+        source: "include/aarch64-linux-android/asm/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/bitsperlong.h",
+        source: "include/aarch64-linux-android/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/byteorder.h",
+        source: "include/aarch64-linux-android/asm/byteorder.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/errno.h",
+        source: "include/aarch64-linux-android/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/fcntl.h",
+        source: "include/aarch64-linux-android/asm/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/hwcap.h",
+        source: "include/aarch64-linux-android/asm/hwcap.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/ioctl.h",
+        source: "include/aarch64-linux-android/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/ioctls.h",
+        source: "include/aarch64-linux-android/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/mman.h",
+        source: "include/aarch64-linux-android/asm/mman.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/poll.h",
+        source: "include/aarch64-linux-android/asm/poll.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/posix_types.h",
+        source: "include/aarch64-linux-android/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/resource.h",
+        source: "include/aarch64-linux-android/asm/resource.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sigcontext.h",
+        source: "include/aarch64-linux-android/asm/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/siginfo.h",
+        source: "include/aarch64-linux-android/asm/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/signal.h",
+        source: "include/aarch64-linux-android/asm/signal.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/socket.h",
+        source: "include/aarch64-linux-android/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sockios.h",
+        source: "include/aarch64-linux-android/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/sve_context.h",
+        source: "include/aarch64-linux-android/asm/sve_context.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/swab.h",
+        source: "include/aarch64-linux-android/asm/swab.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/termbits.h",
+        source: "include/aarch64-linux-android/asm/termbits.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/termios.h",
+        source: "include/aarch64-linux-android/asm/termios.h"
+      },
+      {
+        path: "/sysroot/include/aarch64-linux-android/asm/types.h",
+        source: "include/aarch64-linux-android/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/alloca.h",
+        source: "include/alloca.h"
+      },
+      {
+        path: "/sysroot/include/android/api-level.h",
+        source: "include/android/api-level.h"
+      },
+      {
+        path: "/sysroot/include/android/dlext.h",
+        source: "include/android/dlext.h"
+      },
+      {
+        path: "/sysroot/include/android/fdsan.h",
+        source: "include/android/fdsan.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_stdlib_inlines.h",
+        source: "include/android/legacy_stdlib_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_termios_inlines.h",
+        source: "include/android/legacy_termios_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_threads_inlines.h",
+        source: "include/android/legacy_threads_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/legacy_unistd_inlines.h",
+        source: "include/android/legacy_unistd_inlines.h"
+      },
+      {
+        path: "/sysroot/include/android/ndk-version.h",
+        source: "include/android/ndk-version.h"
+      },
+      {
+        path: "/sysroot/include/android/set_abort_message.h",
+        source: "include/android/set_abort_message.h"
+      },
+      {
+        path: "/sysroot/include/android/versioning.h",
+        source: "include/android/versioning.h"
+      },
+      {
+        path: "/sysroot/include/ar.h",
+        source: "include/ar.h"
+      },
+      {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/bitsperlong.h",
+        source: "include/asm-generic/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno-base.h",
+        source: "include/asm-generic/errno-base.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/errno.h",
+        source: "include/asm-generic/errno.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/fcntl.h",
+        source: "include/asm-generic/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/hugetlb_encode.h",
+        source: "include/asm-generic/hugetlb_encode.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/int-ll64.h",
+        source: "include/asm-generic/int-ll64.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctl.h",
+        source: "include/asm-generic/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/ioctls.h",
+        source: "include/asm-generic/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/mman-common.h",
+        source: "include/asm-generic/mman-common.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/mman.h",
+        source: "include/asm-generic/mman.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/poll.h",
+        source: "include/asm-generic/poll.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/posix_types.h",
+        source: "include/asm-generic/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/resource.h",
+        source: "include/asm-generic/resource.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/siginfo.h",
+        source: "include/asm-generic/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/signal-defs.h",
+        source: "include/asm-generic/signal-defs.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/signal.h",
+        source: "include/asm-generic/signal.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/socket.h",
+        source: "include/asm-generic/socket.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/sockios.h",
+        source: "include/asm-generic/sockios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/swab.h",
+        source: "include/asm-generic/swab.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termbits-common.h",
+        source: "include/asm-generic/termbits-common.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termbits.h",
+        source: "include/asm-generic/termbits.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/termios.h",
+        source: "include/asm-generic/termios.h"
+      },
+      {
+        path: "/sysroot/include/asm-generic/types.h",
+        source: "include/asm-generic/types.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/bits/ctype_inlines.h",
+        source: "include/bits/ctype_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/fcntl.h",
+        source: "include/bits/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_arm.h",
+        source: "include/bits/fenv_arm.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_riscv64.h",
+        source: "include/bits/fenv_riscv64.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_x86.h",
+        source: "include/bits/fenv_x86.h"
+      },
+      {
+        path: "/sysroot/include/bits/fenv_x86_64.h",
+        source: "include/bits/fenv_x86_64.h"
+      },
+      {
+        path: "/sysroot/include/bits/flock.h",
+        source: "include/bits/flock.h"
+      },
+      {
+        path: "/sysroot/include/bits/flock64.h",
+        source: "include/bits/flock64.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/fcntl.h",
+        source: "include/bits/fortify/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/poll.h",
+        source: "include/bits/fortify/poll.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/socket.h",
+        source: "include/bits/fortify/socket.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stat.h",
+        source: "include/bits/fortify/stat.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stdio.h",
+        source: "include/bits/fortify/stdio.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/stdlib.h",
+        source: "include/bits/fortify/stdlib.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/string.h",
+        source: "include/bits/fortify/string.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/strings.h",
+        source: "include/bits/fortify/strings.h"
+      },
+      {
+        path: "/sysroot/include/bits/fortify/unistd.h",
+        source: "include/bits/fortify/unistd.h"
+      },
+      {
+        path: "/sysroot/include/bits/get_device_api_level_inlines.h",
+        source: "include/bits/get_device_api_level_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/getopt.h",
+        source: "include/bits/getopt.h"
+      },
+      {
+        path: "/sysroot/include/bits/in_addr.h",
+        source: "include/bits/in_addr.h"
+      },
+      {
+        path: "/sysroot/include/bits/ioctl.h",
+        source: "include/bits/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/bits/ip_mreq_source.h",
+        source: "include/bits/ip_mreq_source.h"
+      },
+      {
+        path: "/sysroot/include/bits/ip_msfilter.h",
+        source: "include/bits/ip_msfilter.h"
+      },
+      {
+        path: "/sysroot/include/bits/lockf.h",
+        source: "include/bits/lockf.h"
+      },
+      {
+        path: "/sysroot/include/bits/mbstate_t.h",
+        source: "include/bits/mbstate_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/posix_limits.h",
+        source: "include/bits/posix_limits.h"
+      },
+      {
+        path: "/sysroot/include/bits/pthread_types.h",
+        source: "include/bits/pthread_types.h"
+      },
+      {
+        path: "/sysroot/include/bits/sa_family_t.h",
+        source: "include/bits/sa_family_t.h"
+      },
+      {
+        path: "/sysroot/include/bits/seek_constants.h",
+        source: "include/bits/seek_constants.h"
+      },
+      {
+        path: "/sysroot/include/bits/signal_types.h",
+        source: "include/bits/signal_types.h"
+      },
+      {
+        path: "/sysroot/include/bits/stdatomic.h",
+        source: "include/bits/stdatomic.h"
+      },
+      {
+        path: "/sysroot/include/bits/strcasecmp.h",
+        source: "include/bits/strcasecmp.h"
+      },
+      {
+        path: "/sysroot/include/bits/struct_file.h",
+        source: "include/bits/struct_file.h"
+      },
+      {
+        path: "/sysroot/include/bits/swab.h",
+        source: "include/bits/swab.h"
+      },
+      {
+        path: "/sysroot/include/bits/sysconf.h",
+        source: "include/bits/sysconf.h"
+      },
+      {
+        path: "/sysroot/include/bits/termios_inlines.h",
+        source: "include/bits/termios_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/threads_inlines.h",
+        source: "include/bits/threads_inlines.h"
+      },
+      {
+        path: "/sysroot/include/bits/timespec.h",
+        source: "include/bits/timespec.h"
+      },
+      {
+        path: "/sysroot/include/bits/wait.h",
+        source: "include/bits/wait.h"
+      },
+      {
+        path: "/sysroot/include/bits/wchar_limits.h",
+        source: "include/bits/wchar_limits.h"
+      },
+      {
+        path: "/sysroot/include/bits/wctype.h",
+        source: "include/bits/wctype.h"
+      },
+      {
+        path: "/sysroot/include/complex.h",
+        source: "include/complex.h"
+      },
+      {
+        path: "/sysroot/include/cpio.h",
+        source: "include/cpio.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/endian.h",
+        source: "include/endian.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/fnmatch.h",
+        source: "include/fnmatch.h"
+      },
+      {
+        path: "/sysroot/include/ftw.h",
+        source: "include/ftw.h"
+      },
+      {
+        path: "/sysroot/include/glob.h",
+        source: "include/glob.h"
+      },
+      {
+        path: "/sysroot/include/grp.h",
+        source: "include/grp.h"
+      },
+      {
+        path: "/sysroot/include/iconv.h",
+        source: "include/iconv.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/langinfo.h",
+        source: "include/langinfo.h"
+      },
+      {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/linux/auxvec.h",
+        source: "include/linux/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/linux/byteorder/big_endian.h",
+        source: "include/linux/byteorder/big_endian.h"
+      },
+      {
+        path: "/sysroot/include/linux/byteorder/little_endian.h",
+        source: "include/linux/byteorder/little_endian.h"
+      },
+      {
+        path: "/sysroot/include/linux/compiler.h",
+        source: "include/linux/compiler.h"
+      },
+      {
+        path: "/sysroot/include/linux/compiler_types.h",
+        source: "include/linux/compiler_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/const.h",
+        source: "include/linux/const.h"
+      },
+      {
+        path: "/sysroot/include/linux/errno.h",
+        source: "include/linux/errno.h"
+      },
+      {
+        path: "/sysroot/include/linux/fadvise.h",
+        source: "include/linux/fadvise.h"
+      },
+      {
+        path: "/sysroot/include/linux/falloc.h",
+        source: "include/linux/falloc.h"
+      },
+      {
+        path: "/sysroot/include/linux/fcntl.h",
+        source: "include/linux/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/linux/hdlc/ioctl.h",
+        source: "include/linux/hdlc/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/if.h",
+        source: "include/linux/if.h"
+      },
+      {
+        path: "/sysroot/include/linux/in.h",
+        source: "include/linux/in.h"
+      },
+      {
+        path: "/sysroot/include/linux/in6.h",
+        source: "include/linux/in6.h"
+      },
+      {
+        path: "/sysroot/include/linux/ioctl.h",
+        source: "include/linux/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/linux/ipv6.h",
+        source: "include/linux/ipv6.h"
+      },
+      {
+        path: "/sysroot/include/linux/libc-compat.h",
+        source: "include/linux/libc-compat.h"
+      },
+      {
+        path: "/sysroot/include/linux/limits.h",
+        source: "include/linux/limits.h"
+      },
+      {
+        path: "/sysroot/include/linux/memfd.h",
+        source: "include/linux/memfd.h"
+      },
+      {
+        path: "/sysroot/include/linux/mman.h",
+        source: "include/linux/mman.h"
+      },
+      {
+        path: "/sysroot/include/linux/openat2.h",
+        source: "include/linux/openat2.h"
+      },
+      {
+        path: "/sysroot/include/linux/poll.h",
+        source: "include/linux/poll.h"
+      },
+      {
+        path: "/sysroot/include/linux/posix_types.h",
+        source: "include/linux/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/resource.h",
+        source: "include/linux/resource.h"
+      },
+      {
+        path: "/sysroot/include/linux/sched.h",
+        source: "include/linux/sched.h"
+      },
+      {
+        path: "/sysroot/include/linux/signal.h",
+        source: "include/linux/signal.h"
+      },
+      {
+        path: "/sysroot/include/linux/socket.h",
+        source: "include/linux/socket.h"
+      },
+      {
+        path: "/sysroot/include/linux/sockios.h",
+        source: "include/linux/sockios.h"
+      },
+      {
+        path: "/sysroot/include/linux/stat.h",
+        source: "include/linux/stat.h"
+      },
+      {
+        path: "/sysroot/include/linux/stddef.h",
+        source: "include/linux/stddef.h"
+      },
+      {
+        path: "/sysroot/include/linux/swab.h",
+        source: "include/linux/swab.h"
+      },
+      {
+        path: "/sysroot/include/linux/tcp.h",
+        source: "include/linux/tcp.h"
+      },
+      {
+        path: "/sysroot/include/linux/termios.h",
+        source: "include/linux/termios.h"
+      },
+      {
+        path: "/sysroot/include/linux/time.h",
+        source: "include/linux/time.h"
+      },
+      {
+        path: "/sysroot/include/linux/time_types.h",
+        source: "include/linux/time_types.h"
+      },
+      {
+        path: "/sysroot/include/linux/times.h",
+        source: "include/linux/times.h"
+      },
+      {
+        path: "/sysroot/include/linux/tty.h",
+        source: "include/linux/tty.h"
+      },
+      {
+        path: "/sysroot/include/linux/types.h",
+        source: "include/linux/types.h"
+      },
+      {
+        path: "/sysroot/include/linux/uio.h",
+        source: "include/linux/uio.h"
+      },
+      {
+        path: "/sysroot/include/linux/un.h",
+        source: "include/linux/un.h"
+      },
+      {
+        path: "/sysroot/include/linux/utime.h",
+        source: "include/linux/utime.h"
+      },
+      {
+        path: "/sysroot/include/linux/wait.h",
+        source: "include/linux/wait.h"
+      },
+      {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
+        path: "/sysroot/include/malloc.h",
+        source: "include/malloc.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/net/if.h",
+        source: "include/net/if.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in6.h",
+        source: "include/netinet/in6.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/nl_types.h",
+        source: "include/nl_types.h"
+      },
+      {
+        path: "/sysroot/include/poll.h",
+        source: "include/poll.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/pwd.h",
+        source: "include/pwd.h"
+      },
+      {
+        path: "/sysroot/include/regex.h",
+        source: "include/regex.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/search.h",
+        source: "include/search.h"
+      },
+      {
+        path: "/sysroot/include/semaphore.h",
+        source: "include/semaphore.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
+      },
+      {
+        path: "/sysroot/include/spawn.h",
+        source: "include/spawn.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -990,24 +6953,272 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/cdefs.h",
+        source: "include/sys/cdefs.h"
+      },
+      {
+        path: "/sysroot/include/sys/endian.h",
+        source: "include/sys/endian.h"
+      },
+      {
+        path: "/sysroot/include/sys/ioctl.h",
+        source: "include/sys/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/select.h",
+        source: "include/sys/select.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/statvfs.h",
+        source: "include/sys/statvfs.h"
+      },
+      {
+        path: "/sysroot/include/sys/syslog.h",
+        source: "include/sys/syslog.h"
+      },
+      {
+        path: "/sysroot/include/sys/sysmacros.h",
+        source: "include/sys/sysmacros.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/times.h",
+        source: "include/sys/times.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/un.h",
+        source: "include/sys/un.h"
+      },
+      {
+        path: "/sysroot/include/sys/user.h",
+        source: "include/sys/user.h"
+      },
+      {
+        path: "/sysroot/include/sys/utsname.h",
+        source: "include/sys/utsname.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
+      },
+      {
+        path: "/sysroot/include/syslog.h",
+        source: "include/syslog.h"
+      },
+      {
+        path: "/sysroot/include/tar.h",
+        source: "include/tar.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
+        path: "/sysroot/include/termios.h",
+        source: "include/termios.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/ucontext.h",
+        source: "include/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/auxvec.h",
+        source: "include/x86_64-linux-android/asm/auxvec.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/bitsperlong.h",
+        source: "include/x86_64-linux-android/asm/bitsperlong.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/byteorder.h",
+        source: "include/x86_64-linux-android/asm/byteorder.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/errno.h",
+        source: "include/x86_64-linux-android/asm/errno.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/fcntl.h",
+        source: "include/x86_64-linux-android/asm/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/hwcap2.h",
+        source: "include/x86_64-linux-android/asm/hwcap2.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/ioctl.h",
+        source: "include/x86_64-linux-android/asm/ioctl.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/ioctls.h",
+        source: "include/x86_64-linux-android/asm/ioctls.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/mman.h",
+        source: "include/x86_64-linux-android/asm/mman.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/poll.h",
+        source: "include/x86_64-linux-android/asm/poll.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types.h",
+        source: "include/x86_64-linux-android/asm/posix_types.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_32.h",
+        source: "include/x86_64-linux-android/asm/posix_types_32.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_64.h",
+        source: "include/x86_64-linux-android/asm/posix_types_64.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/posix_types_x32.h",
+        source: "include/x86_64-linux-android/asm/posix_types_x32.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/resource.h",
+        source: "include/x86_64-linux-android/asm/resource.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/sigcontext.h",
+        source: "include/x86_64-linux-android/asm/sigcontext.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/siginfo.h",
+        source: "include/x86_64-linux-android/asm/siginfo.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/signal.h",
+        source: "include/x86_64-linux-android/asm/signal.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/socket.h",
+        source: "include/x86_64-linux-android/asm/socket.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/sockios.h",
+        source: "include/x86_64-linux-android/asm/sockios.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/swab.h",
+        source: "include/x86_64-linux-android/asm/swab.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/termbits.h",
+        source: "include/x86_64-linux-android/asm/termbits.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/termios.h",
+        source: "include/x86_64-linux-android/asm/termios.h"
+      },
+      {
+        path: "/sysroot/include/x86_64-linux-android/asm/types.h",
+        source: "include/x86_64-linux-android/asm/types.h"
+      },
+      {
+        path: "/sysroot/include/xlocale.h",
+        source: "include/xlocale.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -1019,18 +7230,28 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
-        path: "/sysroot/lib/crt1.o",
-        source: "lib/x86_64-linux-android/crt1.o"
+        path: "/sysroot/lib/crtbegin_dynamic.o",
+        source: "lib/x86_64-linux-android/crtbegin_dynamic.o"
       },
       {
         binary: true,
-        path: "/sysroot/lib/crti.o",
-        source: "lib/x86_64-linux-android/crti.o"
+        path: "/sysroot/lib/crtbegin_so.o",
+        source: "lib/x86_64-linux-android/crtbegin_so.o"
       },
       {
         binary: true,
-        path: "/sysroot/lib/crtn.o",
-        source: "lib/x86_64-linux-android/crtn.o"
+        path: "/sysroot/lib/crtbegin_static.o",
+        source: "lib/x86_64-linux-android/crtbegin_static.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtend_android.o",
+        source: "lib/x86_64-linux-android/crtend_android.o"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/crtend_so.o",
+        source: "lib/x86_64-linux-android/crtend_so.o"
       },
       {
         binary: true,
@@ -1039,13 +7260,13 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
-        path: "/sysroot/lib/libm.so",
-        source: "lib/x86_64-linux-android/libm.so"
+        path: "/sysroot/lib/libdl.so",
+        source: "lib/x86_64-linux-android/libdl.so"
       },
       {
         binary: true,
-        path: "/sysroot/lib/libdl.so",
-        source: "lib/x86_64-linux-android/libdl.so"
+        path: "/sysroot/lib/libm.so",
+        source: "lib/x86_64-linux-android/libm.so"
       }
     ],
     outputs: {
@@ -1068,7 +7289,12 @@ var TinycWeb = (() => {
     },
     libc: "bionic",
     androidApi: 30,
-    dynamicLinker: "/system/bin/linker64"
+    dynamicLinker: "/system/bin/linker64",
+    libcIncludeRoot: "vendor-android/include",
+    builtinHeadersFirst: true,
+    extraIncludeDirs: [
+      "/sysroot/include/x86_64-linux-android"
+    ]
   };
 
   // sysroot-manifests/arm64-apple-darwin.json
@@ -1080,20 +7306,164 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dispatch/dispatch.h",
+        source: "include/dispatch/dispatch.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/runetype.h",
+        source: "include/runetype.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -1120,24 +7490,116 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/syscall.h",
+        source: "include/sys/syscall.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -1149,8 +7611,28 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
+        path: "/sysroot/lib/libSystem.tbd",
+        source: "lib/arm64-apple-darwin/libSystem.tbd"
+      },
+      {
+        binary: true,
         path: "/sysroot/lib/libc.tbd",
         source: "lib/arm64-apple-darwin/libc.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libdl.tbd",
+        source: "lib/arm64-apple-darwin/libdl.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.tbd",
+        source: "lib/arm64-apple-darwin/libm.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libpthread.tbd",
+        source: "lib/arm64-apple-darwin/libpthread.tbd"
       }
     ],
     outputs: {
@@ -1171,7 +7653,8 @@ var TinycWeb = (() => {
         ext: ".a"
       }
     },
-    systemHeaders: "user-sdk"
+    systemHeaders: "user-sdk",
+    libcIncludeRoot: "vendor-darwin/include"
   };
 
   // sysroot-manifests/x86_64-apple-darwin.json
@@ -1183,20 +7666,164 @@ var TinycWeb = (() => {
     includeDir: "/sysroot/include",
     includeFiles: [
       {
+        path: "/sysroot/include/arm_neon.h",
+        source: "include/arm_neon.h"
+      },
+      {
+        path: "/sysroot/include/arpa/inet.h",
+        source: "include/arpa/inet.h"
+      },
+      {
+        path: "/sysroot/include/assert.h",
+        source: "include/assert.h"
+      },
+      {
+        path: "/sysroot/include/avx2intrin.h",
+        source: "include/avx2intrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512bwintrin.h",
+        source: "include/avx512bwintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512cdintrin.h",
+        source: "include/avx512cdintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512dqintrin.h",
+        source: "include/avx512dqintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512fintrin.h",
+        source: "include/avx512fintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vbmiintrin.h",
+        source: "include/avx512vbmiintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vlintrin.h",
+        source: "include/avx512vlintrin.h"
+      },
+      {
+        path: "/sysroot/include/avx512vnniintrin.h",
+        source: "include/avx512vnniintrin.h"
+      },
+      {
+        path: "/sysroot/include/avxintrin.h",
+        source: "include/avxintrin.h"
+      },
+      {
+        path: "/sysroot/include/ctype.h",
+        source: "include/ctype.h"
+      },
+      {
+        path: "/sysroot/include/dirent.h",
+        source: "include/dirent.h"
+      },
+      {
+        path: "/sysroot/include/dispatch/dispatch.h",
+        source: "include/dispatch/dispatch.h"
+      },
+      {
+        path: "/sysroot/include/dlfcn.h",
+        source: "include/dlfcn.h"
+      },
+      {
+        path: "/sysroot/include/emmintrin.h",
+        source: "include/emmintrin.h"
+      },
+      {
+        path: "/sysroot/include/errno.h",
+        source: "include/errno.h"
+      },
+      {
+        path: "/sysroot/include/f16cintrin.h",
+        source: "include/f16cintrin.h"
+      },
+      {
+        path: "/sysroot/include/fcntl.h",
+        source: "include/fcntl.h"
+      },
+      {
+        path: "/sysroot/include/fenv.h",
+        source: "include/fenv.h"
+      },
+      {
         path: "/sysroot/include/float.h",
         source: "include/float.h"
+      },
+      {
+        path: "/sysroot/include/fmaintrin.h",
+        source: "include/fmaintrin.h"
+      },
+      {
+        path: "/sysroot/include/immintrin.h",
+        source: "include/immintrin.h"
+      },
+      {
+        path: "/sysroot/include/inttypes.h",
+        source: "include/inttypes.h"
       },
       {
         path: "/sysroot/include/iso646.h",
         source: "include/iso646.h"
       },
       {
+        path: "/sysroot/include/libgen.h",
+        source: "include/libgen.h"
+      },
+      {
         path: "/sysroot/include/limits.h",
         source: "include/limits.h"
       },
       {
+        path: "/sysroot/include/locale.h",
+        source: "include/locale.h"
+      },
+      {
         path: "/sysroot/include/math.h",
         source: "include/math.h"
+      },
+      {
+        path: "/sysroot/include/netdb.h",
+        source: "include/netdb.h"
+      },
+      {
+        path: "/sysroot/include/netinet/in.h",
+        source: "include/netinet/in.h"
+      },
+      {
+        path: "/sysroot/include/netinet/tcp.h",
+        source: "include/netinet/tcp.h"
+      },
+      {
+        path: "/sysroot/include/pthread.h",
+        source: "include/pthread.h"
+      },
+      {
+        path: "/sysroot/include/riscv_vector.h",
+        source: "include/riscv_vector.h"
+      },
+      {
+        path: "/sysroot/include/runetype.h",
+        source: "include/runetype.h"
+      },
+      {
+        path: "/sysroot/include/sched.h",
+        source: "include/sched.h"
+      },
+      {
+        path: "/sysroot/include/setjmp.h",
+        source: "include/setjmp.h"
+      },
+      {
+        path: "/sysroot/include/signal.h",
+        source: "include/signal.h"
+      },
+      {
+        path: "/sysroot/include/smmintrin.h",
+        source: "include/smmintrin.h"
       },
       {
         path: "/sysroot/include/stdalign.h",
@@ -1223,24 +7850,116 @@ var TinycWeb = (() => {
         source: "include/stdint.h"
       },
       {
+        path: "/sysroot/include/stdio.h",
+        source: "include/stdio.h"
+      },
+      {
+        path: "/sysroot/include/stdlib.h",
+        source: "include/stdlib.h"
+      },
+      {
         path: "/sysroot/include/stdnoreturn.h",
         source: "include/stdnoreturn.h"
+      },
+      {
+        path: "/sysroot/include/string.h",
+        source: "include/string.h"
+      },
+      {
+        path: "/sysroot/include/strings.h",
+        source: "include/strings.h"
+      },
+      {
+        path: "/sysroot/include/sys/mman.h",
+        source: "include/sys/mman.h"
+      },
+      {
+        path: "/sysroot/include/sys/resource.h",
+        source: "include/sys/resource.h"
+      },
+      {
+        path: "/sysroot/include/sys/socket.h",
+        source: "include/sys/socket.h"
+      },
+      {
+        path: "/sysroot/include/sys/stat.h",
+        source: "include/sys/stat.h"
+      },
+      {
+        path: "/sysroot/include/sys/syscall.h",
+        source: "include/sys/syscall.h"
+      },
+      {
+        path: "/sysroot/include/sys/time.h",
+        source: "include/sys/time.h"
+      },
+      {
+        path: "/sysroot/include/sys/types.h",
+        source: "include/sys/types.h"
+      },
+      {
+        path: "/sysroot/include/sys/ucontext.h",
+        source: "include/sys/ucontext.h"
+      },
+      {
+        path: "/sysroot/include/sys/uio.h",
+        source: "include/sys/uio.h"
+      },
+      {
+        path: "/sysroot/include/sys/wait.h",
+        source: "include/sys/wait.h"
       },
       {
         path: "/sysroot/include/tccdefs.h",
         source: "include/tccdefs.h"
       },
       {
+        path: "/sysroot/include/tcclib.h",
+        source: "tcclib.h"
+      },
+      {
         path: "/sysroot/include/tgmath.h",
         source: "include/tgmath.h"
+      },
+      {
+        path: "/sysroot/include/threads.h",
+        source: "include/threads.h"
+      },
+      {
+        path: "/sysroot/include/time.h",
+        source: "include/time.h"
+      },
+      {
+        path: "/sysroot/include/tmmintrin.h",
+        source: "include/tmmintrin.h"
+      },
+      {
+        path: "/sysroot/include/uchar.h",
+        source: "include/uchar.h"
+      },
+      {
+        path: "/sysroot/include/unistd.h",
+        source: "include/unistd.h"
+      },
+      {
+        path: "/sysroot/include/utime.h",
+        source: "include/utime.h"
       },
       {
         path: "/sysroot/include/varargs.h",
         source: "include/varargs.h"
       },
       {
-        path: "/sysroot/include/tcclib.h",
-        source: "tcclib.h"
+        path: "/sysroot/include/wchar.h",
+        source: "include/wchar.h"
+      },
+      {
+        path: "/sysroot/include/wctype.h",
+        source: "include/wctype.h"
+      },
+      {
+        path: "/sysroot/include/xmmintrin.h",
+        source: "include/xmmintrin.h"
       }
     ],
     libDir: "/sysroot/lib",
@@ -1252,8 +7971,28 @@ var TinycWeb = (() => {
       },
       {
         binary: true,
+        path: "/sysroot/lib/libSystem.tbd",
+        source: "lib/x86_64-apple-darwin/libSystem.tbd"
+      },
+      {
+        binary: true,
         path: "/sysroot/lib/libc.tbd",
         source: "lib/x86_64-apple-darwin/libc.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libdl.tbd",
+        source: "lib/x86_64-apple-darwin/libdl.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libm.tbd",
+        source: "lib/x86_64-apple-darwin/libm.tbd"
+      },
+      {
+        binary: true,
+        path: "/sysroot/lib/libpthread.tbd",
+        source: "lib/x86_64-apple-darwin/libpthread.tbd"
       }
     ],
     outputs: {
@@ -1274,7 +8013,8 @@ var TinycWeb = (() => {
         ext: ".a"
       }
     },
-    systemHeaders: "user-sdk"
+    systemHeaders: "user-sdk",
+    libcIncludeRoot: "vendor-darwin/include"
   };
 
   // runtime-shims.mjs
@@ -1322,11 +8062,14 @@ var TinycWeb = (() => {
       EBADF: 9,
       ENOMEM: 12,
       EEXIST: 17,
-      EINVAL: 22
+      EINVAL: 22,
+      ENOSYS: 38
     };
     let errnoValue = 0;
+    let errnoCell = 0;
     const setErrno = (code) => {
       errnoValue = code;
+      if (errnoCell) writeU32(errnoCell, code);
     };
     const memoryAllocator = options.memoryAllocator === true;
     const HDR_HEAP_TOP = 512, HDR_FREE_HEAD = 516, HDR_ALLOC_LOCK = 520;
@@ -1660,7 +8403,8 @@ var TinycWeb = (() => {
         9: "Bad file descriptor",
         12: "Cannot allocate memory",
         17: "File exists",
-        22: "Invalid argument"
+        22: "Invalid argument",
+        38: "Function not implemented"
       };
       return table[errnum] ?? `Unknown error ${errnum | 0}`;
     }
@@ -1801,6 +8545,17 @@ var TinycWeb = (() => {
     const abs = (v) => Math.abs(v | 0);
     const labs = (v) => Math.abs(v | 0);
     const llabs = (v) => v < 0n ? -v : v;
+    function div(numer, denom) {
+      const q = Math.trunc(numer / denom);
+      return [q | 0, numer - q * denom | 0];
+    }
+    const ldiv = div;
+    function lldiv(sret, numer, denom) {
+      const q = numer / denom;
+      const view = dv();
+      view.setBigInt64(sret, q, true);
+      view.setBigInt64(sret + 8, numer - q * denom, true);
+    }
     function comparatorFn(cmpPtr) {
       const table = options.processTable ?? holder?.instance?.exports?.__indirect_function_table;
       if (!table || typeof table.get !== "function") return null;
@@ -2563,6 +9318,25 @@ var TinycWeb = (() => {
       flushStream(st);
       return handle;
     }
+    let tmpnamCounter = 0;
+    let tmpnamBuffer = 0;
+    function tmpnam(s) {
+      let path;
+      do {
+        tmpnamCounter++;
+        const rand2 = Math.floor(Math.random() * 4294967296).toString(36);
+        path = `/tmpnam-${tmpnamCounter.toString(36)}-${rand2}`;
+      } while (backingRead(path) != null);
+      if (!s && !tmpnamBuffer) tmpnamBuffer = rawMalloc(64);
+      const target = s || tmpnamBuffer;
+      writeCStringBytes(target, textEncoder.encode(path));
+      return target;
+    }
+    function __assert_fail(assertion, file, line) {
+      streamWriteText(2, `assertion failed: ${readCString(assertion)} (${readCString(file)}:${line | 0})
+`);
+      abort();
+    }
     function setvbuf(stream, buf, mode, size) {
       if (stream >= 0 && stream <= 2) return 0;
       const st = openFiles.get(stream);
@@ -2578,8 +9352,16 @@ var TinycWeb = (() => {
     function setbuf(stream, buf) {
       return setvbuf(stream, buf, buf ? 0 : 2, buf ? 1024 : 0);
     }
+    function __tinyc_errno() {
+      if (!errnoCell) {
+        errnoCell = rawMalloc(4);
+        if (errnoCell) writeU32(errnoCell, errnoValue);
+      }
+      return errnoCell;
+    }
     function perror(sPtr) {
       const prefix = sPtr ? readCString(sPtr) : "";
+      if (errnoCell) errnoValue = readU32(errnoCell);
       const text = (prefix ? `${prefix}: ` : "") + strerrorText(errnoValue) + "\n";
       streamWriteText(2, text);
     }
@@ -3421,6 +10203,29 @@ var TinycWeb = (() => {
       return bitsToF32(2143289344 | Number(nanPayload(tagPtr) & 0x3fffffn));
     }
     const asF32 = (fn) => (...args) => Math.fround(fn(...args));
+    const processEnv = options.env ?? {};
+    const getenvCache = /* @__PURE__ */ new Map();
+    function getenv(namePtr) {
+      const name = readCString(namePtr);
+      if (!Object.prototype.hasOwnProperty.call(processEnv, name)) return 0;
+      let ptr = getenvCache.get(name);
+      if (ptr === void 0) {
+        const bytes = textEncoder.encode(String(processEnv[name]));
+        ptr = rawMalloc(bytes.length + 1);
+        if (!ptr) {
+          setErrno(ERRNO.ENOMEM);
+          return 0;
+        }
+        writeCStringBytes(ptr, bytes);
+        getenvCache.set(name, ptr);
+      }
+      return ptr;
+    }
+    function system(cmdPtr) {
+      if (!cmdPtr) return 0;
+      setErrno(ERRNO.ENOSYS);
+      return -1;
+    }
     const env = {
       // memory / string
       memcpy,
@@ -3468,6 +10273,7 @@ var TinycWeb = (() => {
       fwrite,
       fread,
       fgetc,
+      getc: fgetc,
       getchar: () => fgetc(0),
       ungetc,
       fopen,
@@ -3486,9 +10292,12 @@ var TinycWeb = (() => {
       rename: renameFile,
       fdopen,
       tmpfile,
+      tmpnam,
+      __assert_fail,
       setbuf,
       setvbuf,
       perror,
+      __tinyc_errno,
       fgets,
       scanf,
       fscanf,
@@ -3513,12 +10322,22 @@ var TinycWeb = (() => {
       abs,
       labs,
       llabs,
+      div,
+      ldiv,
+      lldiv,
+      // <inttypes.h> imax family: intmax_t is long long on this
+      // target, so these are the ll* implementations under their
+      // standard names (declarations land with the header pass).
+      imaxabs: llabs,
+      imaxdiv: lldiv,
+      strtoimax: strtoll,
+      strtoumax: strtoull,
       bsearch,
       qsort,
       rand,
       srand,
-      getenv: (_name) => 0,
-      system: (cmd) => cmd === 0 ? 0 : -1,
+      getenv,
+      system,
       // ctype
       isalpha,
       isdigit,
@@ -3715,7 +10534,16 @@ var TinycWeb = (() => {
         return sec;
       },
       clock: () => Math.floor(performance.now() * 1e3),
-      difftime: (a, b) => a - b
+      difftime: (a, b) => a - b,
+      // TIME_UTC is the host wall clock — the same frame the
+      // pthread layer's CLOCK_REALTIME abstimes use.
+      timespec_get: (ts, base) => {
+        if (base !== 1) return 0;
+        const ms = Date.now();
+        writeU32(ts, Math.floor(ms / 1e3));
+        writeU32(ts + 4, ms % 1e3 * 1e6);
+        return 1;
+      }
     };
     const result = { env };
     Object.defineProperty(result, "reserveStatic", {
@@ -4950,17 +11778,6 @@ var TinycWeb = (() => {
     "x86_64-apple-darwin": { runnable: false, description: "macOS x86-64 Mach-O" }
   });
   var SUPPORTED_TARGETS = Object.freeze(Object.keys(TARGETS));
-  var ELF_TARGETS = /* @__PURE__ */ new Set([
-    "x86_64-linux-gnu",
-    "aarch64-linux-gnu",
-    "riscv64-linux-gnu",
-    "aarch64-linux-android",
-    "x86_64-linux-android"
-  ]);
-  var ANDROID_TARGETS = /* @__PURE__ */ new Set([
-    "aarch64-linux-android",
-    "x86_64-linux-android"
-  ]);
   function isRunnableTarget(target) {
     return Boolean(TARGETS[target]?.runnable);
   }
@@ -5722,6 +12539,11 @@ var TinycWeb = (() => {
     for (const [name, fn] of Object.entries(wasi)) {
       put("wasi_snapshot_preview1", name, fn);
     }
+    if (options._libtcc1) {
+      for (const [name, fn] of Object.entries(options._libtcc1)) {
+        if (typeof fn === "function") put("env", name, fn);
+      }
+    }
     const defaultShims = createDefaultShims({
       io: byteIO,
       holder,
@@ -6100,13 +12922,6 @@ ${src}`;
      *  inside the module FS (at bridge.modulePath(path)); exportFile
      *  reads it back from there into the virtual FS. */
     outputFile(path) {
-      if (!this._driverLibsAdded && ELF_TARGETS.has(this._instance.target) && (this._outputType === TCC_OUTPUT.EXE || this._outputType === TCC_OUTPUT.DLL)) {
-        this._driverLibsAdded = true;
-        this.addLibrary("m");
-        if (ANDROID_TARGETS.has(this._instance.target)) {
-          this.addLibrary("dl");
-        }
-      }
       return this._checkRc(
         "tcc_output_file",
         this._call(
@@ -6201,6 +13016,7 @@ ${src}`;
         stdin: options.stdin,
         heapBase: options.heapBase,
         _instanceShims: this._instance._shims,
+        _libtcc1: this._instance._libtcc1Exports,
         io: textIOToByteIO(io)
       });
       flushIO(io);
@@ -6264,6 +13080,7 @@ ${src}`;
       this._mainRunning = false;
       this._shims = /* @__PURE__ */ new Map();
       this._fsBackend = "memory";
+      this._libtcc1Exports = null;
     }
     get io() {
       return this._io;
@@ -6443,11 +13260,68 @@ ${src}`;
         stdin: options.stdin,
         heapBase: options.heapBase,
         _instanceShims: this._shims,
+        _libtcc1: this._libtcc1Exports,
         io: textIOToByteIO(io)
       });
       flushIO(io);
       if (typeof result === "number") return result;
       return result?.exitCode ?? 0;
+    }
+    /** Instantiate the sysroot's libtcc1 unit on its own memory
+     *  and table, for the standalone run paths: a standalone
+     *  module runs without a process, so the runtime helpers its
+     *  code imports — __divdi3 and family, the same names
+     *  TinycProcess loads the unit for — are satisfied from this
+     *  private instance's exports instead (buildWasmImports'
+     *  lowest layer).  The unit's functions are pure computations
+     *  over their arguments and keep their state in the
+     *  instance's own memory.  Runs once during load, after the
+     *  sysroot is staged; a sysroot without the unit leaves the
+     *  names as missing imports, as before. */
+    async _initLibtcc1() {
+      const canonical = "/sysroot/lib/libtcc1.tinyc.js";
+      if (!this.fs.hasFile(canonical)) return;
+      let lib;
+      try {
+        lib = libraryFromBytes(canonical, this.fs.readFile(canonical));
+      } catch {
+        return;
+      }
+      if (lib.meta.kind !== "wasm") return;
+      const memory = new WebAssembly.Memory({
+        initial: Math.max(1, Math.ceil(lib.meta.memSize / 65536))
+      });
+      const table = new WebAssembly.Table({
+        element: "anyfunc",
+        initial: lib.meta.tableSize
+      });
+      let instance;
+      try {
+        ({ instance } = await WebAssembly.instantiate(lib.bodyBytes, {
+          env: {
+            memory,
+            __indirect_function_table: table,
+            __memory_base: new WebAssembly.Global({ value: "i32" }, 0),
+            __table_base: new WebAssembly.Global({ value: "i32" }, 0)
+          }
+        }));
+      } catch {
+        return;
+      }
+      let rc;
+      try {
+        rc = instance.exports.__tinyc_dylink_init(0);
+      } catch {
+        return;
+      }
+      if (rc !== 0) return;
+      const exports = {};
+      for (const e of lib.meta.exports) {
+        if (e.kind === 0 && typeof instance.exports[e.name] === "function") {
+          exports[e.name] = instance.exports[e.name];
+        }
+      }
+      this._libtcc1Exports = exports;
     }
     /** Command-line mode: assemble argv exactly like a shell would
      *  (argv[0] filled with the virtual binary path) and call the
@@ -6576,6 +13450,7 @@ ${src}`;
         stdin: options.stdin,
         heapBase: options.heapBase,
         _instanceShims: this._shims,
+        _libtcc1: this._libtcc1Exports,
         io: textIOToByteIO(this._io)
       });
       flushIO(this._io);
@@ -7482,6 +14357,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
         io: this._byteIO,
         holder: this._holder,
         stdin: options.stdin,
+        env: options.env ?? {},
         heapBase: 1024,
         memoryAllocator: true,
         processTable: this.table,
@@ -8287,11 +15163,11 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
             continue;
           }
           unresolvedFunctions.push(imp.name);
-          put(imp.module, imp.name, () => {
+          (imports[imp.module] ??= {})[imp.name] = () => {
             throw new Error(
               `tinyc: call to unresolved function "${imp.name}" imported by "${record.canonical}"`
             );
-          });
+          };
           continue;
         }
         unresolvedOther.push(key);
@@ -8337,6 +15213,21 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       return null;
     }
     // -- the load procedure (design §9) -----------------------------------
+    /** Load the sysroot's runtime library unit — the wasm form
+     *  of the libtcc1 archive native targets link into every
+     *  product — ahead of the main module, in the global scope.
+     *  The compiler emits calls to its helpers for long long
+     *  division and remainder, variable-count 64-bit shifts and
+     *  the __builtin_* fallbacks; with the unit resident, ordinary
+     *  code using them resolves like any library call.  A sysroot
+     *  without the unit (an older staging) leaves those names to
+     *  fail as unresolved, as they did before the unit existed. */
+    _loadLibtcc1() {
+      const canonical = "/sysroot/lib/libtcc1.tinyc.js";
+      if (this._modules.has(canonical)) return;
+      if (!this._libraryLocal(canonical)) return;
+      this._loadModule(canonical, { flags: RTLD_GLOBAL });
+    }
     /** Load (or re-reference) a module by canonical path.
      *  opts: { flags, requester, runtimeEdge, hostEdge, isMain, lib }.
      *  Reference accounting: the call itself is one reference — a
@@ -8364,6 +15255,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       if (this._ended) {
         throw new TinycDylinkError("tinyc: the process has ended");
       }
+      if (opts.isMain) this._loadLibtcc1();
       const lib = opts.lib ?? this._libraryLocal(canonical);
       if (lib && !this._libraries.has(canonical)) {
         this._libraries.set(canonical, lib);
@@ -10490,6 +17382,9 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
       await instance.fs.addFile(entry.path, base64ToBytes(b64));
     }
     if (manifest.includeDir) instance.fs.registerIncludeDir(manifest.includeDir);
+    for (const dir of manifest.extraIncludeDirs ?? []) {
+      instance.fs.registerIncludeDir(dir);
+    }
   }
   var OPFS_MOUNT_POINT = "/opfs";
   var opfsBackendByModule = /* @__PURE__ */ new WeakMap();
@@ -10569,6 +17464,7 @@ globalThis.${DYLINK_REGISTRY}[${JSON.stringify(canonical)}] = ${JSON.stringify(m
     bridge.moduleFsPrefix = instance._fsBackend === "opfs" ? OPFS_MOUNT_POINT : "";
     if (native && native.FS) await fs.mountTo(native.FS, bridge.moduleFsPrefix);
     await loadSysroot(instance, options.sysroot, options.transport);
+    await instance._initLibtcc1();
     return instance;
   }
   async function loadTinyc(options = {}) {

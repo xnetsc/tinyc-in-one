@@ -1567,15 +1567,27 @@ LIBTCCAPI int tcc_add_library(TCCState *s, const char *libraryname)
     if (*libraryname == ':') {
         libraryname++;
     } else {
-        const char * const *pp = libs;
-        if (s->static_link)
-            pp += sizeof(libs) / sizeof(*libs) - 2; /* only "%s/lib%s.a" */
-        while (*pp) {
-            int ret = tcc_add_library_internal(s, *pp,
-                libraryname, flags, s->library_paths, s->nb_library_paths);
-            if (ret != FILE_NOT_FOUND)
-                return ret;
-            ++pp;
+        /* Search directory-major, not form-major: for each library
+           directory in order, try the file forms in order
+           (.dylib/.tbd/.a on Mach-O, .so/.a elsewhere). Form-major
+           let a stub in a later directory shadow the real library
+           in an earlier one: on macOS the SDK's libcurl.tbd beat
+           the bundled libcurl.a, so -lcurl silently linked the
+           system libcurl instead of the bundled one (and the
+           bundled ws handler was never in the binary at all).
+           Directory-major is also what GNU ld does. */
+        int i;
+        for (i = 0; i < s->nb_library_paths; i++) {
+            const char * const *pp = libs;
+            if (s->static_link)
+                pp += sizeof(libs) / sizeof(*libs) - 2; /* only "%s/lib%s.a" */
+            while (*pp) {
+                int ret = tcc_add_library_internal(s, *pp,
+                    libraryname, flags, s->library_paths + i, 1);
+                if (ret != FILE_NOT_FOUND)
+                    return ret;
+                ++pp;
+            }
         }
     }
     /* fallback to try file without pre- or sufffix */
