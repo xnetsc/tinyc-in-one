@@ -30,6 +30,11 @@ typedef HANDLE thread_t;
 #define thread_join(th) (WaitForSingleObject((th), INFINITE), CloseHandle(th))
 #else
 #include <unistd.h>
+/* Not on Android: bionic's fcntl.h references
+   __builtin_object_size, which TCC does not implement. */
+#ifndef __ANDROID__
+#include <fcntl.h>
+#endif
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -328,6 +333,11 @@ static int check_http(void) {
     if (!c) { printf("curl: init failed\n"); return 1; }
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, wr);
     curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+    /* Verbose connect trace: on the Windows runner the GET fails
+       with rc 7 while a raw socket connect to the same port
+       succeeds, so the failure is inside libcurl's connect path;
+       the trace shows which step stalls or fails there. */
+    curl_easy_setopt(c, CURLOPT_VERBOSE, 1L);
     errbuf[0] = 0;
     clen = 0; cbuf[0] = 0;
     snprintf(url, sizeof(url), "http://127.0.0.1:%d/hello", base_port);
@@ -488,6 +498,140 @@ static void probe_raw_connect(void) {
     sock_close(fd);
 }
 
+/* Replicate libcurl's connect steps with plain socket calls:
+   non-blocking connect, select for writability, then SO_ERROR.
+   The raw blocking connect above can pass while this one fails,
+   which is exactly the difference between "the server is
+   reachable" and "libcurl's non-blocking connect path works";
+   each step prints its own result so the log shows where the
+   path breaks. Runs on every platform so the probe itself is
+   exercised by the local battery too. */
+static void probe_nb_connect(void) {
+    sock_t fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!sock_valid(fd)) { printf("nb connect: socket failed\n"); return; }
+#ifdef _WIN32
+    u_long nb = 1;
+    if (ioctlsocket(fd, FIONBIO, &nb) != 0) {
+        printf("nb connect: ioctlsocket failed, WSA error %d\n",
+               WSAGetLastError());
+        sock_close(fd);
+        return;
+    }
+#elif defined(__ANDROID__)
+    /* No non-blocking step here: bionic's fcntl.h references
+       __builtin_object_size, which TCC does not implement, so
+       the socket stays blocking and connect() returns at once
+       below. The probe still reports the connect outcome. */
+#else
+    int fl = fcntl(fd, F_GETFL, 0);
+    if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) != 0) {
+        printf("nb connect: fcntl O_NONBLOCK failed, errno %d (%s)\n",
+               errno, strerror(errno));
+        sock_close(fd);
+        return;
+    }
+#endif
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons((unsigned short)base_port);
+    int rc = connect(fd, (struct sockaddr *)&a, sizeof(a));
+    if (rc == 0) {
+        printf("nb connect: connected immediately\n");
+        sock_close(fd);
+        return;
+    }
+#ifdef _WIN32
+    int cerr = WSAGetLastError();
+    if (cerr != WSAEWOULDBLOCK) {
+        printf("nb connect: connect failed at once, WSA error %d\n", cerr);
+        sock_close(fd);
+        return;
+    }
+#else
+    if (errno != EINPROGRESS) {
+        printf("nb connect: connect failed at once, errno %d (%s)\n",
+               errno, strerror(errno));
+        sock_close(fd);
+        return;
+    }
+#endif
+    /* Same three-way split as the ws wait loop: select on
+       Windows and darwin (whose bundled headers declare select
+       in <sys/time.h> and have no <poll.h>), poll elsewhere --
+       bionic's FD_SET is a fortified macro referencing
+       __builtin_object_size, which TCC does not implement, so
+       select() cannot be used here on Android. */
+#if defined(__APPLE__) || defined(_WIN32)
+    fd_set wfds;
+    struct timeval tv = { 5, 0 };
+    FD_ZERO(&wfds);
+    FD_SET(fd, &wfds);
+    rc = select((int)fd + 1, NULL, &wfds, NULL, &tv);
+    if (rc == 0) {
+        printf("nb connect: select timed out after 5s (not writable)\n");
+        sock_close(fd);
+        return;
+    }
+    if (rc < 0) {
+#ifdef _WIN32
+        printf("nb connect: select failed, WSA error %d\n", WSAGetLastError());
+#else
+        printf("nb connect: select failed, errno %d (%s)\n",
+               errno, strerror(errno));
+#endif
+        sock_close(fd);
+        return;
+    }
+#else
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
+    rc = poll(&pfd, 1, 5000);
+    if (rc == 0) {
+        printf("nb connect: poll timed out after 5s (not writable)\n");
+        sock_close(fd);
+        return;
+    }
+    if (rc < 0) {
+        printf("nb connect: poll failed, errno %d (%s)\n",
+               errno, strerror(errno));
+        sock_close(fd);
+        return;
+    }
+#endif
+    int soerr = 0;
+#ifdef _WIN32
+    int olen = sizeof(soerr);
+#else
+    socklen_t olen = sizeof(soerr);
+#endif
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &olen) != 0) {
+#ifdef _WIN32
+        printf("nb connect: getsockopt SO_ERROR failed, WSA error %d\n",
+               WSAGetLastError());
+#else
+        printf("nb connect: getsockopt SO_ERROR failed, errno %d (%s)\n",
+               errno, strerror(errno));
+#endif
+        sock_close(fd);
+        return;
+    }
+    if (soerr != 0) {
+#ifdef _WIN32
+        printf("nb connect: writable but SO_ERROR=%d\n", soerr);
+#else
+        printf("nb connect: writable but SO_ERROR=%d (%s)\n",
+               soerr, strerror(soerr));
+#endif
+    } else {
+        printf("nb connect: ok, non-blocking connect + select + SO_ERROR clean\n");
+    }
+    sock_close(fd);
+}
+
 /* Probe whether the ws scheme is recognised at all, before any
    server is involved: a closed port must fail with "couldn't
    connect" (7); "unsupported protocol" (1) means the protocol
@@ -529,7 +673,7 @@ int main(int argc, char **argv) {
     thread_create(&th_http, http_server);
     thread_create(&th_ws, ws_server);
     if (!wait_ready(&ready_http, "http", base_port)) return 1;
-    if (check_http()) { probe_raw_connect(); return 1; }
+    if (check_http()) { probe_raw_connect(); probe_nb_connect(); return 1; }
     if (!wait_ready(&ready_ws, "ws", base_port + 2)) return 1;
     if (check_ws()) return 1;
     thread_join(th_http);

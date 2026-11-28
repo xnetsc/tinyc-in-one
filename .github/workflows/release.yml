@@ -123,6 +123,11 @@ jobs:
           cd packages/npm
           npm install --ignore-scripts --omit=optional > ../../test-outputs/npm-install.log 2>&1
           node bundle_native.js
+          # The package's own test suite (test/tinyc.test.js) runs
+          # here, on the just-bundled natives: the consumer test
+          # below is a separate 4-check smoke test on the packed
+          # tarballs and does not cover the package API.
+          node --test test/tinyc.test.js > ../../test-outputs/npm-package-tests.log 2>&1
           npm pack --silent
           (cd native-packages/@xnetx/tinyc-native-x86_64-linux-gnu && npm pack --silent)
           cd "$GITHUB_WORKSPACE"

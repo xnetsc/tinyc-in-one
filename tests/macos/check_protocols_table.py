@@ -8,6 +8,13 @@ chained fixups, so a broken link shows up here as a NULL slot
 or a target that is not _Curl_handler_ws, while a correct link
 shows the handler address with its chain offset.
 
+The table symbol is a static (local) symbol, so it is only in
+the LC_SYMTAB table, never in the dynamic symbol table. TCC
+writes Mach-O symbol names with the leading underscore
+(`_protocols`, `_Curl_handler_ws`); the unprefixed spellings
+are accepted as a fallback in case some other linker wrote
+them plain.
+
 Usage: check_protocols_table.py <mach-o-binary>
 Exit 0 when slot 60 holds _Curl_handler_ws, 1 when it does not,
 2 when the symbols or the table cannot be located.
@@ -54,6 +61,7 @@ def main(path):
         return 2
     proto = None
     handlers = {}
+    names_seen = []
     entsize = 16 if is64 else 12
     for i in range(nsyms):
         e = symoff + i * entsize
@@ -69,12 +77,22 @@ def main(path):
             continue
         end = data.index(b"\0", stroff + n_strx)
         name = data[stroff + n_strx:end].decode("utf-8", "replace")
-        if name == "_protocols":
+        names_seen.append(name)
+        plain = name[1:] if name.startswith("_") else name
+        if plain == "protocols" and proto is None:
             proto = n_value
-        elif name.startswith("_Curl_handler_"):
-            handlers[name[14:]] = n_value
+        elif plain.startswith("Curl_handler_"):
+            handlers[plain[13:]] = n_value
     if proto is None:
         print("protocols table: _protocols not found in %s" % path)
+        print("protocols table: symtab has %d entries" % len(names_seen))
+        near = [n for n in names_seen
+                if "rotocol" in n or "andler" in n or n in
+                ("protocols", "_protocols", "url", "_url")]
+        print("protocols table: near matches: %s"
+              % (", ".join(near[:20]) if near else "(none)"))
+        print("protocols table: sections: %s"
+              % ", ".join("%#x+%d" % (a, s) for a, s, o in sections))
         return 2
     fo = None
     for addr, sz, o in sections:

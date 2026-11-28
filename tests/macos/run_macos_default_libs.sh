@@ -44,6 +44,28 @@ if command -v python3 >/dev/null 2>&1; then
     python3 "$ROOT/tests/macos/check_protocols_table.py" "$TMP/battery2" || true
 fi
 
+# Independent check with the system nm: whether the ws handler
+# symbols are in the staged archive at all, and whether they
+# survived into the linked battery. A handler present in the
+# archive but missing from the binary points at the link/table;
+# absent from the archive points at the library build.
+# Diagnostic only (|| true): never fails the step itself.
+if command -v nm >/dev/null 2>&1; then
+    echo "--- ws symbols (nm) ---"
+    # One archive per triple dist (lib/tcc/<family>/libcurl.a).
+    CURLA_LIST=$(find "$DIST" -name libcurl.a -path '*lib/tcc/*' 2>/dev/null)
+    if [ -z "$CURLA_LIST" ]; then
+        echo "nm: no libcurl.a found under $DIST"
+    fi
+    for CURLA in $CURLA_LIST; do
+        echo "libcurl.a: $CURLA"
+        nm "$CURLA" 2>/dev/null | grep -E 'Curl_handler_ws|_protocols' \
+            || echo "nm: no Curl_handler_ws/_protocols in libcurl.a"
+    done
+    nm "$TMP/battery2" 2>/dev/null | grep -E 'Curl_handler_ws|_protocols' \
+        || echo "nm: no Curl_handler_ws/_protocols in battery2"
+fi
+
 "$TMP/battery1" && pass "battery1 run" || fail "battery1 run"
 "$TMP/battery2" && pass "battery2 run" || fail "battery2 run"
 
