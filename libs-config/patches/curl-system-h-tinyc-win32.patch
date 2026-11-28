@@ -9,7 +9,7 @@ consumers of the bundled libcurl get the same fix.
 --- a/include/curl/system.h
 +++ b/include/curl/system.h
 @@ -275,6 +275,16 @@
- #endif
+ #  define CURL_TYPEOF_CURL_SOCKLEN_T int
  
  #elif defined(__TINYC__) /* also known as tcc */
 +#  if defined(_WIN32)
@@ -25,7 +25,7 @@ consumers of the bundled libcurl get the same fix.
  #  define CURL_TYPEOF_CURL_OFF_T     long long
  #  define CURL_FORMAT_CURL_OFF_T     "lld"
  #  define CURL_FORMAT_CURL_OFF_TU    "llu"
-@@ -282,6 +292,7 @@
+@@ -283,6 +293,7 @@
  #  define CURL_TYPEOF_CURL_SOCKLEN_T socklen_t
  #  define CURL_PULL_SYS_TYPES_H      1
  #  define CURL_PULL_SYS_SOCKET_H     1

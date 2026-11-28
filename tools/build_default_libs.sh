@@ -47,7 +47,17 @@ done
 }
 CFG=$ROOT/libs-config/$FAMILY
 WORK=$ROOT/build/work-libs/$TRIPLE
-JOBS=$(nproc)
+# CPU count, portable: macOS ships no nproc(1); sysctl is the
+# native way there, and Linux keeps its own tool.
+if [ "$(uname -s)" = Darwin ]; then
+    JOBS=$(sysctl -n hw.ncpu)
+else
+    JOBS=$(nproc)
+fi
+
+# File size in bytes, portable: GNU stat -c%s does not exist on
+# macOS (BSD stat takes -f%z); wc -c works on every runner.
+fsize() { wc -c < "$1" | tr -d '[:space:]'; }
 
 case $FAMILY in
     windows)
@@ -131,7 +141,11 @@ prepare_curl_src() {
     local p
     for p in "$ROOT"/libs-config/patches/curl-*.patch; do
         [ -f "$p" ] || continue
-        (cd "$CURLSRC" && patch -s -p1 < "$p") || {
+        # No `patch` binary: it is not on PATH on the Windows
+        # runner (MSYS2 ships no patch package). The Python
+        # applier needs only python3, which this script already
+        # requires, and applies byte-identically to `patch`.
+        (cd "$CURLSRC" && python3 "$ROOT/tools/apply_patch.py" "$p" .) || {
             echo "failed to apply $p" >&2; exit 1; }
     done
 }
@@ -209,7 +223,7 @@ build_pcre2() {
         exit 1
     fi
     archive "$LIBDIR/libpcre2-posix.a" "$pobj"
-    echo "pcre2: $(stat -c%s "$LIBDIR/libpcre2.a") + $(stat -c%s "$LIBDIR/libpcre2-posix.a") bytes"
+    echo "pcre2: $(fsize "$LIBDIR/libpcre2.a") + $(fsize "$LIBDIR/libpcre2-posix.a") bytes"
 }
 
 # ---------------- mbedTLS ----------------
@@ -227,7 +241,8 @@ build_mbedtls() {
     local p
     for p in "$ROOT"/libs-config/patches/mbedtls-*.patch; do
         [ -f "$p" ] || continue
-        (cd "$V" && patch -s -p1 < "$p") || {
+        # Same `patch`-free rule as prepare_curl_src above.
+        (cd "$V" && python3 "$ROOT/tools/apply_patch.py" "$p" .) || {
             echo "failed to apply $p" >&2; exit 1; }
     done
     local crypto="aes aesni aesce aria asn1parse asn1write base64
@@ -263,7 +278,7 @@ build_mbedtls() {
     archive "$LIBDIR/libmbedcrypto.a" "$WORK/mbedtls/crypto"
     archive "$LIBDIR/libmbedx509.a" "$WORK/mbedtls/x509"
     archive "$LIBDIR/libmbedtls.a" "$WORK/mbedtls/tls"
-    echo "mbedtls: $(stat -c%s "$LIBDIR/libmbedtls.a") + $(stat -c%s "$LIBDIR/libmbedx509.a") + $(stat -c%s "$LIBDIR/libmbedcrypto.a") bytes"
+    echo "mbedtls: $(fsize "$LIBDIR/libmbedtls.a") + $(fsize "$LIBDIR/libmbedx509.a") + $(fsize "$LIBDIR/libmbedcrypto.a") bytes"
 }
 
 # ---------------- libcurl ----------------
@@ -310,7 +325,7 @@ PYEOF
         "${gnudef[@]}" \
         -I"$CFG" -I"$V/lib" -I"$V/include" "${SYSINCFLAGS[@]}" "${BOSDEF[@]}"
     archive "$LIBDIR/libcurl.a" "$WORK/curl/obj"
-    echo "curl: $(stat -c%s "$LIBDIR/libcurl.a") bytes"
+    echo "curl: $(fsize "$LIBDIR/libcurl.a") bytes"
 }
 
 prepare_curl_src
